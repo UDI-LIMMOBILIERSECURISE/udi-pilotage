@@ -104,7 +104,7 @@ function Journee({ moi }) {
     const m = new Map();
     visibles.forEach((a) => {
       const k = a.dossier?.type === 'bail' || a.dossier?.type === 'lot' ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
-      if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, alertes: [] });
+      if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, bailleur: a.bailleur, alertes: [] });
       m.get(k).alertes.push(a);
     });
     const rang = { critique: 0, haute: 1, normale: 2 };
@@ -143,6 +143,7 @@ function Journee({ moi }) {
                   <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
                   <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
                   <div className="grid2">
+                    {d.bailleur && <><span>Bailleur</span><span>{d.bailleur}</span></>}
                     {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
                     {d.mandat && <><span>Mandat</span><span>{d.mandat}</span></>}
                   </div>
@@ -209,7 +210,7 @@ function Mandats() {
               const commission = suivi(m) && m.loyer_cc && m.taux_ttc ? (m.loyer_cc * m.taux_ttc / 100 / 1.2) * 8 : null;
               return (
                 <tr key={m.id} className={anomalie ? 'anomalie' : ''}>
-                  <td><strong>n°{m.reference}</strong>{m.nom ? ` · ${m.nom}` : ''}</td>
+                  <td><strong>n°{m.reference}</strong>{m.nom ? ` · ${m.nom}` : ''}{m.bailleur && <div className="muted">{m.bailleur}</div>}</td>
                   <td>{m.statut === 'active' ? 'Actif' : m.statut === 'lost' ? 'Perdu' : m.statut}</td>
                   <td>{date(m.debut)}</td>
                   <td style={{ color: m.signe_le ? 'inherit' : 'var(--red)' }}>{m.signe_le ? date(m.signe_le) : 'non signé'}</td>
@@ -443,7 +444,7 @@ function Sinistres() {
       <ResumeIA type="sinistre" id={s.id} />
       {s.description && <p>{s.description}</p>}
       <Champs items={[['Type', TYPE_INC[s.type] || s.type], ['Urgence', (URG[s.urgence] || [s.urgence])[0]], ['Lot', s.adresse ? `${s.adresse} (${s.lot})` : 'Immeuble, pas de lot précis'],
-        ['Locataire', s.locataires], ['Bail', s.bail], ['Mandat', s.mandat], s.bailleur && ['Bailleur', s.bailleur], ['Déclaré le', date(s.declare_le)],
+        ['Bailleur', s.bailleur], ['Locataire', s.locataires], ['Bail', s.bail], ['Mandat', s.mandat], ['Déclaré le', date(s.declare_le)],
         ['Ancienneté', s.jours + ' jours'], ['Résolu le', s.resolu_le ? date(s.resolu_le) : null], ['À la charge de', CHARGE[s.a_charge] || s.a_charge],
         ['Montant estimé', euro(s.montant_estime)], ['Prestataires', s.prestataires ? String(s.prestataires) : 'Aucun désigné']]} />
       {!s.clos && !s.prestataires && <div className="mini-alerte haute">Aucun prestataire désigné dans Rivage.</div>}
@@ -461,7 +462,7 @@ function Sinistres() {
             <div className="muted">{x.adresse || 'Immeuble, pas de lot précis'}</div>
             {x.situation && <div style={{ marginTop: 6 }}><span className={'situ ' + x.situation.code + ' ' + x.situation.gravite}>{x.situation.libelle}</span>
               {x.mandat_statut && x.mandat_statut !== 'Mandat actif' && <span className="situ critique" style={{ marginLeft: 6 }}>{x.mandat_statut}</span>}</div>}
-            <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Locataire</span><span>{x.locataires || '—'}</span><span className="muted">Mandat</span><span>{x.mandat || '—'}</span></div>
+            <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Bailleur</span><span>{x.bailleur || '—'}</span><span className="muted">Locataire</span><span>{x.locataires || '—'}</span><span className="muted">Mandat</span><span>{x.mandat || '—'}</span></div>
             <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
               <span style={{ fontSize: 12, color: x.prestataires || x.clos ? 'var(--ink2)' : 'var(--red)' }}>{x.prestataires ? x.prestataires + ' prestataire(s)' : x.clos ? 'Clos le ' + date(x.resolu_le) : 'Sans prestataire'}</span>
               <span className="mono" style={{ fontSize: 12 }}>{x.clos ? 'clos' : x.jours + ' j'}</span></div>
@@ -518,6 +519,7 @@ function SortiesDG() {
         <div className="muted">Bail {s.reference} · <span className={'sev ' + e[1]}>{e[0]}</span></div>
         <h2>{s.locataires}</h2>
         <div className="muted">{s.adresse} ({s.lot}) · {s.mandat}</div>
+        <div className="muted">Bailleur : {s.bailleur || '—'}</div>
         <ResumeIA type="dg" id={s.bail_id} />
         <div className="echeance"><div><b>{s.parti ? 'Restitution au plus tard' : 'Départ prévu'}</b>
           <div className="muted">{s.parti ? 'le ' + date(s.limite_1_mois) + ' si EDL conforme, le ' + date(s.limite_2_mois) + ' sinon' : 'fin du bail'}</div></div>
@@ -538,7 +540,7 @@ function SortiesDG() {
           <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">Bail {x.reference}</span><span className={'sev ' + e[1]}>{e[0]}</span></div>
           <div className="kcarte-titre">{x.locataires}</div>
           <div className="muted">{x.adresse}</div>
-          <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Mandat</span><span>{x.mandat || '—'}</span><span className="muted">Fin</span><span>{date(x.fin)}</span></div>
+          <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Bailleur</span><span>{x.bailleur || '—'}</span><span className="muted">Mandat</span><span>{x.mandat || '—'}</span><span className="muted">Fin</span><span>{date(x.fin)}</span></div>
           <div className="barres" aria-label={`${et.filter((s) => s.fait).length} étapes sur ${et.length}`}>{et.map((s) => <span key={s.l} className={s.fait ? 'fait' : s.retard ? 'retard' : ''} />)}</div>
           <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}><span>DG {euro(x.depot)}</span><span className="mono">{x.parti ? 'limite ' + date(x.limite_1_mois) : 'préavis'}</span></div>
           {(x.alertes.length > 0 || x.incidents.some((i) => i.a_charge === 'tenant')) && <div className="muted" style={{ color: 'var(--amber)', marginTop: 4 }}>
@@ -577,6 +579,7 @@ function Compta() {
         <div className="muted">Bail {s.reference} · période du {date(s.periode)} au {date(s.periode_fin)}</div>
         <h2>{s.locataires}</h2>
         <div className="muted">{s.adresse} ({s.lot}) · {s.mandat}</div>
+        <div className="muted">Bailleur : {s.bailleur || '—'}</div>
         <ResumeIA type="compta" id={s.id} />
         <div className="echeance"><div><b>{s.solde < 0 ? 'Reste dû par le locataire' : s.solde > 0 ? 'Trop-perçu à régulariser' : 'Période soldée'}</b>
           <div className="muted">reçu − dû sur la période</div></div><div className="echeance-n" style={{ color: s.solde < 0 ? 'var(--red)' : s.solde > 0 ? 'var(--amber)' : 'var(--teal)' }}>{s.solde > 0 ? '+' : ''}{euro(s.solde)}</div></div>
@@ -597,7 +600,7 @@ function Compta() {
             <span className={'sev ' + g}>{x.solde < 0 ? 'Impayé' : x.solde > 0 ? 'Trop-perçu' : 'Soldé'}</span></div>
           <div className="kcarte-titre">{x.locataires}</div>
           <div className="muted">{x.adresse}</div>
-          <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Dû</span><span>{euro(x.du)}</span><span className="muted">Reçu</span><span>{euro(x.recu)}</span></div>
+          <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Bailleur</span><span>{x.bailleur || '—'}</span><span className="muted">Dû</span><span>{euro(x.du)}</span><span className="muted">Reçu</span><span>{euro(x.recu)}</span></div>
           <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}><span style={{ fontSize: 12 }}>Reversé {euro(x.reverse_proprio)}</span>
             <b style={{ color: x.solde < 0 ? 'var(--red)' : x.solde > 0 ? 'var(--amber)' : 'var(--teal)' }}>{x.solde > 0 ? '+' : ''}{euro(x.solde)}</b></div>
         </button>; })}
@@ -639,14 +642,14 @@ function Agence() {
       <ResumeIA type="alerte" id={s.id} />
       {s.detail && <p>{s.detail}</p>}
       {s.explication && <div className="info">{s.explication}</div>}
-      <Champs items={[['Mandat', s.mandat], ['Qui', s.qui], ['Détectée le', dateHeure(s.depuis)]]} />
+      <Champs items={[['Bailleur', s.bailleur], ['Mandat', s.mandat], ['Qui', s.qui], ['Détectée le', dateHeure(s.depuis)]]} />
       {s.lien && <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={s.lien} target="_blank" rel="noreferrer">Ouvrir dans Rivage</a></div>}
     </>}>
       <div className="grille-cartes">{vus.map((x) => <button key={x.id} className={'kcarte ' + (sel === x.id ? 'sel ' : '') + x.gravite} onClick={() => setSel(x.id)}>
         <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">{x.domaine}</span><span className={'sev ' + x.gravite}>{SEV[x.gravite]}</span></div>
         <div className="kcarte-titre">{x.libelle}</div>
         <div className="muted">{x.titre}</div>
-        <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Mandat</span><span>{x.mandat || '—'}</span><span className="muted">Qui</span><span>{x.qui}</span></div>
+        <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Bailleur</span><span>{x.bailleur || '—'}</span><span className="muted">Mandat</span><span>{x.mandat || '—'}</span><span className="muted">Qui</span><span>{x.qui}</span></div>
       </button>)}</div>
     </AvecDetail>
   </>;
