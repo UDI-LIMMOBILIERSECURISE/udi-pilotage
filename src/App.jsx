@@ -734,6 +734,7 @@ function Impayes() {
   const [sel, setSel] = useState(null);
   const [ouverts, setOuverts] = useState({ 'Clôturé': false });
   const [recherche, setRecherche] = useState('');
+  const [section, setSection] = useState('en_cours');
   const [moi, setMoi] = useState(null);
   const [vue, setVue] = useState(() => { try { return localStorage.getItem('vue-impayes') || 'cartes'; } catch { return 'cartes'; } });
   const changerVue = (v) => { setVue(v); try { localStorage.setItem('vue-impayes', v); } catch { /* stockage indisponible */ } };
@@ -762,6 +763,11 @@ function Impayes() {
       <div className="bascule">{[['cartes', 'Cartes'], ['tableau', 'Tableau']].map(([k, l]) => <button key={k} className={vue === k ? 'on' : ''} onClick={() => changerVue(k)}>{l}</button>)}</div>
       {moi?.role === 'direction' && <ImportMonday membres={d.membres} apres={charger} />}
     </div>
+    <div className="filtres-imp">
+      {[['en_cours', 'En cours', actifs.length], ...[...GROUPES_IMP, ...autres].map(([g, titre, c]) => [g, g === 'Clôturé' ? 'Clôturés' : (GROUPES_IMP.find((x) => x[0] === g) ? g : titre), d.dossiers.filter((x) => x.groupe === g).length, c]), ['tous', 'Tous', d.dossiers.length]]
+        .filter(([k, , n]) => n > 0 || ['en_cours', 'tous'].includes(k))
+        .map(([k, l, n, c]) => <button key={k} className={'chip' + (section === k ? ' on' : '')} style={c && section !== k ? { borderColor: c, color: c } : c ? { background: c, borderColor: c } : undefined} onClick={() => setSection(k)}>{l}<span className="n">{n}</span></button>)}
+    </div>
     {d.peut_saisir && <Rapprochement apres={charger} />}
     {d.candidats.length > 0 && <div className="mini-alerte haute" style={{ marginBottom: 14 }}>
       <b>{d.candidats.length} bail{d.candidats.length > 1 ? 'x' : ''} en impayé dans Rivage sans dossier de suivi</b>
@@ -771,9 +777,10 @@ function Impayes() {
     </div>}
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un dossier pour voir et modifier le suivi." detail={s && <DossierImpaye key={s.id} d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} />}>
       {[...GROUPES_IMP, ...autres].map(([g, titre, couleur]) => {
+        if (section === 'en_cours' ? g === 'Clôturé' : section !== 'tous' && section !== g) return null;
         const items = dossiers.filter((x) => x.groupe === g);
-        if (!items.length && q) return null;
-        const ouvert = ouverts[g] ?? items.length > 0;
+        if (!items.length && (q || section !== 'tous')) return null;
+        const ouvert = section === g ? true : (ouverts[g] ?? items.length > 0);
         return <section key={g} className="groupe-imp">
           <button className="groupe-tete" style={{ color: couleur }} onClick={() => setOuverts({ ...ouverts, [g]: !ouvert })}>
             {ouvert ? '▾' : '▸'} {titre} <span className="muted">{items.length} dossier{items.length > 1 ? 's' : ''}</span></button>
