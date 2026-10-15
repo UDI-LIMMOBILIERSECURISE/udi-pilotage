@@ -7,6 +7,7 @@
 --   mise en location par un commercial : 40 % des honoraires de location HT (honoraires bailleur + locataire du bail).
 -- Seuls les mandats dont la date de début est à partir du 01/01/2026 sont suivis.
 
+-- Appliqué : migrations pilotage_mandats_commissions et pilotage_mandats_loyer_reel (15/10/2026) ; GO et « loué sans GO » exigés seulement pour les mandats depuis 2026.
 create table if not exists pilotage.mandats_suivi (
   mandat_id text primary key,
   negociateur uuid references auth.users(id),
@@ -69,7 +70,6 @@ begin
     select data into bo from pilotage.objets where type = 'LeasingContract' and id = b.id;
   end if;
   mois := case when coalesce(s.apport_direction, false) then 6 else 8 end;
-  -- Loyer prévisionnel : loyer en cours des baux du mandat (ou du bail de location une fois signé)
   -- Loyer prévu : saisi au mandat, sinon loyers des baux en cours ; loyer réel : premier bail de chaque lot signé depuis le début du mandat
   loyer_prev := coalesce(s.loyer_prevu, (select sum(x.loyer_hc + x.charges) from pilotage.v_baux x join pilotage.v_lots l on l.id = x.lot_id
                  where l.mandat_id = p_mandat and x.statut in ('created', 'move_in', 'in_progress')));
@@ -95,8 +95,8 @@ begin
   if m.taux_gestion_ttc is null or m.taux_gestion_ttc = 0 then manques := manques || '"Taux de gestion absent ou à 0 % dans Rivage"'::jsonb; end if;
   if lots = 0 then manques := manques || '"Aucun lot rattaché au mandat dans Rivage"'::jsonb; end if;
   if loyer_prev is null and loyer_reel is null then manques := manques || '"Loyer prévu à saisir : commission non calculable"'::jsonb; end if;
-  if s.go_le is null and statut <> 'Retiré sans location' then manques := manques || '"GO (dossier complet) non donné"'::jsonb; end if;
-  if b.id is not null and s.go_le is null then manques := manques || '"Anomalie : bien loué sans GO"'::jsonb; end if;
+  if s.go_le is null and statut <> 'Retiré sans location' and m.debut >= date '2026-01-01' then manques := manques || '"GO (dossier complet) non donné"'::jsonb; end if;
+  if b.id is not null and s.go_le is null and m.debut >= date '2026-01-01' then manques := manques || '"Anomalie : bien loué sans GO"'::jsonb; end if;
   if b.id is not null and bs.valide_le is null then manques := manques || '"Bail de mise en location non validé"'::jsonb; end if;
   if b.id is not null and bs.loue_par is null then manques := manques || '"« Loué par » non renseigné sur le bail"'::jsonb; end if;
   return jsonb_build_object(

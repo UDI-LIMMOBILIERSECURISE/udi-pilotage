@@ -209,6 +209,7 @@ function Mandats() {
   const [vue, setVue] = useState('pipeline');
   const [sel, setSel] = useState(null);
   const [nego, setNego] = useState(null);
+  const [anciens, setAnciens] = useState(false);
   const charger = () => Promise.all([rpc('pilotage_mandats'), rpc('pilotage_baux_a_valider')]).then(([m, b]) => { setD(m); setBaux(b || []); }).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
@@ -216,10 +217,11 @@ function Mandats() {
   const majMandat = async (id, champ, valeur) => { setErr(''); try { await rpc('pilotage_mandat_maj', { p_mandat: id, p_champ: champ, p_valeur: valeur ?? '' }); await charger(); } catch (e) { setErr(e.message); } };
   const majBail = async (id, champ, valeur) => { setErr(''); try { await rpc('pilotage_bail_maj', { p_bail: id, p_champ: champ, p_valeur: valeur ?? '' }); await charger(); } catch (e) { setErr(e.message); } };
   const facturer = async (mid, v, facture, montant) => { setErr(''); try { await rpc('pilotage_commission_facturer', { p_mandat: mid, p_versement: v, p_facture: facture, p_montant: montant }); await charger(); } catch (e) { setErr(e.message); } };
-  const mandats = d.mandats;
-  const suivis = mandats.filter((m) => m.suivi_commission);
+  const suivis = d.mandats.filter((m) => m.suivi_commission);
+  // Par défaut on ne montre que les mandats rentrés depuis 2026 (ceux qui donnent lieu à commission)
+  const mandats = anciens ? d.mandats : suivis;
   const negos = d.negociateurs;
-  const aValider = mandats.filter((m) => m.statut !== 'Retiré sans location' && (!m.go_le || !m.negociateur)).length + baux.filter((b) => !b.valide_le || !b.loue_par).length;
+  const aValider = suivis.filter((m) => m.statut !== 'Retiré sans location' && (!m.go_le || !m.negociateur)).length + baux.filter((b) => !b.valide_le || !b.loue_par).length;
   const sansGo = mandats.filter((m) => m.bail && !m.go_le && m.suivi_commission);
   // Lignes de commission : versements mandat au négociateur du mandat, versement location à celui qui a loué
   const lignes = [];
@@ -239,6 +241,7 @@ function Mandats() {
       [suivis.filter((m) => m.statut === 'Loué').length, 'Loués'],
       [euro(lignes.filter((l) => l.v.du && !l.facture).reduce((t, l) => t + Number(l.v.montant), 0)), 'Commissions dues à facturer'],
       [euro(lignes.filter((l) => l.facture).reduce((t, l) => t + Number(l.facture.montant ?? l.v.montant), 0)), 'Déjà facturé']]} />
+    <label className="switch" style={{ float: 'right', marginTop: 6 }}><input type="checkbox" checked={anciens} onChange={(e) => setAnciens(e.target.checked)} /> Afficher aussi les mandats antérieurs à 2026 ({d.mandats.length - suivis.length})</label>
     <div className="bascule" style={{ marginBottom: 14 }}>{[['pipeline', 'Pipeline'], ['validation', `Validation${aValider ? ' (' + aValider + ')' : ''}`], ['commissions', 'Commissions par négociateur']].map(([k, l]) =>
       <button key={k} className={vue === k ? 'on' : ''} onClick={() => setVue(k)}>{l}</button>)}</div>
 
@@ -247,7 +250,7 @@ function Mandats() {
       <div className="kanban">{COL_MANDAT.map(([k, l]) => { const items = mandats.filter((m) => k === 'Loué' ? ['Loué', 'Retiré sans location'].includes(m.statut) : m.statut === k);
         return <div key={k} className="kcol"><div className="kcol-tete"><b>{l}</b><span className="pastille">{items.length}</span></div>
           {!items.length && <div className="muted" style={{ padding: '8px 4px' }}>Aucun.</div>}
-          {items.map((m) => { const et = etapesMandat(m); const alerte = m.bail && !m.go_le;
+          {items.map((m) => { const et = etapesMandat(m); const alerte = m.suivi_commission && m.bail && !m.go_le;
             return <button key={m.id} className={'kcarte ' + (sel === m.id ? 'sel ' : '') + (alerte ? 'critique' : m.manques.length ? 'haute' : 'normale')} onClick={() => setSel(m.id)}>
               {alerte && <div className="carte-alerte">⚠ Loué sans GO</div>}
               <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">Mandat n°{m.reference}{m.nom ? ' · ' + m.nom : ''}</span>
@@ -268,7 +271,7 @@ function Mandats() {
       <h2>Mandats</h2>
       <div className="table-wrap"><table>
         <thead><tr><th>Mandat</th><th>Bailleur</th><th>Début</th><th>Négociateur</th><th>Apport direction</th><th>Loyer prévu</th><th>GO dossier complet</th><th>À compléter</th></tr></thead>
-        <tbody>{mandats.map((m) => <tr key={m.id} className={m.bail && !m.go_le ? 'anomalie' : ''}>
+        <tbody>{mandats.map((m) => <tr key={m.id} className={m.suivi_commission && m.bail && !m.go_le ? 'anomalie' : ''}>
           <td><button className="lien" onClick={() => { setSel(m.id); setVue('pipeline'); }}>n°{m.reference}</button>{m.nom ? ' · ' + m.nom : ''}{!m.suivi_commission && <div className="muted">avant 2026</div>}</td>
           <td>{m.bailleur}</td>
           <td>{date(m.debut)}</td>
@@ -328,7 +331,7 @@ function FicheMandat({ m, negos, role, majMandat, majBail }) {
     <div className="muted">Mandat n°{m.reference}{m.nom ? ' · ' + m.nom : ''} · {m.statut}{m.apport_direction ? ' · apport direction' : ''}</div>
     <h2>{m.bailleur || 'Bailleur'}</h2>
     <div className="muted">Locataire : {m.bail?.locataires || 'pas encore loué'}</div>
-    {m.bail && !m.go_le && <div className="mini-alerte critique"><b>Anomalie : bien loué sans GO.</b> Le bail a été signé le {date(m.bail.signe_le || m.bail.debut)} alors que le dossier complet n’a pas été validé.</div>}
+    {m.suivi_commission && m.bail && !m.go_le && <div className="mini-alerte critique"><b>Anomalie : bien loué sans GO.</b> Le bail a été signé le {date(m.bail.signe_le || m.bail.debut)} alors que le dossier complet n’a pas été validé.</div>}
     <ResumeIA type="mandat" id={m.id} />
     <h3>Ce qui manque</h3>
     {m.manques.length ? <ul className="manques">{m.manques.map((x) => <li key={x}>{x}</li>)}</ul> : <p className="muted">Rien : dossier complet.</p>}
