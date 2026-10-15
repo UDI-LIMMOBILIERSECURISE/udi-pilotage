@@ -1,0 +1,311 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { supabase, rpc } from './supabase.js';
+
+const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
+const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
+const ROLES = { direction: 'Direction', superviseur: 'Superviseur', gestionnaire: 'Gestionnaire', comptable: 'Comptable', negociateur: 'Négociateur' };
+const euro = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }));
+const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
+
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
+    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => data.subscription.unsubscribe();
+  }, []);
+  if (!ready) return null;
+  return session ? <Espace /> : <Connexion />;
+}
+
+function Connexion() {
+  const [email, setEmail] = useState('');
+  const [mdp, setMdp] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async (e) => {
+    e.preventDefault(); setBusy(true); setErr('');
+    const { error } = await supabase.auth.signInWithPassword({ email, password: mdp });
+    if (error) setErr('Connexion refusée : vérifiez l’e-mail et le mot de passe (les mêmes que sur UDIGESTION).');
+    setBusy(false);
+  };
+  return (
+    <form className="card login" onSubmit={go}>
+      <h1>Pilotage UDI Gestion</h1>
+      <p className="sub">Connectez-vous avec votre compte UDIGESTION.</p>
+      <label className="muted" htmlFor="em">E-mail</label>
+      <input id="em" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+      <label className="muted" htmlFor="pw">Mot de passe</label>
+      <input id="pw" type="password" autoComplete="current-password" value={mdp} onChange={(e) => setMdp(e.target.value)} required />
+      {err && <div className="err">{err}</div>}
+      <button className="btn plein" disabled={busy} type="submit">{busy ? 'Connexion…' : 'Se connecter'}</button>
+    </form>
+  );
+}
+
+function Espace() {
+  const [moi, setMoi] = useState(undefined);
+  const [onglet, setOnglet] = useState('jour');
+  const [err, setErr] = useState('');
+  useEffect(() => { rpc('pilotage_moi').then(setMoi).catch((e) => setErr(e.message)); }, []);
+  if (err) return <main><div className="banner">{err}</div></main>;
+  if (moi === undefined) return <main><p className="sub">Chargement…</p></main>;
+  if (moi === null) return (
+    <main><div className="card"><h1>Accès non ouvert</h1><p className="sub">Votre compte existe mais n’a pas encore accès au pilotage. Demandez à Nicolas de vous ajouter dans l’onglet Équipe.</p>
+      <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
+  );
+  const tabs = [['jour', 'Ma journée', true], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
+    ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
+  return (
+    <>
+      <header className="top">
+        <span className="brand">Pilotage UDI Gestion</span>
+        <nav className="tabs">{tabs.map(([k, l]) => <button key={k} className={'tab' + (onglet === k ? ' on' : '')} onClick={() => setOnglet(k)}>{l}</button>)}</nav>
+        <span className="me">{moi.prenom} · {ROLES[moi.role]} <button onClick={() => supabase.auth.signOut()}>Déconnexion</button></span>
+      </header>
+      <main>
+        {onglet === 'jour' && <Journee moi={moi} />}
+        {onglet === 'mandats' && moi.voit_commissions && <Mandats />}
+        {onglet === 'obligations' && moi.voit_reglages && <Obligations />}
+        {onglet === 'regles' && moi.voit_reglages && <Regles />}
+        {onglet === 'equipe' && moi.voit_reglages && <Equipe moi={moi} />}
+      </main>
+    </>
+  );
+}
+
+function Journee({ moi }) {
+  const [membres, setMembres] = useState([]);
+  const [cible, setCible] = useState(moi.user_id);
+  const [alertes, setAlertes] = useState(null);
+  const [cat, setCat] = useState('toutes');
+  const [ouvert, setOuvert] = useState(null);
+  const [err, setErr] = useState('');
+  const charger = () => rpc('pilotage_journee', { p_user: cible }).then(setAlertes).catch((e) => setErr(e.message));
+  useEffect(() => { if (moi.voit_equipe) rpc('pilotage_membres').then(setMembres).catch(() => {}); }, []);
+  useEffect(() => { setAlertes(null); charger(); }, [cible]);
+  const traiter = async (a, oui) => { try { await rpc('pilotage_traiter', { p_alerte: a.id, p_traitee: oui }); setOuvert(null); charger(); } catch (e) { setErr(e.message); } };
+
+  const ouvertes = (alertes || []).filter((a) => a.statut === 'ouverte');
+  const traitees = (alertes || []).filter((a) => a.statut === 'traitee');
+  const visibles = ouvertes.filter((a) => cat === 'toutes' || a.categorie === cat);
+  const dossiers = useMemo(() => {
+    const m = new Map();
+    visibles.forEach((a) => {
+      const k = a.dossier?.type === 'bail' || a.dossier?.type === 'lot' ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
+      if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, alertes: [] });
+      m.get(k).alertes.push(a);
+    });
+    const rang = { critique: 0, haute: 1, normale: 2 };
+    return [...m.values()].map((d) => ({ ...d, pire: d.alertes.reduce((p, a) => Math.min(p, rang[a.gravite]), 2) }))
+      .sort((x, y) => x.pire - y.pire || y.alertes.length - x.alertes.length);
+  }, [alertes, cat]);
+  const nomCible = cible === moi.user_id ? moi.prenom : (membres.find((m) => m.user_id === cible)?.prenom || '');
+  const gravNom = ['critique', 'haute', 'normale'];
+
+  return (
+    <>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
+        <div>
+          <h1>{cible === moi.user_id ? `Bonjour ${moi.prenom}` : `Journée de ${nomCible}`}</h1>
+          <p className="sub">{new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {ouvertes.length} alerte{ouvertes.length > 1 ? 's' : ''} à traiter</p>
+        </div>
+        {moi.voit_equipe && membres.length > 1 && (
+          <div className="row" role="group" aria-label="Voir la journée de">
+            {membres.map((m) => <button key={m.user_id} className={'chip' + (cible === m.user_id ? ' on' : '')} onClick={() => setCible(m.user_id)}>{m.prenom}</button>)}
+          </div>
+        )}
+      </div>
+      {err && <div className="banner">{err}</div>}
+      {moi.role === 'direction' && cible === moi.user_id && <div className="info">Vous voyez ici les alertes des mandats attribués à vous et celles des mandats qui ne sont encore attribués à personne.</div>}
+      <div className="row" style={{ marginBottom: 14 }}>
+        {[['toutes', 'Toutes']].concat(Object.entries(CAT)).map(([k, l]) => (
+          <button key={k} className={'chip' + (cat === k ? ' on' : '')} onClick={() => setCat(k)}>{l}<span className="n">{k === 'toutes' ? ouvertes.length : ouvertes.filter((a) => a.categorie === k).length}</span></button>
+        ))}
+      </div>
+      {alertes === null ? <p className="sub">Chargement…</p> : dossiers.length === 0 ? <div className="card">Rien à traiter pour {nomCible}.</div> : (
+        <div className="stack">
+          {dossiers.map((d) => (
+            <article key={d.cle} className={'card ' + gravNom[d.pire]}>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
+                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
+                  <div className="grid2">
+                    {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
+                    {d.mandat && <><span>Mandat</span><span>{d.mandat}</span></>}
+                  </div>
+                </div>
+                {d.dossier?.lien && <a className="btn" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
+              </div>
+              <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+                {d.alertes.map((a) => (
+                  <div key={a.id} className={'alerte ' + a.gravite}>
+                    <button className="head" aria-expanded={ouvert === a.id} onClick={() => setOuvert(ouvert === a.id ? null : a.id)}>
+                      <span className="row"><span className={'tag ' + a.categorie}>{CAT[a.categorie]}</span><strong style={{ fontSize: 14 }}>{a.titre}</strong></span>
+                      <span className="muted">depuis le {date(a.depuis)}</span>
+                    </button>
+                    {ouvert === a.id && (
+                      <div className="detail">
+                        {a.detail && <p style={{ margin: '0 0 6px' }}>{a.detail}</p>}
+                        <p style={{ margin: '0 0 6px' }}><strong>Règle :</strong> {a.explication}</p>
+                        <div className="row">
+                          {a.lien && <a className="btn" href={a.lien} target="_blank" rel="noopener">Voir dans Rivage</a>}
+                          <button className="btn plein" onClick={() => traiter(a, true)}>Traité</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      {traitees.length > 0 && (
+        <details style={{ marginTop: 18 }}><summary style={{ cursor: 'pointer', color: 'var(--teal)' }}>Traité ces 7 derniers jours ({traitees.length})</summary>
+          <ul style={{ fontSize: 13, color: 'var(--ink2)' }}>{traitees.map((a) => <li key={a.id}>{a.titre} · par {a.traitee_par} le {date(a.traitee_le)} <button className="btn gris" style={{ minHeight: 28 }} onClick={() => traiter(a, false)}>Rouvrir</button></li>)}</ul>
+          <p className="muted">Une alerte traitée revient si le problème est toujours présent dans Rivage au contrôle suivant.</p>
+        </details>
+      )}
+    </>
+  );
+}
+
+const SUIVI_DEPUIS = '2026-01-01'; // mandats concernés par la commission de rentrée
+const suivi = (m) => (m.debut || '') >= SUIVI_DEPUIS;
+
+function Mandats() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState('');
+  const charger = () => rpc('pilotage_mandats').then(setRows).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, []);
+  const saisir = async (m, cle, valeur) => { try { await rpc('pilotage_saisir_mandat', { p_mandat: m.id, p_cle: cle, p_valeur: valeur }); charger(); } catch (e) { setErr(e.message); } };
+  if (!rows) return err ? <div className="banner">{err}</div> : <p className="sub">Chargement…</p>;
+  const sansGo = rows.filter((m) => suivi(m) && m.loyer_cc > 0 && !(m.go && m.go.v));
+  return (
+    <>
+      <h1>Mandats et commissions</h1>
+      <p className="sub">Visible par Nicolas et Romain. Commission et GO suivis pour les mandats rentrés depuis le 01/01/2026. Commission estimée selon le nouveau barème : 8 mois d’honoraires de gestion HT (loyer CC × taux TTC ÷ 1,2 × 8).</p>
+      {err && <div className="banner">{err}</div>}
+      {sansGo.length > 0 && <div className="banner">{sansGo.length} mandat{sansGo.length > 1 ? 's' : ''} loué{sansGo.length > 1 ? 's' : ''} sans GO : {sansGo.map((m) => 'n°' + m.reference).join(', ')}</div>}
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Mandat</th><th>Statut</th><th>Début</th><th>Signé le</th><th>Taux TTC</th><th>Lots</th><th>Loyers CC en cours</th><th>Commission estimée</th><th>Négociateur</th><th>GO</th><th></th></tr></thead>
+          <tbody>
+            {rows.map((m) => {
+              const anomalie = suivi(m) && m.loyer_cc > 0 && !(m.go && m.go.v);
+              const commission = suivi(m) && m.loyer_cc && m.taux_ttc ? (m.loyer_cc * m.taux_ttc / 100 / 1.2) * 8 : null;
+              return (
+                <tr key={m.id} className={anomalie ? 'anomalie' : ''}>
+                  <td><strong>n°{m.reference}</strong>{m.nom ? ` · ${m.nom}` : ''}</td>
+                  <td>{m.statut === 'active' ? 'Actif' : m.statut === 'lost' ? 'Perdu' : m.statut}</td>
+                  <td>{date(m.debut)}</td>
+                  <td style={{ color: m.signe_le ? 'inherit' : 'var(--red)' }}>{m.signe_le ? date(m.signe_le) : 'non signé'}</td>
+                  <td>{m.taux_ttc != null ? m.taux_ttc + ' %' : '—'}</td>
+                  <td>{m.lots}</td>
+                  <td>{euro(m.loyer_cc)}</td>
+                  <td>{euro(commission)}</td>
+                  <td><input aria-label={'Négociateur du mandat ' + m.reference} defaultValue={m.negociateur || ''} placeholder="à identifier" style={{ width: 110, padding: '4px 6px', border: '1px solid #C9D3DC', borderRadius: 6 }}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v !== (m.negociateur || '')) saisir(m, 'negociateur', { v }); }} /></td>
+                  <td>{!suivi(m) ? <span className="muted">avant 2026</span> : m.go && m.go.v ? <span>✓ {date(m.go.le)}</span> : <button className="btn" onClick={() => saisir(m, 'go', { v: true, le: new Date().toISOString().slice(0, 10) })}>Donner le GO</button>}</td>
+                  <td><a className="btn gris" href={m.lien} target="_blank" rel="noopener">Rivage</a></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function useReglages() {
+  const [r, setR] = useState(null); const [err, setErr] = useState('');
+  const charger = () => rpc('pilotage_reglages').then(setR).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, []);
+  return [r, err, charger, setErr];
+}
+
+function Obligations() {
+  const [r, err] = useReglages();
+  const [dom, setDom] = useState('Toutes'); const [st, setSt] = useState('tous');
+  if (!r) return err ? <div className="banner">{err}</div> : <p className="sub">Chargement…</p>;
+  const ob = r.obligations || [];
+  const doms = ['Toutes', ...new Set(ob.map((o) => o.domaine))];
+  const STL = { auto: 'Automatisable', partiel: 'Rivage + saisie', saisie: 'À saisir', humain: 'Contrôle humain', regles: 'Règles à remplir' };
+  const rows = ob.filter((o) => (dom === 'Toutes' || o.domaine === dom) && (st === 'tous' || o.statut === st));
+  return (
+    <>
+      <h1>Obligations suivies</h1>
+      <p className="sub">{ob.length} obligations. Réservé à Nicolas.</p>
+      <div className="row" style={{ marginBottom: 8 }}>{doms.map((d) => <button key={d} className={'chip' + (dom === d ? ' on' : '')} onClick={() => setDom(d)}>{d}</button>)}</div>
+      <div className="row" style={{ marginBottom: 14 }}>{[['tous', 'Tous']].concat(Object.entries(STL)).map(([k, l]) => <button key={k} className={'chip' + (st === k ? ' on' : '')} onClick={() => setSt(k)}>{l}<span className="n">{k === 'tous' ? ob.length : ob.filter((o) => o.statut === k).length}</span></button>)}</div>
+      <div className="table-wrap"><table>
+        <thead><tr><th>Obligation</th><th>Texte</th><th>Déclencheur</th><th>Alerte</th><th>Statut</th><th>Ce qui manque</th></tr></thead>
+        <tbody>{rows.map((o) => <tr key={o.id}><td><strong>{o.obligation}</strong><div className="muted">{o.domaine} · {o.moment}{o.types ? ' · ' + o.types : ''}</div></td><td>{o.texte}</td><td>{o.declencheur}</td><td>{o.alerte}</td><td>{STL[o.statut] || o.statut}</td><td>{o.manque}</td></tr>)}</tbody>
+      </table></div>
+    </>
+  );
+}
+
+function Regles() {
+  const [r, err, charger, setErr] = useReglages();
+  if (!r) return err ? <div className="banner">{err}</div> : <p className="sub">Chargement…</p>;
+  const basculer = async (g) => { try { await rpc('pilotage_regle_activer', { p_cle: g.cle, p_actif: !g.actif }); charger(); } catch (e) { setErr(e.message); } };
+  return (
+    <>
+      <h1>Règles de relance</h1>
+      <p className="sub">Contrôles exécutés automatiquement toutes les 30 minutes. Une règle désactivée ne crée plus d’alerte ; les alertes déjà ouvertes se ferment au contrôle suivant.</p>
+      {err && <div className="banner">{err}</div>}
+      <div className="table-wrap"><table>
+        <thead><tr><th>Règle</th><th>Domaine</th><th>Gravité</th><th>Alertes ouvertes</th><th>Active</th></tr></thead>
+        <tbody>{(r.regles || []).map((g) => <tr key={g.cle}><td><strong>{g.libelle}</strong><div className="muted">{g.explication}</div></td><td>{g.domaine}</td><td><span className={'sev ' + g.gravite}>{SEV[g.gravite]}</span></td><td>{g.ouvertes}</td>
+          <td><label className="switch"><input type="checkbox" checked={g.actif} onChange={() => basculer(g)} /> {g.actif ? 'Oui' : 'Non'}</label></td></tr>)}</tbody>
+      </table></div>
+    </>
+  );
+}
+
+function Equipe({ moi }) {
+  const [r, err, charger, setErr] = useReglages();
+  const [f, setF] = useState({ email: '', prenom: '', role: 'gestionnaire' });
+  const [sel, setSel] = useState(null);
+  if (!r) return err ? <div className="banner">{err}</div> : <p className="sub">Chargement…</p>;
+  const membres = r.membres || []; const mandats = r.mandats || [];
+  const ajouter = async (e) => { e.preventDefault(); try { await rpc('pilotage_membre_enregistrer', { p_email: f.email, p_prenom: f.prenom, p_role: f.role, p_actif: true }); setF({ email: '', prenom: '', role: 'gestionnaire' }); charger(); } catch (x) { setErr(x.message); } };
+  const modifier = async (m, patch) => { try { await rpc('pilotage_membre_enregistrer', { p_email: m.email, p_prenom: m.prenom, p_role: patch.role ?? m.role, p_actif: patch.actif ?? m.actif }); charger(); } catch (x) { setErr(x.message); } };
+  const attribuer = async (mid, uid, oui) => { try { await rpc('pilotage_attribuer', { p_mandat: mid, p_user: uid, p_oui: oui }); charger(); } catch (x) { setErr(x.message); } };
+  const choisi = membres.find((m) => m.user_id === sel);
+  return (
+    <>
+      <h1>Équipe</h1>
+      <p className="sub">Chaque membre ne voit que les alertes des mandats qui lui sont attribués. Romain (superviseur) voit en plus les journées de toute l’équipe et les commissions.</p>
+      {err && <div className="banner">{err}</div>}
+      <form className="form card" onSubmit={ajouter}>
+        <label>E-mail du compte UDIGESTION<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></label>
+        <label>Prénom<input value={f.prenom} onChange={(e) => setF({ ...f, prenom: e.target.value })} required /></label>
+        <label>Rôle<select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{Object.entries(ROLES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <button className="btn plein" type="submit">Ajouter</button>
+      </form>
+      <div className="table-wrap" style={{ marginBottom: 18 }}><table>
+        <thead><tr><th>Membre</th><th>Rôle</th><th>Mandats attribués</th><th>Accès</th><th></th></tr></thead>
+        <tbody>{membres.map((m) => <tr key={m.user_id}>
+          <td><strong>{m.prenom}</strong><div className="muted">{m.email}</div></td>
+          <td>{m.user_id === moi.user_id ? ROLES[m.role] : <select value={m.role} onChange={(e) => modifier(m, { role: e.target.value })}>{Object.entries(ROLES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}</td>
+          <td>{m.mandats.length}</td>
+          <td>{m.user_id === moi.user_id ? 'Oui' : <label className="switch"><input type="checkbox" checked={m.actif} onChange={() => modifier(m, { actif: !m.actif })} /> {m.actif ? 'Oui' : 'Non'}</label>}</td>
+          <td><button className="btn gris" onClick={() => setSel(m.user_id)}>Attribuer des mandats</button></td>
+        </tr>)}</tbody>
+      </table></div>
+      {choisi && (
+        <div className="card">
+          <h2 style={{ fontSize: 17, marginTop: 0 }}>Mandats de {choisi.prenom}</h2>
+          <div className="row">{mandats.map((md) => { const oui = choisi.mandats.includes(md.id); return (
+            <label key={md.id} className="chip" style={{ background: oui ? 'var(--teal-bg)' : '#fff' }}><input type="checkbox" checked={oui} onChange={() => attribuer(md.id, choisi.user_id, !oui)} /> n°{md.reference}{md.nom ? ' ' + md.nom : ''}</label>); })}</div>
+        </div>
+      )}
+    </>
+  );
+}
