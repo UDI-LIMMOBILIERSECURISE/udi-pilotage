@@ -48,14 +48,20 @@ function Espace() {
   const [moi, setMoi] = useState(undefined);
   const [onglet, setOnglet] = useState('jour');
   const [err, setErr] = useState('');
-  useEffect(() => { rpc('pilotage_moi').then(setMoi).catch((e) => setErr(e.message)); }, []);
+  const [tableaux, setTableaux] = useState([]);
+  useEffect(() => {
+    rpc('pilotage_moi').then(setMoi).catch((e) => setErr(e.message));
+    rpc('pilotage_tableaux_visibles').then((t) => setTableaux(t || [])).catch(() => {});
+  }, []);
+  const voit = (t) => tableaux.includes(t);
   if (err) return <main><div className="banner">{err}</div></main>;
   if (moi === undefined) return <main><p className="sub">Chargement…</p></main>;
   if (moi === null) return (
     <main><div className="card"><h1>Accès non ouvert</h1><p className="sub">Votre compte existe mais n’a pas encore accès au pilotage. Demandez à Nicolas de vous ajouter dans l’onglet Équipe.</p>
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
-  const tabs = [['jour', 'Ma journée', true], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
+  const tabs = [['jour', 'Ma journée', true], ['agence', 'Toute l’agence', voit('agence')], ['sinistres', 'Sinistres', voit('sinistres')],
+    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
     ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
   return (
     <>
@@ -66,6 +72,10 @@ function Espace() {
       </header>
       <main>
         {onglet === 'jour' && <Journee moi={moi} />}
+        {onglet === 'agence' && voit('agence') && <Agence />}
+        {onglet === 'sinistres' && voit('sinistres') && <Sinistres />}
+        {onglet === 'dg' && voit('dg') && <SortiesDG />}
+        {onglet === 'compta' && voit('compta') && <Compta />}
         {onglet === 'mandats' && moi.voit_commissions && <Mandats />}
         {onglet === 'obligations' && moi.voit_reglages && <Obligations />}
         {onglet === 'regles' && moi.voit_reglages && <Regles />}
@@ -308,4 +318,186 @@ function Equipe({ moi }) {
       )}
     </>
   );
+}
+
+// ===== Tableaux de suivi =====
+
+function useCharge(fn) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const charger = () => rpc(fn).then(setD).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, []);
+  return [d, err, charger];
+}
+
+function Chiffre({ n, l, alerte }) {
+  return <div className="card" style={{ minWidth: 150, flex: '1 1 150px' }}>
+    <div style={{ fontSize: 26, fontWeight: 700, color: alerte && n > 0 ? 'var(--red)' : 'var(--ink)' }}>{n}</div>
+    <div className="muted">{l}</div></div>;
+}
+
+const TYPE_INC = { plumbing: 'Plomberie', roofing: 'Toiture', painting: 'Peinture', electricity: 'Électricité', electrical: 'Électricité', heating: 'Chauffage', locksmith: 'Serrurerie', other: 'Autre' };
+const URG = { urgent: ['Urgent', 'critique'], high: ['Haute', 'haute'], normal: ['Normale', 'normale'], low: ['Basse', 'normale'] };
+const ST_INC = { open: 'Ouvert', in_progress: 'En cours', closed: 'Clos', resolved: 'Résolu', cancelled: 'Annulé' };
+const CHARGE = { tenant: 'Locataire', landlord: 'Propriétaire', agency: 'Agence' };
+
+function Sinistres() {
+  const [d, err] = useCharge('pilotage_sinistres');
+  const [clos, setClos] = useState(false);
+  if (err) return <div className="banner">{err}</div>;
+  if (!d) return <p className="sub">Chargement…</p>;
+  const ouverts = d.filter((x) => !x.clos);
+  const liste = clos ? d : ouverts;
+  return <>
+    <h1>Sinistres et incidents</h1>
+    <p className="sub">Incidents déclarés dans Rivage, mis à jour à chaque modification.</p>
+    <div className="row" style={{ marginBottom: 14 }}>
+      <Chiffre n={ouverts.length} l="ouverts" />
+      <Chiffre n={ouverts.filter((x) => x.urgence === 'urgent' || x.urgence === 'high').length} l="urgents ou prioritaires" alerte />
+      <Chiffre n={ouverts.filter((x) => x.jours > 15).length} l="ouverts depuis plus de 15 jours" alerte />
+      <Chiffre n={ouverts.filter((x) => !x.prestataires).length} l="sans prestataire" alerte />
+    </div>
+    <label className="switch" style={{ marginBottom: 10 }}><input type="checkbox" checked={clos} onChange={(e) => setClos(e.target.checked)} /> Afficher aussi les clos</label>
+    <div className="table-wrap"><table>
+      <thead><tr><th>N°</th><th>Incident</th><th>Lot et locataire</th><th>Urgence</th><th>Statut</th><th>Déclaré</th><th>Âge</th><th>À la charge</th><th>Estimé</th><th>Prestataire</th><th></th></tr></thead>
+      <tbody>{liste.map((x) => {
+        const u = URG[x.urgence] || [x.urgence, 'normale'];
+        return <tr key={x.id} className={!x.clos && (x.jours > 15 || !x.prestataires) ? 'anomalie' : ''}>
+          <td>{x.numero}</td>
+          <td><b>{x.titre}</b><div className="muted">{TYPE_INC[x.type] || x.type}{x.description ? ' · ' + x.description : ''}</div></td>
+          <td>{x.adresse || <span className="muted">Immeuble (pas de lot)</span>}<div className="muted">{[x.locataires, x.mandat].filter(Boolean).join(' · ')}</div></td>
+          <td><span className={'sev ' + u[1]}>{u[0]}</span></td>
+          <td>{ST_INC[x.statut] || x.statut}{x.resolu_le ? <div className="muted">le {date(x.resolu_le)}</div> : null}</td>
+          <td>{date(x.declare_le)}</td>
+          <td>{x.jours} j</td>
+          <td>{CHARGE[x.a_charge] || x.a_charge || '—'}</td>
+          <td>{euro(x.montant_estime)}</td>
+          <td>{x.prestataires ? x.prestataires : <span style={{ color: 'var(--red)' }}>Aucun</span>}</td>
+          <td><a className="btn gris" href={x.lien} target="_blank" rel="noreferrer">Rivage</a></td>
+        </tr>;
+      })}</tbody></table></div>
+    {!liste.length && <p className="sub">Aucun incident.</p>}
+  </>;
+}
+
+function SortiesDG() {
+  const [d, err] = useCharge('pilotage_dg');
+  if (err) return <div className="banner">{err}</div>;
+  if (!d) return <p className="sub">Chargement…</p>;
+  const auj = new Date().toISOString().slice(0, 10);
+  const etat = (x) => {
+    if (x.remboursee) return ['Restitué', 'normale'];
+    if (!x.parti) return ['Préavis en cours', 'normale'];
+    if (auj > x.limite_2_mois) return ['Hors délai (2 mois dépassés)', 'critique'];
+    if (auj > x.limite_1_mois) return ['Délai 1 mois dépassé', 'haute'];
+    return [x.validee ? 'Validé, à virer' : 'À préparer', 'normale'];
+  };
+  const parti = d.filter((x) => x.parti && !x.remboursee);
+  return <>
+    <h1>Sorties et dépôts de garantie</h1>
+    <p className="sub">Baux en sortie ou avec une date de fin. Délai légal de restitution : 1 mois après la remise des clés si l’état des lieux de sortie est conforme, 2 mois sinon (loi du 6 juillet 1989, art. 22). Au-delà, majoration de 10 % du loyer hors charges par mois de retard.</p>
+    <div className="info">La date de fin affichée est celle du bail dans Rivage. La date réelle de remise des clés et la conformité de l’état des lieux ne sont pas exposées par Rivage : le délai applicable (1 ou 2 mois) reste à apprécier.</div>
+    <div className="row" style={{ marginBottom: 14 }}>
+      <Chiffre n={d.filter((x) => !x.parti).length} l="préavis en cours" />
+      <Chiffre n={parti.length} l="partis, DG non restitué" alerte />
+      <Chiffre n={parti.filter((x) => auj > x.limite_1_mois).length} l="au-delà d’un mois" alerte />
+      <Chiffre n={parti.filter((x) => !x.restitution_creee).length} l="sans restitution créée dans Rivage" alerte />
+    </div>
+    <div className="table-wrap"><table>
+      <thead><tr><th>Bail</th><th>Lot</th><th>Fin du bail</th><th>Dépôt</th><th>Limite 1 mois</th><th>Limite 2 mois</th><th>Restitution Rivage</th><th>État</th><th></th></tr></thead>
+      <tbody>{d.map((x) => {
+        const e = etat(x);
+        return <tr key={x.bail_id} className={e[1] !== 'normale' ? 'anomalie' : ''}>
+          <td><b>{x.locataires}</b><div className="muted">{x.reference}</div></td>
+          <td>{x.adresse}<div className="muted">{x.mandat}</div></td>
+          <td>{date(x.fin)}</td>
+          <td>{euro(x.depot)}</td>
+          <td>{date(x.limite_1_mois)}</td>
+          <td>{date(x.limite_2_mois)}</td>
+          <td>{!x.restitution_creee ? 'Non créée' : x.remboursee ? 'Remboursée' : x.validee ? 'Validée' : 'Créée, non validée'}</td>
+          <td><span className={'sev ' + e[1]}>{e[0]}</span></td>
+          <td><a className="btn gris" href={x.lien} target="_blank" rel="noreferrer">Rivage</a></td>
+        </tr>;
+      })}</tbody></table></div>
+    {!d.length && <p className="sub">Aucune sortie en cours.</p>}
+  </>;
+}
+
+function Compta() {
+  const [d, err] = useCharge('pilotage_compta');
+  if (err) return <div className="banner">{err}</div>;
+  if (!d) return <p className="sub">Chargement…</p>;
+  const imp = d.periodes.filter((x) => x.solde < 0);
+  const trop = d.periodes.filter((x) => x.solde > 0);
+  return <>
+    <h1>Comptabilité</h1>
+    <p className="sub">Situation des locataires par période quittancée et comptes tiers, d’après les écritures reçues de Rivage.</p>
+    <div className="info">Ne remontent ici que les périodes et comptes dont Rivage a envoyé les écritures depuis la mise en place (pas d’historique antérieur). Les ordres de virement aux propriétaires ne sont pas encore suivis.</div>
+    <div className="row" style={{ marginBottom: 14 }}>
+      <Chiffre n={imp.length + d.impayes_baux.length} l="impayés" alerte />
+      <Chiffre n={trop.length} l="trop-perçus à régulariser" alerte />
+      <Chiffre n={d.periodes.filter((x) => x.recu > 0 && !x.reverse_proprio).length} l="encaissés non reversés" />
+    </div>
+    <h2 style={{ fontSize: 18 }}>Loyers par période</h2>
+    <div className="table-wrap"><table>
+      <thead><tr><th>Bail</th><th>Lot</th><th>Période</th><th>Appelé</th><th>Reçu</th><th>Écart</th><th>Reçu le</th><th>Reversé proprio</th><th></th></tr></thead>
+      <tbody>{d.periodes.map((x) => <tr key={x.bail_id + x.periode} className={x.solde !== 0 ? 'anomalie' : ''}>
+        <td><b>{x.locataires}</b><div className="muted">{x.reference}</div></td>
+        <td>{x.adresse}<div className="muted">{x.mandat}</div></td>
+        <td>{date(x.periode)}</td>
+        <td>{euro(x.du)}</td>
+        <td>{euro(x.recu)}</td>
+        <td style={{ fontWeight: 700, color: x.solde < 0 ? 'var(--red)' : x.solde > 0 ? 'var(--amber)' : 'inherit' }}>{x.solde > 0 ? '+' : ''}{euro(x.solde)}<div className="muted">{x.solde < 0 ? 'impayé' : x.solde > 0 ? 'trop-perçu' : 'soldé'}</div></td>
+        <td>{date(x.recu_le)}</td>
+        <td>{euro(x.reverse_proprio)}{x.dernier_virement_proprio ? <div className="muted">le {date(x.dernier_virement_proprio)}</div> : null}</td>
+        <td><a className="btn gris" href={x.lien} target="_blank" rel="noreferrer">Rivage</a></td>
+      </tr>)}</tbody></table></div>
+    {!d.periodes.length && <p className="sub">Aucune période reçue.</p>}
+    {d.impayes_baux.length > 0 && <>
+      <h2 style={{ fontSize: 18 }}>Impayés déclarés sur les baux</h2>
+      <div className="table-wrap"><table><thead><tr><th>Bail</th><th>Lot</th><th>Impayé</th><th></th></tr></thead>
+        <tbody>{d.impayes_baux.map((x) => <tr key={x.bail_id} className="anomalie"><td><b>{x.locataires}</b><div className="muted">{x.reference}</div></td><td>{x.adresse}</td><td>{euro(x.impaye)}</td>
+          <td><a className="btn gris" href={x.lien} target="_blank" rel="noreferrer">Rivage</a></td></tr>)}</tbody></table></div>
+    </>}
+    <h2 style={{ fontSize: 18 }}>Comptes tiers non soldés</h2>
+    <p className="muted">Solde = crédit − débit. Un compte propriétaire négatif signifie que le propriétaire doit de l’argent à l’agence.</p>
+    <div className="table-wrap"><table><thead><tr><th>Compte</th><th>Libellé</th><th>Débit</th><th>Crédit</th><th>Solde</th></tr></thead>
+      <tbody>{d.comptes.map((x, i) => <tr key={i} className={x.titulaire === 'landlord' && x.solde < 0 ? 'anomalie' : ''}>
+        <td>{x.compte} · {x.titulaire === 'tenant' ? 'Locataire' : 'Propriétaire'}</td><td>{x.libelle}</td><td>{euro(x.debit)}</td><td>{euro(x.credit)}</td>
+        <td style={{ fontWeight: 700 }}>{euro(x.solde)}</td></tr>)}</tbody></table></div>
+    {!d.comptes.length && <p className="sub">Tous les comptes tiers reçus sont soldés.</p>}
+  </>;
+}
+
+function Agence() {
+  const [d, err] = useCharge('pilotage_agence');
+  const [qui, setQui] = useState('Tous');
+  const [dom, setDom] = useState('Tous');
+  if (err) return <div className="banner">{err}</div>;
+  if (!d) return <p className="sub">Chargement…</p>;
+  const compte = (arr, k) => arr.reduce((m, x) => { m[x[k]] = (m[x[k]] || 0) + 1; return m; }, {});
+  const parQui = compte(d, 'qui');
+  const parDom = compte(d.filter((x) => qui === 'Tous' || x.qui === qui), 'domaine');
+  const liste = d.filter((x) => (qui === 'Tous' || x.qui === qui) && (dom === 'Tous' || x.domaine === dom));
+  return <>
+    <h1>Toute l’agence</h1>
+    <p className="sub">Toutes les alertes ouvertes, quelle que soit la personne. {d.length} au total.</p>
+    <div className="row" style={{ marginBottom: 8 }}>
+      {['Tous', ...Object.keys(parQui).sort()].map((k) => <button key={k} className={'chip' + (qui === k ? ' on' : '')} onClick={() => { setQui(k); setDom('Tous'); }}>{k}<span className="n">{k === 'Tous' ? d.length : parQui[k]}</span></button>)}
+    </div>
+    <div className="row" style={{ marginBottom: 14 }}>
+      {['Tous', ...Object.keys(parDom).sort()].map((k) => <button key={k} className={'chip' + (dom === k ? ' on' : '')} onClick={() => setDom(k)}>{k === 'Tous' ? 'Tous domaines' : k}<span className="n">{k === 'Tous' ? Object.values(parDom).reduce((a, b) => a + b, 0) : parDom[k]}</span></button>)}
+    </div>
+    <div className="table-wrap"><table>
+      <thead><tr><th>Gravité</th><th>Alerte</th><th>Dossier</th><th>Mandat</th><th>Qui</th><th>Depuis</th><th></th></tr></thead>
+      <tbody>{liste.map((x) => <tr key={x.id}>
+        <td><span className={'sev ' + x.gravite}>{SEV[x.gravite]}</span></td>
+        <td><b>{x.libelle}</b><div className="muted">{x.domaine} · {CAT[x.categorie] || x.categorie}</div></td>
+        <td>{x.titre}</td>
+        <td>{x.mandat || '—'}</td>
+        <td>{x.qui === 'Non attribué' ? <span className="muted">Non attribué</span> : x.qui}</td>
+        <td>{date(x.depuis)}</td>
+        <td>{x.lien ? <a className="btn gris" href={x.lien} target="_blank" rel="noreferrer">Rivage</a> : null}</td>
+      </tr>)}</tbody></table></div>
+  </>;
 }
