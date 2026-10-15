@@ -65,8 +65,15 @@ Deno.serve(async (req) => {
     declencheur = moi.prenom
   }
 
-  const cle = Deno.env.get('RIVAGE_API_KEY')
-  if (!cle) return rep(500, { error: 'Clé API Rivage non configurée (secret RIVAGE_API_KEY)' })
+  const brute = Deno.env.get('RIVAGE_API_KEY')
+  if (!brute) return rep(500, { error: 'Clé API Rivage non configurée (secret RIVAGE_API_KEY)' })
+  // Tolère « Bearer » et les espaces collés par erreur ; diagnostic du format sans jamais afficher la clé
+  const cle = brute.trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '')
+  if (!/^pk_[A-Za-z0-9]+:sk_[A-Za-z0-9]+$/.test(cle)) {
+    const diag = `format attendu pk_…:sk_… ; reçu : commence par pk_ ${cle.startsWith('pk_') ? 'oui' : 'non'}, deux-points ${cle.includes(':') ? 'oui' : 'non'}, contient sk_ ${cle.includes('sk_') ? 'oui' : 'non'}, ${cle.length} caractères`
+    await service.rpc('pilotage_sync_fin', { p_id: (await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur })).data, p_compteurs: {}, p_erreur: 'Clé Rivage mal formée : ' + diag })
+    return rep(500, { error: 'Clé Rivage mal formée : ' + diag })
+  }
 
   const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur })
   const compteurs: Record<string, number> = {}
