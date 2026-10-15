@@ -162,3 +162,9 @@ tr.sel td { background: #EEF4FA; }
 .carte-imp-audience { color: var(--red); font-weight: 600; }
 .carte-imp-pied .lie { color: var(--teal); font-weight: 600; }
 .filtres-imp { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 6px 0; }
+.carte-alerte { margin: -12px -12px 8px; padding: 5px 12px; background: var(--red); color: #fff; font-size: 12px; font-weight: 700; border-radius: 8px 8px 0 0; }
+.manques { margin: 0; padding-left: 18px; font-size: 13px; color: var(--amber); }
+.manques li { margin: 3px 0; }
+.versements { border: 1px solid var(--line); border-radius: 10px; }
+.versement { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 9px 12px; border-bottom: 1px solid #EEF1F4; font-size: 13px; align-items: center; }
+.versement:last-child { border-bottom: 0; }
