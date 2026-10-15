@@ -15,7 +15,7 @@ const SOURCES: Record<string, { rpc: string; cle: string; liste?: string }> = {
 
 const CONSIGNES: Record<string, string> = {
   sinistre: "Il s'agit d'un incident technique (sinistre) déclaré dans le logiciel de gestion Rivage.",
-  dg: "Il s'agit d'un dossier de sortie de locataire et de restitution du dépôt de garantie. Rappel légal : restitution sous 1 mois après remise des clés si l'état des lieux de sortie est conforme à celui d'entrée, 2 mois sinon (loi du 6 juillet 1989, art. 22), majoration de 10 % du loyer HC par mois de retard commencé. La date réelle de remise des clés et la conformité de l'EDL ne sont pas connues : la date de fin du bail sert de référence.",
+  dg: "Il s'agit d'un dossier de sortie de locataire et de restitution du dépôt de garantie. Rappel légal : restitution sous 1 mois après remise des clés si l'état des lieux de sortie est conforme à celui d'entrée, 2 mois sinon (loi du 6 juillet 1989, art. 22), majoration de 10 % du loyer HC par mois de retard commencé. Signification des champs : fin = date de fin du bail (sert de date de référence, la date réelle de remise des clés n'est pas connue) ; restitution_creee = une restitution du dépôt a été créée dans Rivage ; validee = cette restitution a été validée dans Rivage (cela ne dit RIEN de l'état des lieux) ; remboursee = le dépôt a été remboursé ; incidents = incidents techniques liés au bail, a_charge = qui les paie. La conformité de l'état des lieux de sortie n'est pas connue : ne la déduis jamais, cite les deux échéances possibles (limite_1_mois et limite_2_mois).",
   compta: "Il s'agit de la situation comptable d'un locataire sur une période de loyer (montants en euros). solde = reçu − dû : négatif = impayé, positif = trop-perçu.",
   alerte: "Il s'agit d'une alerte de contrôle automatique sur un dossier de gestion locative.",
 }
@@ -28,7 +28,9 @@ Règles strictes :
 - Si une information utile manque (null, vide), dis-le simplement plutôt que de supposer.
 - Mets en avant ce qui demande une action (retard, montant à rembourser ou à réclamer, pièce ou étape manquante, incident à la charge du locataire à imputer, etc.).
 - Termine par la prochaine action concrète à faire, formulée à l'infinitif.
-- Dates au format jj/mm/aaaa, montants avec le symbole €.`
+- Dates au format jj/mm/aaaa, montants avec le symbole €.
+- Ne cite jamais les noms techniques des champs ni des valeurs comme true, false ou null : écris en français courant.
+- Ne tire aucune conclusion juridique ou factuelle qui ne découle pas directement d'une donnée fournie.`
 
 function cors(req: Request) {
   const o = req.headers.get('origin') || ''
