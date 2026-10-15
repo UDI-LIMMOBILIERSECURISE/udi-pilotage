@@ -61,7 +61,7 @@ function Espace() {
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
   const tabs = [['jour', 'Ma journée', true], ['agence', 'Toute l’agence', voit('agence')], ['sinistres', 'Sinistres', voit('sinistres')],
-    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
+    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
     ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
   return (
     <>
@@ -71,11 +71,13 @@ function Espace() {
         <span className="me">{moi.prenom} · {ROLES[moi.role]} <button onClick={() => supabase.auth.signOut()}>Déconnexion</button></span>
       </header>
       <main>
+        <Synchro direction={moi.role === 'direction'} />
         {onglet === 'jour' && <Journee moi={moi} />}
         {onglet === 'agence' && voit('agence') && <Agence />}
         {onglet === 'sinistres' && voit('sinistres') && <Sinistres />}
         {onglet === 'dg' && voit('dg') && <SortiesDG />}
         {onglet === 'compta' && voit('compta') && <Compta />}
+        {onglet === 'impayes' && voit('impayes') && <Impayes />}
         {onglet === 'mandats' && moi.voit_commissions && <Mandats />}
         {onglet === 'obligations' && moi.voit_reglages && <Obligations />}
         {onglet === 'regles' && moi.voit_reglages && <Regles />}
@@ -652,5 +654,183 @@ function Agence() {
         <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Bailleur</span><span>{x.bailleur || '—'}</span><span className="muted">Mandat</span><span>{x.mandat || '—'}</span><span className="muted">Qui</span><span>{x.qui}</span></div>
       </button>)}</div>
     </AvecDetail>
+  </>;
+}
+
+
+// ===== Mise à jour depuis Rivage =====
+
+function Synchro({ direction }) {
+  const [d, setD] = useState(null);
+  const [encours, setEncours] = useState(false);
+  const [msg, setMsg] = useState('');
+  const lire = () => rpc('pilotage_derniere_sync').then(setD).catch(() => {});
+  useEffect(() => { lire(); }, []);
+  const lancer = async () => {
+    setEncours(true); setMsg('');
+    const { data, error } = await supabase.functions.invoke('pilotage-sync-rivage', { body: {} });
+    if (error) {
+      let texte = 'La mise à jour a échoué.';
+      try { const j = await error.context.json(); if (j?.error) texte += ' ' + j.error; } catch { /* réponse illisible */ }
+      setMsg(texte);
+    } else setMsg('Mise à jour terminée : ' + Object.entries(data.compteurs || {}).map(([k, v]) => v + ' ' + k).join(', ') + '. Rechargez la page pour voir les données.');
+    setEncours(false); lire();
+  };
+  return <div className="synchro">
+    <span>{d ? <>Dernière mise à jour depuis Rivage : {dateHeure(d.fin || d.debut)}{d.erreur ? <span style={{ color: 'var(--red)' }}> · échec : {d.erreur}</span> : ''}</> : 'Mise à jour nocturne depuis Rivage : pas encore de passage.'} Les webhooks mettent à jour en continu.</span>
+    {direction && <button className="lien" disabled={encours} onClick={lancer}>{encours ? 'Mise à jour en cours…' : 'Mettre à jour maintenant'}</button>}
+    {msg && <span className="muted">{msg}</span>}
+  </div>;
+}
+
+// ===== Suivi des impayés (modèle du tableau Monday) =====
+
+const GROUPES_IMP = [
+  ['GLI', 'Dossiers suivi impayés · GLI', '#579BFC'],
+  ['Transfert assureur', 'Transfert à l’assureur · décomptes mensuels', '#00854D'],
+  ['Caution', 'Caution / garant (SmartGarant…)', '#FDAB3D'],
+  ['Avocat', 'Dossier chez l’avocat (procédure d’expulsion)', '#E2445C'],
+  ['Liquidation', 'Liquidation judiciaire', '#7E3B8A'],
+  ['Clôturé', 'Dossier clôturé', '#9DA3AE'],
+];
+const LISTES_IMP = {
+  cause: ['Impayé loyer', 'Loyer non réglé', 'Rejet prélèvement', 'TEOM non réglée', 'Dégradations', 'Préavis en cours', 'Autre'],
+  notif_bailleur: ['Infos impayé', 'Prise en charge'],
+  garantie: ['GLI Zelok', 'Mila', 'Garantme', 'SmartGarant (caution)', 'Garant personne physique', 'Aucune'],
+  procedure: ['Commandement de payer', 'Assignation avocat par l’assureur', 'Assignation avocat par le bailleur', 'Plan d’apurement', 'Expulsion', 'Aucune'],
+  prise_en_charge: ['Oui', 'En cours', 'Compte mis à jour', 'Refusée', 'Dossier clos'],
+  indemnisation_recue: ['OK reçue', 'En cours', 'Quittance subrogative', 'Non'],
+  indemnite_versee_bailleur: ['Oui', 'Oui avec le décompte', 'Non'],
+};
+const COULEUR_VAL = { 'Oui': 'ok', 'OK reçue': 'ok', 'Prise en charge': 'ok', 'Oui avec le décompte': 'ok', 'En cours': 'encours', 'Infos impayé': 'info', 'Compte mis à jour': 'rose', 'Quittance subrogative': 'info', 'Refusée': 'ko', 'Non': 'ko', 'Dossier clos': 'gris' };
+const civ = (c) => ({ mr: 'M.', mrs: 'Mme', other: '' }[c] ?? '');
+const NATURE_LOT = { flat: 'Appartement', house: 'Maison', commercial: 'Local commercial', office: 'Bureaux', parking: 'Parking', box: 'Box', cellar: 'Cave' };
+
+function Etiquette({ v }) { return v ? <span className={'etq ' + (COULEUR_VAL[v] || 'neutre')}>{v}</span> : <span className="muted">—</span>; }
+
+function Impayes() {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const [sel, setSel] = useState(null);
+  const [ouverts, setOuverts] = useState({ 'Clôturé': false });
+  const [recherche, setRecherche] = useState('');
+  const charger = () => rpc('pilotage_impayes').then(setD).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, []);
+  if (err) return <div className="banner">{err}</div>;
+  if (!d) return <p className="sub">Chargement…</p>;
+  const ouvrir = async (bail) => { try { const id = await rpc('pilotage_impaye_ouvrir', { p_bail: bail, p_groupe: 'GLI' }); await charger(); setSel(id); } catch (e) { setErr(e.message); } };
+  const q = recherche.trim().toLowerCase();
+  const filtre = (x) => !q || JSON.stringify([x.rivage?.locataires, x.rivage?.bailleurs, x.rivage?.adresse, x.rivage?.reference]).toLowerCase().includes(q);
+  const dossiers = d.dossiers.filter(filtre);
+  const s = d.dossiers.find((x) => x.id === sel);
+  const actifs = d.dossiers.filter((x) => x.groupe !== 'Clôturé');
+  const somme = (k) => actifs.reduce((t, x) => t + (Number(x[k]) || 0), 0);
+  return <>
+    <div className="entete"><div><h1>Suivi des impayés</h1>
+      <p className="sub">Un dossier par bail en impayé : ce que dit Rivage, et le suivi de la garantie, de la procédure et des remboursements.</p></div>
+      <input className="recherche" placeholder="Rechercher un locataire, un bailleur, une adresse…" value={recherche} onChange={(e) => setRecherche(e.target.value)} /></div>
+    <Tuiles items={[[actifs.length, 'Dossiers en cours'], [euro(somme('montant_impaye')), 'Montant déclaré en cours'],
+      [actifs.filter((x) => !x.declaration_le).length, 'Non déclarés à l’assureur', true],
+      [actifs.filter((x) => x.audience_le && x.audience_le >= auj()).length, 'Audiences à venir'],
+      [euro(somme('solde_a_rembourser_assureur') + somme('indemnisation_a_rembourser')), 'À rembourser à l’assureur']]} />
+    {d.candidats.length > 0 && <div className="mini-alerte haute" style={{ marginBottom: 14 }}>
+      <b>{d.candidats.length} bail{d.candidats.length > 1 ? 'x' : ''} en impayé dans Rivage sans dossier de suivi</b>
+      {d.candidats.map((c) => <div key={c.bail_id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+        <span>{(c.locataires || []).map((l) => l.nom).join(', ')} · {c.adresse} · impayé {euro(c.impaye)}{c.assureur_gli ? ' · GLI ' + c.assureur_gli : ''}</span>
+        {d.peut_saisir && <button className="btn" onClick={() => ouvrir(c.bail_id)}>Ouvrir un dossier</button>}</div>)}
+    </div>}
+    <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un dossier pour voir et modifier le suivi." detail={s && <DossierImpaye d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} />}>
+      {GROUPES_IMP.map(([g, titre, couleur]) => {
+        const items = dossiers.filter((x) => x.groupe === g);
+        const ouvert = ouverts[g] !== false;
+        return <section key={g} className="groupe-imp">
+          <button className="groupe-tete" style={{ color: couleur }} onClick={() => setOuverts({ ...ouverts, [g]: !ouvert })}>
+            {ouvert ? '▾' : '▸'} {titre} <span className="muted">{items.length} dossier{items.length > 1 ? 's' : ''}</span></button>
+          {ouvert && <div className="table-wrap" style={{ borderLeft: '4px solid ' + couleur, borderRadius: 8 }}><table className="table-imp">
+            <thead><tr><th>Dossier</th><th>Cause</th><th>Resp.</th><th>Notif. bailleur</th><th>Déclaré le</th><th>Garantie</th><th>Prise en charge</th><th>Montant</th><th>Indemnisation</th><th>Procédure</th><th>Audience</th></tr></thead>
+            <tbody>{items.map((x) => <tr key={x.id} className={'clic' + (sel === x.id ? ' sel' : '')} onClick={() => setSel(x.id)}>
+              <td><b>{(x.rivage?.bailleurs || []).map((b) => b.nom).join(', ') || '—'}</b> à <b>{(x.rivage?.locataires || []).map((l) => l.nom).join(', ')}</b>
+                <div className="muted">{x.rivage?.adresse} · bail {x.rivage?.reference}</div></td>
+              <td>{x.cause || '—'}</td>
+              <td>{x.responsable_prenom || '—'}</td>
+              <td><Etiquette v={x.notif_bailleur} /></td>
+              <td>{date(x.declaration_le)}</td>
+              <td>{x.garantie || x.rivage?.assureur_gli || '—'}</td>
+              <td><Etiquette v={x.prise_en_charge} /></td>
+              <td>{euro(x.montant_impaye)}</td>
+              <td><Etiquette v={x.indemnisation_recue} /></td>
+              <td>{x.procedure || '—'}</td>
+              <td>{date(x.audience_le)}</td>
+            </tr>)}
+            {!items.length && <tr><td colSpan="11" className="muted">Aucun dossier.</td></tr>}</tbody></table></div>}
+        </section>;
+      })}
+    </AvecDetail>
+  </>;
+}
+
+function DossierImpaye({ d, membres, peut, recharger }) {
+  const [err, setErr] = useState('');
+  const [action, setAction] = useState('');
+  const [actionLe, setActionLe] = useState('');
+  const r = d.rivage || {};
+  const maj = async (champ, valeur) => { setErr(''); try { await rpc('pilotage_impaye_maj', { p_id: d.id, p_champ: champ, p_valeur: valeur ?? '' }); recharger(); } catch (e) { setErr(e.message); } };
+  const champ = (cle, libelle, type = 'texte') => {
+    const v = d[cle];
+    let input;
+    if (!peut) input = <span>{type === 'date' ? date(v) : type === 'montant' ? euro(v) : v || '—'}</span>;
+    else if (LISTES_IMP[cle]) input = <select defaultValue={v || ''} onChange={(e) => maj(cle, e.target.value)}><option value="">—</option>{[...new Set([...LISTES_IMP[cle], ...(v ? [v] : [])])].map((o) => <option key={o}>{o}</option>)}</select>;
+    else if (type === 'date') input = <input type="date" defaultValue={v || ''} onBlur={(e) => e.target.value !== (v || '') && maj(cle, e.target.value)} />;
+    else if (type === 'montant') input = <input inputMode="decimal" defaultValue={v ?? ''} placeholder="0,00" onBlur={(e) => e.target.value !== String(v ?? '') && maj(cle, e.target.value)} />;
+    else input = <input defaultValue={v || ''} onBlur={(e) => e.target.value !== (v || '') && maj(cle, e.target.value)} />;
+    return <label key={cle + d.maj_le} className="champ-imp"><span>{libelle}</span>{input}</label>;
+  };
+  const ajouterAction = async () => { if (!action.trim()) return; try { await rpc('pilotage_impaye_action', { p_impaye: d.id, p_libelle: action, p_le: actionLe || null }); setAction(''); setActionLe(''); recharger(); } catch (e) { setErr(e.message); } };
+  const statutAction = async (a, st) => { try { await rpc('pilotage_impaye_action_statut', { p_action: a.id, p_statut: st }); recharger(); } catch (e) { setErr(e.message); } };
+  return <>
+    <div className="muted">Bail {r.reference} · {r.mandat} · dossier ouvert le {date(d.cree_le)}{d.maj_par ? ' · modifié par ' + d.maj_par + ' le ' + dateHeure(d.maj_le) : ''}</div>
+    <h2>{(r.bailleurs || []).map((b) => b.nom).join(', ') || 'Bailleur'} à {(r.locataires || []).map((l) => l.nom).join(', ')}</h2>
+    <div className="muted">{r.adresse} ({r.lot}) · {NATURE_LOT[r.nature_lot] || r.nature_lot || ''}</div>
+    {err && <div className="err">{err}</div>}
+    <div className="echeance"><div><b>Impayé selon Rivage</b><div className="muted">loyer {euro((r.loyer_hc || 0) + (r.charges || 0))} CC · dernier encaissement {euro(r.dernier_encaissement_montant)} le {date(r.dernier_encaissement)}</div></div>
+      <div className="echeance-n" style={{ color: r.impaye > 0 ? 'var(--red)' : 'var(--teal)' }}>{euro(r.impaye)}</div></div>
+    <h3>Contacts (Rivage)</h3>
+    <Champs items={[...(r.bailleurs || []).map((b, i) => ['Bailleur' + ((r.bailleurs || []).length > 1 ? ' ' + (i + 1) : ''), [civ(b.civilite), b.nom].filter(Boolean).join(' ') + (b.email ? ' · ' + b.email : '') + (b.tel ? ' · ' + b.tel : '')]),
+      ...(r.locataires || []).map((l, i) => ['Locataire' + ((r.locataires || []).length > 1 ? ' ' + (i + 1) : ''), [civ(l.civilite), l.nom].filter(Boolean).join(' ') + (l.tel ? ' · ' + l.tel : '') + (l.email ? ' · ' + l.email : '')]),
+      ['Assureur GLI (Rivage)', r.assureur_gli || 'aucun indiqué'], ['Dépôt de garantie', euro(r.depot)]]} />
+    <h3>Suivi</h3>
+    <div className="grille-champs">
+      {peut ? <label className="champ-imp"><span>Section</span><select defaultValue={d.groupe} key={'g' + d.maj_le} onChange={(e) => maj('groupe', e.target.value)}>{GROUPES_IMP.map(([g, t]) => <option key={g} value={g}>{t}</option>)}</select></label>
+        : <label className="champ-imp"><span>Section</span><span>{d.groupe}</span></label>}
+      {champ('cause', 'Cause du sinistre')}
+      {peut ? <label className="champ-imp"><span>Responsable</span><select defaultValue={d.responsable || ''} key={'r' + d.maj_le} onChange={(e) => maj('responsable', e.target.value)}><option value="">—</option>{membres.map((m) => <option key={m.user_id} value={m.user_id}>{m.prenom}</option>)}</select></label>
+        : <label className="champ-imp"><span>Responsable</span><span>{d.responsable_prenom || '—'}</span></label>}
+      {champ('notif_bailleur', 'Notification bailleur')}
+      {champ('declaration_le', 'Déclaré le', 'date')}
+      {champ('garantie', 'Garantie')}
+      {champ('prise_en_charge', 'Prise en charge')}
+      {champ('maj_assureur_le', 'MAJ dossier chez l’assureur', 'date')}
+      {champ('montant_impaye', 'Montant de l’impayé déclaré', 'montant')}
+      {champ('indemnisation_recue', 'Indemnisation reçue')}
+      {champ('indemnisation_montant', 'Montant de l’indemnisation', 'montant')}
+      {champ('indemnite_versee_bailleur', 'Indemnité versée au bailleur')}
+      {champ('dette_remb_loc', 'Dette remboursée par le locataire', 'montant')}
+      {champ('solde_a_rembourser_assureur', 'Solde à rembourser à l’assureur', 'montant')}
+      {champ('indemnisation_a_rembourser', 'Indemnisation à rembourser à l’assureur', 'montant')}
+      {champ('procedure', 'Procédure')}
+      {champ('commandement_le', 'Commandement de payer délivré le', 'date')}
+      {champ('audience_le', 'Date de l’audience', 'date')}
+    </div>
+    {peut ? <label className="champ-imp" style={{ marginTop: 8 }}><span>Observations</span><textarea rows="3" defaultValue={d.observations || ''} key={'o' + d.maj_le} onBlur={(e) => e.target.value !== (d.observations || '') && maj('observations', e.target.value)} /></label>
+      : d.observations && <p>{d.observations}</p>}
+    <h3>Actions</h3>
+    <ol className="histo">{d.actions.map((a) => <li key={a.id}><span className="muted">{date(a.le)}</span><span style={{ flex: 1 }}>{a.libelle}{a.par ? <span className="muted"> · {a.par}</span> : ''}</span>
+      {peut ? <select value={a.statut} onChange={(e) => statutAction(a, e.target.value)}>{['À faire', 'En cours', 'Fait'].map((o) => <option key={o}>{o}</option>)}</select> : <span>{a.statut}</span>}</li>)}
+      {!d.actions.length && <li className="muted">Aucune action notée.</li>}</ol>
+    {peut && <div className="form" style={{ marginTop: 8 }}>
+      <label style={{ flex: 1 }}>Nouvelle action<input value={action} onChange={(e) => setAction(e.target.value)} placeholder="Ex. envoyer le décompte mensuel à l’assureur" /></label>
+      <label>Pour le<input type="date" value={actionLe} onChange={(e) => setActionLe(e.target.value)} /></label>
+      <button className="btn plein" onClick={ajouterAction}>Ajouter</button></div>}
+    <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={r.lien} target="_blank" rel="noreferrer">Ouvrir le bail dans Rivage</a></div>
   </>;
 }

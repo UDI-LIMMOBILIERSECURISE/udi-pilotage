@@ -1,0 +1,98 @@
+// Mise à jour du reflet pilotage depuis l'API Rivage (lecture seule).
+// Appelée chaque nuit par pg_cron (en-tête x-pilotage-cron) ou à la demande par la direction (jeton de session).
+// Complète les webhooks : rattrape ce qui n'a pas été envoyé et les objets créés avant leur mise en place.
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+
+const RIVAGE = 'https://rivage.immo'
+const ORIGINES = ['https://udi-pilotage.vercel.app', 'http://localhost:5173', 'http://localhost:4173']
+
+// Modèle Rivage -> chemin API. Ordre : référentiels d'abord.
+const MODELES: [string, string][] = [
+  ['GliProvider', '/api/v1/gli_providers'],
+  ['ManagementContract', '/api/v1/management_contracts'],
+  ['AssetGroup', '/api/v1/asset_groups'],
+  ['Asset', '/api/v1/assets'],
+  ['LeasingContract', '/api/v1/leasing_contracts'],
+  ['Profile', '/api/v1/profiles'],
+  ['Incident', '/api/v1/incidents'],
+  ['AccountingEventGroup', '/api/v1/accounting_event_groups'],
+  ['AccountingAccount', '/api/v1/accounting_accounts'],
+]
+
+// Données personnelles : on ne garde que ce qui sert au suivi (identité, e-mail, téléphone).
+const PERSONNE = ['id', 'nature', 'civility', 'first_name', 'last_name', 'company_name', 'email', 'phone_number', 'reference']
+const garder = (o: Record<string, unknown>, cles: string[]) => Object.fromEntries(cles.filter((k) => k in o).map((k) => [k, o[k]]))
+
+function nettoyer(modele: string, o: Record<string, unknown>) {
+  if (modele === 'Profile') return garder(o, PERSONNE)
+  if (modele === 'LeasingContract') {
+    o.tenants = ((o.tenants as Record<string, unknown>[]) || []).map((t) => garder(t, PERSONNE))
+    o.guarantors = ((o.guarantors as Record<string, unknown>[]) || []).map((g) => ({ id: g.id }))
+  }
+  return o
+}
+
+function cors(req: Request) {
+  const o = req.headers.get('origin') || ''
+  return {
+    'Access-Control-Allow-Origin': ORIGINES.includes(o) ? o : ORIGINES[0],
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  }
+}
+
+Deno.serve(async (req) => {
+  const h = { ...cors(req), 'Content-Type': 'application/json' }
+  const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: h })
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors(req) })
+  if (req.method !== 'POST') return rep(405, { error: 'Méthode non autorisée' })
+
+  const url = Deno.env.get('SUPABASE_URL')!
+  const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+
+  // Qui appelle : la tâche planifiée (secret partagé) ou un membre de la direction
+  let declencheur = 'cron'
+  const enteteCron = req.headers.get('x-pilotage-cron')
+  // Le secret de la tâche planifiée est dans le coffre (Vault) de la base : vérification côté base
+  const cronValide = enteteCron ? (await service.rpc('pilotage_cron_valide', { p_secret: enteteCron })).data === true : false
+  if (!cronValide) {
+    const auth = req.headers.get('Authorization')
+    if (!auth) return rep(401, { error: 'Non autorisé' })
+    const utilisateur = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } })
+    const { data: moi } = await utilisateur.rpc('pilotage_moi')
+    if (!moi || moi.role !== 'direction') return rep(403, { error: 'Réservé à la direction' })
+    declencheur = moi.prenom
+  }
+
+  const cle = Deno.env.get('RIVAGE_API_KEY')
+  if (!cle) return rep(500, { error: 'Clé API Rivage non configurée (secret RIVAGE_API_KEY)' })
+
+  const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur })
+  const compteurs: Record<string, number> = {}
+  try {
+    for (const [modele, chemin] of MODELES) {
+      let page = 1, total = 1, n = 0
+      while (page <= total) {
+        const r = await fetch(`${RIVAGE}${chemin}?page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
+        if (!r.ok) throw new Error(`${modele} page ${page} : HTTP ${r.status}`)
+        const j = await r.json()
+        total = j.pagination?.total_pages || 1
+        const lot = (j.data || []).map((o: Record<string, unknown>) => nettoyer(modele, o))
+        if (lot.length) {
+          const { error } = await service.rpc('pilotage_sync_appliquer', { p_modele: modele, p_objets: lot })
+          if (error) throw new Error(`${modele} : ${error.message}`)
+        }
+        n += lot.length
+        page++
+      }
+      compteurs[modele] = n
+    }
+    await service.rpc('pilotage_sync_fin', { p_id: syncId, p_compteurs: compteurs, p_erreur: null })
+    return rep(200, { ok: true, compteurs })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await service.rpc('pilotage_sync_fin', { p_id: syncId, p_compteurs: compteurs, p_erreur: msg })
+    return rep(500, { error: msg, compteurs })
+  }
+})
