@@ -115,3 +115,9 @@ h3 { font-size: 14px; margin: 16px 0 6px; color: var(--ink2); }
 .resume-ia p { margin: 6px 0; line-height: 1.5; }
 .resume-ia-titre { font-weight: 700; color: #0B4F45; font-size: 13px; }
 .lien { background: none; border: 0; color: var(--teal); cursor: pointer; font-size: 12px; text-decoration: underline; padding: 4px; }
+.situ { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #EEF1F4; color: var(--ink2); }
+.situ.occupe { background: var(--teal-bg); color: var(--teal); }
+.situ.libre { background: var(--blue-bg); color: var(--blue); }
+.situ.conge { background: var(--amber-bg); color: var(--amber); }
+.situ.attente_dg { background: var(--amber-bg); color: var(--amber); }
+.situ.attente_dg.critique, .situ.critique { background: var(--red-bg); color: #8F1B13; }

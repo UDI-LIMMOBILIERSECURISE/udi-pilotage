@@ -437,6 +437,9 @@ function Sinistres() {
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un incident pour voir le détail." detail={s && <>
       <div className="muted">Incident n°{s.numero} · {ST_INC[s.statut] || s.statut}</div>
       <h2>{s.titre}</h2>
+      {s.situation && <div className={'mini-alerte ' + s.situation.gravite}><b>Situation du bien : {s.situation.libelle}</b>
+        <div>{s.situation.detail}{s.situation.bail ? ' Bail ' + s.situation.bail + '.' : ''}</div>
+        {s.mandat_statut && <div className="muted">{s.mandat_statut}</div>}</div>}
       <ResumeIA type="sinistre" id={s.id} />
       {s.description && <p>{s.description}</p>}
       <Champs items={[['Type', TYPE_INC[s.type] || s.type], ['Urgence', (URG[s.urgence] || [s.urgence])[0]], ['Lot', s.adresse ? `${s.adresse} (${s.lot})` : 'Immeuble, pas de lot précis'],
@@ -456,6 +459,8 @@ function Sinistres() {
             <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">#{x.numero} · {TYPE_INC[x.type] || x.type}</span><span className={'sev ' + u[1]}>{u[0]}</span></div>
             <div className="kcarte-titre">{x.titre}</div>
             <div className="muted">{x.adresse || 'Immeuble, pas de lot précis'}</div>
+            {x.situation && <div style={{ marginTop: 6 }}><span className={'situ ' + x.situation.code + ' ' + x.situation.gravite}>{x.situation.libelle}</span>
+              {x.mandat_statut && x.mandat_statut !== 'Mandat actif' && <span className="situ critique" style={{ marginLeft: 6 }}>{x.mandat_statut}</span>}</div>}
             <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Locataire</span><span>{x.locataires || '—'}</span><span className="muted">Mandat</span><span>{x.mandat || '—'}</span></div>
             <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
               <span style={{ fontSize: 12, color: x.prestataires || x.clos ? 'var(--ink2)' : 'var(--red)' }}>{x.prestataires ? x.prestataires + ' prestataire(s)' : x.clos ? 'Clos le ' + date(x.resolu_le) : 'Sans prestataire'}</span>
