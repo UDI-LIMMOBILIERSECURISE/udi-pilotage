@@ -755,7 +755,7 @@ function Impayes() {
     <div className="entete"><div><h1>Suivi des impayés</h1>
       <p className="sub">Un dossier par impayé : garantie, prise en charge, procédure, indemnisation et remboursements, avec le fil des échanges.</p></div>
       <input className="recherche" placeholder="Rechercher un locataire, un bailleur, une adresse…" value={recherche} onChange={(e) => setRecherche(e.target.value)} /></div>
-    <Tuiles items={[[actifs.length, 'Dossiers en cours'], [euro(somme('montant_impaye')), 'Montant des impayés en cours'],
+    <Tuiles items={[[actifs.length, 'Dossiers en cours'], [euro(somme('montant_impaye')), `Montant saisi · ${actifs.filter((x) => x.montant_impaye != null).length} dossier(s) sur ${actifs.length} renseigné(s)`],
       [actifs.filter((x) => !x.declaration_le).length, 'Sans date de déclaration', true],
       [actifs.filter((x) => x.audience_le && x.audience_le >= auj()).length, 'Audiences à venir'],
       [euro(somme('solde_a_rembourser_assureur')), 'Solde à rembourser à l’assureur']]} />
