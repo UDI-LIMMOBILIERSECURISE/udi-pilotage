@@ -138,3 +138,11 @@ tr.sel td { background: #EEF4FA; }
 .champ-imp input, .champ-imp select, .champ-imp textarea { font-size: 13px; padding: 6px 8px; border: 1px solid #C9D3DC; border-radius: 6px; color: var(--ink); min-height: 34px; font-family: inherit; }
 .champ-imp > span:last-child:not(:first-child) { color: var(--ink); font-size: 13px; }
 @media (max-width: 640px) { .grille-champs { grid-template-columns: 1fr; } .recherche { min-width: 0; width: 100%; } }
+.etq { max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.etq.violet { background: #A25DDC; } .etq.vert { background: #037F4C; }
+.import-monday { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; font-size: 13px; }
+.import-monday label.btn { cursor: pointer; }
+.note { border-top: 1px solid #EEF1F4; padding: 8px 0; font-size: 13px; }
+.note.reponse { margin-left: 18px; border-top: 1px dashed #E3E8ED; padding: 6px 0 0; }
+.note-texte { white-space: pre-wrap; margin-top: 3px; color: var(--ink); }
+.saisie-note { width: 100%; padding: 8px; border: 1px solid #C9D3DC; border-radius: 8px; font-family: inherit; font-size: 13px; }
