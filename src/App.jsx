@@ -382,7 +382,7 @@ function ResumeIA({ type, id }) {
     </div>
     {etat.charge ? <p className="muted">Analyse du dossier en cours…</p>
       : etat.err ? <p className="muted">{etat.err}</p>
-      : <><p>{etat.texte}</p><div className="muted">Généré le {dateHeure(etat.genere_le)} à partir des seules données Rivage du dossier. À vérifier avant toute décision.</div></>}
+      : <><p>{etat.texte}</p><div className="muted">Généré le {dateHeure(etat.genere_le)} à partir des seules données du dossier{type === 'impaye' ? ' et de ses échanges' : ''}. À vérifier avant toute décision.</div></>}
   </div>;
 }
 
