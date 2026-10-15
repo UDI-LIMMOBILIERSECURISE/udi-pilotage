@@ -773,7 +773,7 @@ function Impayes() {
       {[...GROUPES_IMP, ...autres].map(([g, titre, couleur]) => {
         const items = dossiers.filter((x) => x.groupe === g);
         if (!items.length && q) return null;
-        const ouvert = ouverts[g] !== false;
+        const ouvert = ouverts[g] ?? items.length > 0;
         return <section key={g} className="groupe-imp">
           <button className="groupe-tete" style={{ color: couleur }} onClick={() => setOuverts({ ...ouverts, [g]: !ouvert })}>
             {ouvert ? '▾' : '▸'} {titre} <span className="muted">{items.length} dossier{items.length > 1 ? 's' : ''}</span></button>
