@@ -841,14 +841,16 @@ function Commentaires({ id, peut, recharger }) {
   const [notes, setNotes] = useState(null);
   const [texte, setTexte] = useState('');
   const [err, setErr] = useState('');
+  const [tout, setTout] = useState(false);
   const lire = () => rpc('pilotage_impaye_notes', { p_impaye: id }).then(setNotes).catch((e) => setErr(e.message));
   useEffect(() => { lire(); }, [id]);
   const envoyer = async () => { if (!texte.trim()) return; try { await rpc('pilotage_impaye_note', { p_impaye: id, p_contenu: texte }); setTexte(''); lire(); recharger(); } catch (e) { setErr(e.message); } };
   if (!notes) return <p className="muted">Chargement des échanges…</p>;
-  const racines = notes.filter((n) => !n.parent_id);
+  const toutes = notes.filter((n) => !n.parent_id);
+  const racines = tout ? toutes : toutes.slice(0, 3);
   const reponses = (n) => notes.filter((r) => r.parent_id === n.id).sort((a, b) => a.le.localeCompare(b.le));
   return <>
-    <h3>Échanges ({notes.length})</h3>
+    <h3>Échanges ({notes.length}) <span className="muted" style={{ fontWeight: 400 }}>· les 3 derniers, le résumé IA en haut de la fiche couvre tout le fil</span></h3>
     {err && <div className="err">{err}</div>}
     {peut && <div style={{ marginBottom: 10 }}><textarea className="saisie-note" rows="3" placeholder="Écrire une mise à jour…" value={texte} onChange={(e) => setTexte(e.target.value)} />
       <button className="btn plein" onClick={envoyer} style={{ marginTop: 6 }}>Publier</button></div>}
@@ -857,6 +859,7 @@ function Commentaires({ id, peut, recharger }) {
       <div className="note-texte">{n.contenu}</div>
       {reponses(n).map((r) => <div key={r.id} className="note reponse"><div className="muted"><b>{r.auteur || '—'}</b> · {dateHeure(r.le)}</div><div className="note-texte">{r.contenu}</div></div>)}
     </div>)}
+    {toutes.length > 3 && <button className="btn gris" style={{ marginTop: 8 }} onClick={() => setTout(!tout)}>{tout ? 'Ne garder que les 3 derniers' : `Voir les ${toutes.length - 3} échanges plus anciens`}</button>}
     {!notes.length && <p className="muted">Aucun échange.</p>}
   </>;
 }
@@ -886,6 +889,7 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     <h2>{p.titre}</h2>
     <div className="muted">{p.adresse}{r ? ` (${r.lot}) · ${NATURE_LOT[r.nature_lot] || r.nature_lot || ''}` : d.nature_bien ? ' · ' + d.nature_bien : ''}</div>
     {err && <div className="err">{err}</div>}
+    <ResumeIA type="impaye" id={d.id} />
     <SuggestionsBail d={d} peut={peut} recharger={recharger} />
     {r && <div className="echeance"><div><b>Impayé selon Rivage</b><div className="muted">loyer {euro((r.loyer_hc || 0) + (r.charges || 0))} CC · dernier encaissement {euro(r.dernier_encaissement_montant)} le {date(r.dernier_encaissement)}</div></div>
       <div className="echeance-n" style={{ color: r.impaye > 0 ? 'var(--red)' : 'var(--teal)' }}>{euro(r.impaye)}</div></div>}

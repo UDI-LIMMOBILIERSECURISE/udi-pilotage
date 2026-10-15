@@ -11,6 +11,7 @@ const SOURCES: Record<string, { rpc: string; cle: string; liste?: string }> = {
   dg: { rpc: 'pilotage_dg', cle: 'bail_id' },
   compta: { rpc: 'pilotage_compta', cle: 'id', liste: 'periodes' },
   alerte: { rpc: 'pilotage_agence', cle: 'id' },
+  impaye: { rpc: 'pilotage_impayes', cle: 'id', liste: 'dossiers' },
 }
 
 const CONSIGNES: Record<string, string> = {
@@ -18,6 +19,7 @@ const CONSIGNES: Record<string, string> = {
   dg: "Il s'agit d'un dossier de sortie de locataire et de restitution du dépôt de garantie. Rappel légal : restitution sous 1 mois après remise des clés si l'état des lieux de sortie est conforme à celui d'entrée, 2 mois sinon (loi du 6 juillet 1989, art. 22), majoration de 10 % du loyer HC par mois de retard commencé. Signification des champs : fin = date de fin du bail (sert de date de référence, la date réelle de remise des clés n'est pas connue) ; restitution_creee = une restitution du dépôt a été créée dans Rivage ; validee = cette restitution a été validée dans Rivage (cela ne dit RIEN de l'état des lieux) ; remboursee = le dépôt a été remboursé ; incidents = incidents techniques liés au bail, a_charge = qui les paie. La conformité de l'état des lieux de sortie n'est pas connue : ne la déduis jamais, cite les deux échéances possibles (limite_1_mois et limite_2_mois).",
   compta: "Il s'agit de la situation comptable d'un locataire sur une période de loyer (montants en euros). solde = reçu − dû : négatif = impayé, positif = trop-perçu.",
   alerte: "Il s'agit d'une alerte de contrôle automatique sur un dossier de gestion locative.",
+  impaye: "Il s'agit d'un dossier de suivi d'impayé locatif (garantie loyers impayés GLI Zelok ou Mila, caution, huissier, avocat). Les champs du dossier viennent du tableau de suivi de l'agence ; echanges contient le fil des mises à jour de l'équipe (repris de Monday puis saisis dans le pilotage), du plus récent au plus ancien ; rivage contient les données du bail si le dossier y est rattaché. Résume en 4 à 6 phrases : où en est le dossier (garantie, prise en charge, indemnisation, procédure, audience), les montants connus, ce qui s'est passé de marquant dans les échanges (avec les dates), ce qui est en attente et qui doit agir. Ne recopie pas les échanges, synthétise-les.",
 }
 
 const SYSTEME = `Tu es l'assistant de supervision d'une agence de gestion locative française (UDI Gestion).
@@ -71,6 +73,14 @@ Deno.serve(async (req) => {
   const liste = (src.liste ? data?.[src.liste] : data) || []
   const dossier = liste.find((x: Record<string, unknown>) => String(x[src.cle]) === String(corps.id))
   if (!dossier) return rep(404, { error: 'Dossier introuvable ou non visible' })
+  if (corps.type === 'impaye') {
+    const { data: notes } = await utilisateur.rpc('pilotage_impaye_notes', { p_impaye: Number(corps.id) })
+    // Fil des échanges, du plus récent au plus ancien, limité pour rester lisible par l'IA
+    let total = 0
+    dossier.echanges = (notes || []).filter((n: { contenu: string }) => { total += (n.contenu || '').length; return total < 30000 })
+      .map((n: { le: string; auteur: string; contenu: string; parent_id: number | null }) => ({ le: n.le, auteur: n.auteur, reponse: !!n.parent_id, texte: n.contenu }))
+    delete dossier.actions_internes
+  }
   if (corps.type === 'compta') dossier.compte_locataire = (data?.comptes || []).filter((c: Record<string, unknown>) => c.bail_id === dossier.bail_id)
 
   const contenu = JSON.stringify(dossier)
@@ -94,7 +104,7 @@ Deno.serve(async (req) => {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: m, max_tokens: 600, temperature: 0, system: SYSTEME, messages: [{ role: 'user', content: message }] }),
+      body: JSON.stringify({ model: m, max_tokens: 900, temperature: 0, system: SYSTEME, messages: [{ role: 'user', content: message }] }),
     })
     if (r.ok) {
       const j = await r.json()
