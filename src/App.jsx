@@ -735,6 +735,8 @@ function Impayes() {
   const [ouverts, setOuverts] = useState({ 'Clôturé': false });
   const [recherche, setRecherche] = useState('');
   const [moi, setMoi] = useState(null);
+  const [vue, setVue] = useState(() => { try { return localStorage.getItem('vue-impayes') || 'cartes'; } catch { return 'cartes'; } });
+  const changerVue = (v) => { setVue(v); try { localStorage.setItem('vue-impayes', v); } catch { /* stockage indisponible */ } };
   const charger = () => rpc('pilotage_impayes').then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); rpc('pilotage_moi').then(setMoi).catch(() => {}); }, []);
   if (err) return <div className="banner">{err}</div>;
@@ -756,7 +758,11 @@ function Impayes() {
       [actifs.filter((x) => !x.declaration_le).length, 'Sans date de déclaration', true],
       [actifs.filter((x) => x.audience_le && x.audience_le >= auj()).length, 'Audiences à venir'],
       [euro(somme('solde_a_rembourser_assureur')), 'Solde à rembourser à l’assureur']]} />
-    {moi?.role === 'direction' && <ImportMonday membres={d.membres} apres={charger} />}
+    <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+      <div className="bascule">{[['cartes', 'Cartes'], ['tableau', 'Tableau']].map(([k, l]) => <button key={k} className={vue === k ? 'on' : ''} onClick={() => changerVue(k)}>{l}</button>)}</div>
+      {moi?.role === 'direction' && <ImportMonday membres={d.membres} apres={charger} />}
+    </div>
+    {d.peut_saisir && <Rapprochement apres={charger} />}
     {d.candidats.length > 0 && <div className="mini-alerte haute" style={{ marginBottom: 14 }}>
       <b>{d.candidats.length} bail{d.candidats.length > 1 ? 'x' : ''} en impayé dans Rivage sans dossier de suivi</b>
       {d.candidats.map((c) => <div key={c.bail_id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
@@ -771,7 +777,10 @@ function Impayes() {
         return <section key={g} className="groupe-imp">
           <button className="groupe-tete" style={{ color: couleur }} onClick={() => setOuverts({ ...ouverts, [g]: !ouvert })}>
             {ouvert ? '▾' : '▸'} {titre} <span className="muted">{items.length} dossier{items.length > 1 ? 's' : ''}</span></button>
-          {ouvert && <div className="table-wrap" style={{ borderLeft: '4px solid ' + couleur, borderRadius: 8 }}><table className="table-imp">
+          {ouvert && vue === 'cartes' && <div className="grille-imp">
+            {items.map((x) => <CarteImpaye key={x.id} x={x} couleur={couleur} sel={sel === x.id} choisir={() => setSel(x.id)} />)}
+            {!items.length && <div className="muted" style={{ padding: 8 }}>Aucun dossier.</div>}</div>}
+          {ouvert && vue === 'tableau' && <div className="table-wrap" style={{ borderLeft: '4px solid ' + couleur, borderRadius: 8 }}><table className="table-imp">
             <thead><tr><th>Dossier</th><th>Cause</th><th>Personne</th><th>Notif. bailleur</th><th>Déclaré le</th><th>Garantie</th><th>Prise en charge</th><th>Montant</th><th>Indemnisation</th><th>Indemnité bailleur</th><th>Procédure</th><th>Audience</th><th>Échanges</th></tr></thead>
             <tbody>{items.map((x) => { const p = parties(x);
               return <tr key={x.id} className={'clic' + (sel === x.id ? ' sel' : '')} onClick={() => setSel(x.id)}>
@@ -877,6 +886,7 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     <h2>{p.titre}</h2>
     <div className="muted">{p.adresse}{r ? ` (${r.lot}) · ${NATURE_LOT[r.nature_lot] || r.nature_lot || ''}` : d.nature_bien ? ' · ' + d.nature_bien : ''}</div>
     {err && <div className="err">{err}</div>}
+    <SuggestionsBail d={d} peut={peut} recharger={recharger} />
     {r && <div className="echeance"><div><b>Impayé selon Rivage</b><div className="muted">loyer {euro((r.loyer_hc || 0) + (r.charges || 0))} CC · dernier encaissement {euro(r.dernier_encaissement_montant)} le {date(r.dernier_encaissement)}</div></div>
       <div className="echeance-n" style={{ color: r.impaye > 0 ? 'var(--red)' : 'var(--teal)' }}>{euro(r.impaye)}</div></div>}
     <h3>Contacts {r ? '(Rivage)' : ''}</h3>
@@ -927,4 +937,61 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     {r && <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={r.lien} target="_blank" rel="noreferrer">Ouvrir le bail dans Rivage</a></div>}
     <Commentaires id={d.id} peut={peut} recharger={recharger} />
   </>;
+}
+
+
+function CarteImpaye({ x, couleur, sel, choisir }) {
+  const p = parties(x);
+  const statuts = [['Garantie', x.garantie], ['Prise en charge', x.prise_en_charge], ['Indemnisation', x.indemnisation_recue], ['Indemnité bailleur', x.indemnite_versee_bailleur]];
+  return <button className={'carte-imp' + (sel ? ' sel' : '')} style={{ borderLeftColor: couleur }} onClick={choisir}>
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
+      <span className="carte-imp-titre">{p.titre}</span>
+      {x.montant_impaye != null && <span className="carte-imp-montant">{euro(x.montant_impaye)}</span>}
+    </div>
+    <div className="muted">{[p.adresse, x.cause].filter(Boolean).join(' · ') || '—'}</div>
+    <div className="carte-imp-statuts">{statuts.map(([l, v]) => <div key={l}><span className="muted">{l}</span><Etiquette v={v} /></div>)}</div>
+    <div className="carte-imp-pied">
+      <span>{x.intervenants || x.responsable_prenom || 'Personne'}</span>
+      <span>{x.declaration_le ? 'Déclaré ' + date(x.declaration_le) : 'Non déclaré'}</span>
+      {x.audience_le && <span className="carte-imp-audience">Audience {date(x.audience_le)}</span>}
+      {x.procedure && <span>{x.procedure}</span>}
+      <span>{x.nb_notes ? `💬 ${x.nb_notes} · ${date(x.derniere_note)}` : '💬 0'}</span>
+      {x.bail_id ? <span className="lie">Rivage ✓</span> : null}
+    </div>
+  </button>;
+}
+
+// Rapprochement des dossiers non rattachés avec les baux Rivage (propositions à valider)
+function Rapprochement({ apres }) {
+  const [liste, setListe] = useState(null);
+  const [ouvert, setOuvert] = useState(false);
+  const lire = () => rpc('pilotage_impayes_rapprochement').then(setListe).catch(() => setListe([]));
+  useEffect(() => { lire(); }, []);
+  if (!liste || !liste.length) return null;
+  const rattacher = async (id, bail) => { await rpc('pilotage_impaye_maj', { p_id: id, p_champ: 'bail_id', p_valeur: bail }); lire(); apres(); };
+  const sures = liste.filter((x) => x.score >= 0.8);
+  return <div className="mini-alerte" style={{ marginBottom: 14 }}>
+    <div className="row" style={{ justifyContent: 'space-between' }}>
+      <b>{liste.length} dossier{liste.length > 1 ? 's' : ''} correspond{liste.length > 1 ? 'ent' : ''} probablement à un bail Rivage</b>
+      <span>{sures.length > 0 && <button className="btn" onClick={async () => { for (const x of sures) await rpc('pilotage_impaye_maj', { p_id: x.id, p_champ: 'bail_id', p_valeur: x.bail_id }); lire(); apres(); }}>Rattacher les {sures.length} sûrs (≥ 80 %)</button>}
+        <button className="lien" onClick={() => setOuvert(!ouvert)}>{ouvert ? 'Masquer' : 'Voir les propositions'}</button></span>
+    </div>
+    {ouvert && liste.map((x) => <div key={x.id} className="row" style={{ justifyContent: 'space-between', marginTop: 6, gap: 8 }}>
+      <span><b>{x.titre}</b> → bail {x.reference} · {x.bailleurs} à {x.locataires} · {x.adresse} <span className="muted">({Math.round(x.score * 100)} %)</span></span>
+      <button className="btn" onClick={() => rattacher(x.id, x.bail_id)}>Rattacher</button></div>)}
+  </div>;
+}
+
+function SuggestionsBail({ d, peut, recharger }) {
+  const [sug, setSug] = useState(null);
+  useEffect(() => { if (!d.bail_id) rpc('pilotage_impaye_suggestions', { p_impaye: d.id }).then(setSug).catch(() => setSug([])); }, [d.id, d.bail_id]);
+  const maj = async (v) => { await rpc('pilotage_impaye_maj', { p_id: d.id, p_champ: 'bail_id', p_valeur: v }); recharger(); };
+  if (d.bail_id) return peut ? <div className="muted" style={{ marginTop: 4 }}>Rattaché au bail Rivage {d.rivage?.reference} · <button className="lien" onClick={() => maj('')}>détacher</button></div> : null;
+  return <div className="mini-alerte" style={{ marginTop: 10 }}>
+    <b>Pas encore rattaché à un bail Rivage</b>
+    {sug === null ? <div className="muted">Recherche…</div> : !sug.length ? <div className="muted">Aucun bail Rivage ressemblant (normal tant que vos baux réels ne sont pas dans Rivage).</div>
+      : sug.map((x) => <div key={x.bail_id} className="row" style={{ justifyContent: 'space-between', marginTop: 6, gap: 8 }}>
+        <span>Bail {x.reference} · {x.bailleurs} à {x.locataires} · {x.adresse} <span className="muted">({Math.round(x.score * 100)} %)</span></span>
+        {peut && <button className="btn" onClick={() => maj(x.bail_id)}>Rattacher</button>}</div>)}
+  </div>;
 }
