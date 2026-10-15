@@ -111,3 +111,7 @@ h3 { font-size: 14px; margin: 16px 0 6px; color: var(--ink2); }
 .mini-alerte.haute { background: var(--amber-bg); color: var(--amber); }
 .mini-alerte.critique { background: var(--red-bg); color: #8F1B13; }
 @media (max-width: 900px) { .zone-detail { position: static; max-height: none; } .champs { grid-template-columns: 110px 1fr; } }
+.resume-ia { background: #E6F2EF; border: 1px solid #B9DDD3; border-radius: 10px; padding: 10px 12px; margin: 12px 0; font-size: 13.5px; color: #0B3F37; }
+.resume-ia p { margin: 6px 0; line-height: 1.5; }
+.resume-ia-titre { font-weight: 700; color: #0B4F45; font-size: 13px; }
+.lien { background: none; border: 0; color: var(--teal); cursor: pointer; font-size: 12px; text-decoration: underline; padding: 4px; }

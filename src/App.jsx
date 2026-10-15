@@ -359,6 +359,29 @@ function AvecDetail({ children, detail, fermer, vide, cle }) {
   </div>;
 }
 
+function ResumeIA({ type, id }) {
+  const [etat, setEtat] = useState({ charge: true });
+  const demander = (forcer) => {
+    setEtat((e) => ({ ...e, charge: true, err: '' }));
+    supabase.functions.invoke('pilotage-resume', { body: { type, id, forcer } })
+      .then(({ data, error }) => {
+        if (error || !data?.texte) setEtat({ err: 'Résumé indisponible pour le moment.' });
+        else setEtat({ ...data });
+      })
+      .catch(() => setEtat({ err: 'Résumé indisponible pour le moment.' }));
+  };
+  useEffect(() => { demander(false); }, [type, id]);
+  return <div className="resume-ia">
+    <div className="row" style={{ justifyContent: 'space-between' }}>
+      <span className="resume-ia-titre">✦ Résumé IA</span>
+      {!etat.charge && <button className="lien" onClick={() => demander(true)}>Actualiser</button>}
+    </div>
+    {etat.charge ? <p className="muted">Analyse du dossier en cours…</p>
+      : etat.err ? <p className="muted">{etat.err}</p>
+      : <><p>{etat.texte}</p><div className="muted">Généré le {dateHeure(etat.genere_le)} à partir des seules données Rivage du dossier. À vérifier avant toute décision.</div></>}
+  </div>;
+}
+
 function Champs({ items }) {
   return <dl className="champs">{items.filter((x) => x).map(([k, v]) => <React.Fragment key={k}><dt>{k}</dt><dd>{v ?? '—'}</dd></React.Fragment>)}</dl>;
 }
@@ -414,6 +437,7 @@ function Sinistres() {
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un incident pour voir le détail." detail={s && <>
       <div className="muted">Incident n°{s.numero} · {ST_INC[s.statut] || s.statut}</div>
       <h2>{s.titre}</h2>
+      <ResumeIA type="sinistre" id={s.id} />
       {s.description && <p>{s.description}</p>}
       <Champs items={[['Type', TYPE_INC[s.type] || s.type], ['Urgence', (URG[s.urgence] || [s.urgence])[0]], ['Lot', s.adresse ? `${s.adresse} (${s.lot})` : 'Immeuble, pas de lot précis'],
         ['Locataire', s.locataires], ['Bail', s.bail], ['Mandat', s.mandat], s.bailleur && ['Bailleur', s.bailleur], ['Déclaré le', date(s.declare_le)],
@@ -489,6 +513,7 @@ function SortiesDG() {
         <div className="muted">Bail {s.reference} · <span className={'sev ' + e[1]}>{e[0]}</span></div>
         <h2>{s.locataires}</h2>
         <div className="muted">{s.adresse} ({s.lot}) · {s.mandat}</div>
+        <ResumeIA type="dg" id={s.bail_id} />
         <div className="echeance"><div><b>{s.parti ? 'Restitution au plus tard' : 'Départ prévu'}</b>
           <div className="muted">{s.parti ? 'le ' + date(s.limite_1_mois) + ' si EDL conforme, le ' + date(s.limite_2_mois) + ' sinon' : 'fin du bail'}</div></div>
           <div className="echeance-n">{s.parti ? (jours(s) >= 0 ? 'J-' + jours(s) : 'J+' + -jours(s)) : date(s.fin)}</div></div>
@@ -547,6 +572,7 @@ function Compta() {
         <div className="muted">Bail {s.reference} · période du {date(s.periode)} au {date(s.periode_fin)}</div>
         <h2>{s.locataires}</h2>
         <div className="muted">{s.adresse} ({s.lot}) · {s.mandat}</div>
+        <ResumeIA type="compta" id={s.id} />
         <div className="echeance"><div><b>{s.solde < 0 ? 'Reste dû par le locataire' : s.solde > 0 ? 'Trop-perçu à régulariser' : 'Période soldée'}</b>
           <div className="muted">reçu − dû sur la période</div></div><div className="echeance-n" style={{ color: s.solde < 0 ? 'var(--red)' : s.solde > 0 ? 'var(--amber)' : 'var(--teal)' }}>{s.solde > 0 ? '+' : ''}{euro(s.solde)}</div></div>
         {s.solde > 0 && s.statut_bail === 'move_out' && s.appele < s.loyer_hc + s.charges &&
@@ -605,6 +631,7 @@ function Agence() {
       <div className="muted">{s.domaine} · {CAT[s.categorie] || s.categorie} · <span className={'sev ' + s.gravite}>{SEV[s.gravite]}</span></div>
       <h2>{s.libelle}</h2>
       <p><b>{s.titre}</b></p>
+      <ResumeIA type="alerte" id={s.id} />
       {s.detail && <p>{s.detail}</p>}
       {s.explication && <div className="info">{s.explication}</div>}
       <Champs items={[['Mandat', s.mandat], ['Qui', s.qui], ['Détectée le', dateHeure(s.depuis)]]} />
