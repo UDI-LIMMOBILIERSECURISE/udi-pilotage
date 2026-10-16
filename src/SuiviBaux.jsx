@@ -282,6 +282,8 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
   const [lecture, setLecture] = useState({ charge: false, err: '' });
   useEffect(() => { setOuvert(!c.go_le); }, [b.bail_id]);
   const manquants = c.items.filter((i) => i.bloc === 'pieces' && i.statut !== 'ok' && i.statut !== 'sans_objet').map((i) => i.libelle);
+  // Écarts détectés (Rivage vide, différence avec le bail lu, incohérence légale) : restent visibles même une fois répondus.
+  const ecarts = c.items.filter((i) => i.auto === 'anomalie' && i.bloc !== 'pieces');
   const lire = async (fichier) => {
     setLecture({ charge: true, err: '' });
     let body = { bail_id: b.bail_id };
@@ -311,10 +313,19 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
       </div>}
       {lecture.err && <div className="err">{lecture.err}</div>}
     </div>
+    {ecarts.length > 0 && <div className="mini-alerte critique">
+      <b>⚠ {ecarts.length} écart(s) détecté(s) entre le bail, Rivage et la loi</b>
+      <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{ecarts.map((i) => <li key={i.cle}>
+        <a href={'#q-' + i.cle} onClick={() => setOuvert(true)} style={{ color: 'inherit' }}>{i.libelle}</a> · {i.detail}
+        {i.repondu ? <b> → {i.statut === 'ok' ? 'validé conforme' : i.statut === 'anomalie' ? 'anomalie confirmée' : 'sans objet'} par {i.par || '—'}{i.commentaire ? ' : ' + i.commentaire : ' sans justification'}</b> : <b> → à traiter</b>}
+      </li>)}</ul>
+    </div>}
     {d.lecture && <LectureIA l={d.lecture} />}
     {ouvert && ['pieces', 'rivage', 'clauses'].map((bloc) => <div key={bloc}>
       <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS[bloc]}</b></div>
-      {c.items.filter((i) => i.bloc === bloc && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche')).map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
+      {c.items.filter((i) => i.bloc === bloc && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche'))
+        .sort((x, y) => (y.auto === 'anomalie') - (x.auto === 'anomalie'))
+        .map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
       {(() => { const ok = c.items.filter((i) => i.bloc === bloc && i.auto === 'ok' && !i.repondu && i.mode !== 'fiche');
         return ok.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {ok.length} point(s) conforme(s) automatiquement{bloc === 'rivage' ? ' : identiques dans le bail et dans Rivage' : bloc === 'pieces' ? ' : pièces déposées dans Rivage' : ''}</summary>
@@ -341,7 +352,15 @@ function Question({ i, d, b, peut, agir }) {
   const [suivi, setSuivi] = useState(i.suivi || (i.bloc === 'rivage' ? 'rivage' : i.genere ? 'backoffice' : ''));
   const [creer, setCreer] = useState(false);
   useEffect(() => { setCom(i.commentaire || ''); }, [i.commentaire]);
-  const repondre = (statut) => agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: statut, p_suivi: suivi || null, p_valeur: null, p_commentaire: com || null });
+  const [errJ, setErrJ] = useState('');
+  const ecart = i.auto === 'anomalie' && i.bloc !== 'pieces';
+  const typeEcart = !ecart ? '' : /non renseigné/.test(i.detail || '') ? 'Non renseigné dans Rivage' : /le bail indique/.test(i.detail || '') ? 'Écart entre le bail et Rivage' : 'Incohérence légale';
+  // Valider conforme un écart détecté exige une justification (avenant, indexation, erreur de lecture…).
+  const repondre = (statut) => {
+    if (ecart && statut !== 'sans_objet' && !com.trim()) { setErrJ(statut === 'ok' ? 'Écart détecté : indiquez pourquoi c’est conforme (avenant, indexation, mauvais document lu…).' : 'Indiquez l’anomalie.'); return; }
+    setErrJ('');
+    return agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: statut, p_suivi: suivi || null, p_valeur: null, p_commentaire: com || null });
+  };
   const couleur = i.statut === 'ok' ? 'var(--teal)' : i.statut === 'anomalie' ? 'var(--red)' : i.statut === 'sans_objet' ? 'var(--muted)' : 'var(--amber)';
   const suiviExiste = i.genere && (d.obligations || []).some((o) => o.nature === i.genere && o.actif);
   // Revenir sur une réponse : la question redevient à traiter ; les suivis qu'elle a créés peuvent être arrêtés ;
@@ -355,26 +374,30 @@ function Question({ i, d, b, peut, agir }) {
     } catch { /* l'erreur éventuelle s'affiche au rechargement */ }
     await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: null, p_suivi: null, p_valeur: null, p_commentaire: null });
   };
-  return <div style={{ borderTop: '1px solid var(--line)', padding: '8px 0' }}>
+  const cadre = ecart ? { borderTop: '1px solid var(--line)', borderLeft: '4px solid var(--red)', background: 'var(--red-bg)', padding: '8px 10px', margin: '6px 0', borderRadius: 6 } : { borderTop: '1px solid var(--line)', padding: '8px 0' };
+  return <div id={'q-' + i.cle} style={cadre}>
     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 220 }}>
+        {ecart && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '.03em' }}>⚠ {typeEcart}{i.repondu ? (i.statut === 'ok' ? ' · validé conforme' : i.statut === 'anomalie' ? ' · anomalie confirmée' : ' · sans objet') : ' · à traiter'}</div>}
         <span style={{ color: couleur, fontWeight: 700 }}>{i.statut === 'ok' ? '✓' : i.statut === 'anomalie' ? '!' : i.statut === 'sans_objet' ? '–' : '○'}</span> {i.libelle}
         {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
         {i.detail && i.mode !== 'fiche' && <div style={{ fontSize: 13 }}>{i.mode === 'rivage' ? 'Rivage : ' : ''}{i.detail}</div>}
-        {i.ia && i.bloc !== 'rivage' && <div style={{ fontSize: 13, background: 'var(--blue-bg)', padding: '4px 8px', borderRadius: 6, marginTop: 4 }}>
+        {i.ia && (i.bloc !== 'rivage' || ecart) && <div style={{ fontSize: 13, background: 'var(--blue-bg)', padding: '4px 8px', borderRadius: 6, marginTop: 4 }}>
           ✦ Lu dans le bail : {i.ia.valeur || (i.ia.trouve === false ? 'non trouvé' : '—')}{i.ia.page ? ` (page ${i.ia.page})` : ''}
           {i.ia.extrait && <div className="muted" style={{ fontSize: 12 }}>« {i.ia.extrait} »</div>}</div>}
         {i.mode === 'fiche' && <div style={{ marginTop: 4 }}><ChampFiche b={b} fiche={d.fiche} champ={i.ref} peut={peut} agir={agir} /></div>}
         {i.repondu && <div className="muted" style={{ fontSize: 12 }}>Répondu par {i.par || '—'} le {date(i.le)}{i.suivi ? ` · suivi ${i.suivi === 'rivage' ? 'dans Rivage' : 'dans le back-office'}` : ''}{i.commentaire ? ' · ' + i.commentaire : ''}</div>}
+        {i.repondu && ecart && i.statut === 'ok' && !i.commentaire && <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>Écart validé sans justification : revenez sur la réponse pour l’expliquer ou corriger Rivage.</div>}
+        {errJ && <div className="err">{errJ}</div>}
       </div>
-      {peut && !(i.genere && i.genere !== 'garantie' && !i.repondu) && <div className="row" style={{ justifyContent: 'flex-end' }}>
+      {peut && i.repondu && <div className="row" style={{ justifyContent: 'flex-end' }}><button className="btn gris" onClick={() => revenir()}>Revenir sur ma réponse</button></div>}
+      {peut && !i.repondu && !(i.genere && i.genere !== 'garantie') && <div className="row" style={{ justifyContent: 'flex-end' }}>
         <select value={suivi} onChange={(e) => setSuivi(e.target.value)} aria-label="Où se fait le suivi">
           <option value="">Suivi —</option><option value="rivage">Suivi dans Rivage</option><option value="backoffice">Suivi back-office</option></select>
-        <input placeholder="Commentaire" value={com} onChange={(e) => setCom(e.target.value)} style={{ width: 150 }} />
+        <input placeholder={ecart ? 'Justification (obligatoire)' : 'Commentaire'} value={com} onChange={(e) => setCom(e.target.value)} style={{ width: 150 }} />
         <button className="btn" onClick={() => repondre('ok')}>Conforme</button>
         <button className="btn" onClick={() => repondre('anomalie')}>Anomalie</button>
         <button className="btn gris" onClick={() => repondre('sans_objet')}>Sans objet</button>
-        {i.repondu && <button className="btn gris" onClick={() => revenir()}>Revenir sur ma réponse</button>}
       </div>}
     </div>
     {peut && i.genere && i.genere !== 'garantie' && !i.repondu && <QuestionSuivi i={i} d={d} b={b} agir={agir} />}
