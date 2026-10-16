@@ -67,7 +67,7 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: m, max_tokens: 8000, temperature: 0, system: SYSTEME,
+        model: m, max_tokens: 8000, system: SYSTEME, ...(m.includes('haiku') ? { temperature: 0 } : {}),
         messages: [{ role: 'user', content: [
           { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } },
           { type: 'text', text: `Questions :\n${liste}` },

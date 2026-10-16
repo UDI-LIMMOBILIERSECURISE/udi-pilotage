@@ -117,7 +117,8 @@ Deno.serve(async (req) => {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: m, max_tokens: 900, temperature: 0, system: SYSTEME, messages: [{ role: 'user', content: message }] }),
+      // Les modèles récents refusent le paramètre temperature : il n'est envoyé qu'au modèle de secours
+      body: JSON.stringify({ model: m, max_tokens: 900, system: SYSTEME, messages: [{ role: 'user', content: message }], ...(m.includes('haiku') ? { temperature: 0 } : {}) }),
     })
     if (r.ok) {
       const j = await r.json()
