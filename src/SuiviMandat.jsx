@@ -36,7 +36,7 @@ export default function DossierMandat({ m, apres }) {
     else { setLecture({ charge: false, err: '' }); await charger(); }
   };
   const synthese = !parametrer && (!!c.go_le || !c.soumis);
-  const ctx = { m, d, c, agir, repondre, lien: d.lien };
+  const ctx = { m, d, c, agir, repondre, lien: d.lien, recharger: async () => { await charger(); apres && apres(); }, onErreur: setErr };
   return <>
     <div className="row" style={{ justifyContent: 'space-between', marginTop: 18 }}>
       <h3 style={{ margin: 0 }}>{synthese ? 'Synthèse du mandat' : 'Contrôle d’entrée du mandat'}</h3>
@@ -148,17 +148,17 @@ function PointRivage({ i, repondre, lien }) {
 }
 
 // ----- Clauses : équipements et compteurs par lot, puis questions simples -----
-function Clauses({ m, d, c, agir, repondre }) {
+function Clauses({ m, d, c, agir, repondre, recharger, onErreur }) {
   const it = (cle) => c.items.find((i) => i.cle === cle);
   const autres = c.items.filter((i) => i.bloc === 'clauses' && !['m_cl_equipements', 'm_cl_compteurs'].includes(i.cle));
   return <>
     <div className="groupe-tete" style={{ marginTop: 10 }}><b>Équipements du bien et clauses</b></div>
-    {['m_cl_equipements', 'm_cl_compteurs'].map((cle) => it(cle) && <Equipements key={cle} i={it(cle)} d={d} agir={agir} repondre={repondre} />)}
+    {['m_cl_equipements', 'm_cl_compteurs'].map((cle) => it(cle) && <Equipements key={cle} i={it(cle)} d={d} agir={agir} repondre={repondre} recharger={recharger} onErreur={onErreur} />)}
     {autres.map((i) => <ClauseSimple key={i.cle} i={i} repondre={repondre} />)}
   </>;
 }
 
-function Equipements({ i, d, agir, repondre }) {
+function Equipements({ i, d, agir, repondre, recharger, onErreur }) {
   const compteur = i.cle === 'm_cl_compteurs';
   const nature = compteur ? 'compteur' : 'equipement';
   const total = d.lots.reduce((t, l) => t + l.equipements.filter((e) => e.nature === nature).length, 0);
@@ -174,7 +174,10 @@ function Equipements({ i, d, agir, repondre }) {
             <button className="btn gris" onClick={() => repondre(i, 'sans_objet')}>{compteur ? 'Pas de compteurs divisionnaires' : 'Aucun équipement'}</button></>}
       </div>
     </div>
-    {i.statut !== 'sans_objet' && d.lots.map((l) => <Lot key={l.id} l={l} nature={nature} agir={agir} />)}
+    {i.statut !== 'sans_objet' && d.lots.map((l) => compteur
+      ? <div key={l.id} style={{ margin: '6px 0 6px 18px' }}><b style={{ fontSize: 13 }}>Lot {l.reference || l.id}</b><span className="muted" style={{ fontSize: 13 }}> · {l.adresse}</span>
+          <Compteurs asset={l.id} compteurs={l.compteurs || []} typeDefaut="mandat" recharger={recharger} onErreur={onErreur} /></div>
+      : <Lot key={l.id} l={l} nature={nature} agir={agir} />)}
   </div>;
 }
 
@@ -253,4 +256,83 @@ function Synthese({ d, c, lien, parametrer }) {
           {co.length ? ' · compteurs divisionnaires : ' + co.map((e) => e.libelle).join(', ') : ''}</span></div>; })}
     </div>
   </>;
+}
+
+// ----- Compteurs divisionnaires : situation, relevés datés et calcul des consommations (mandat et bail) -----
+const UNITE = (l) => (/eau|gaz/i.test(l) ? 'm³' : 'kWh');
+const nb = (x, d = 3) => (x == null ? '—' : Number(x).toLocaleString('fr-FR', { maximumFractionDigits: d }));
+const TYPES_RELEVE = { mandat: 'Relevé à la prise de mandat', entree: 'Entrée du locataire', periodique: 'Relevé périodique', sortie: 'Sortie du locataire' };
+
+export function Compteurs({ asset, compteurs, bail, typeDefaut = 'periodique', recharger, onErreur }) {
+  const [nouveau, setNouveau] = useState({ libelle: '', autre: '', situation: '', numero: '', le: new Date().toISOString().slice(0, 10), index: '' });
+  const appel = async (fn, args) => { try { await rpc(fn, args); await recharger(); return true; } catch (e) { onErreur ? onErreur(e.message) : alert(e.message); return false; } };
+  const ajouterCompteur = async () => {
+    const libelle = nouveau.libelle === 'autre' ? nouveau.autre.trim() : nouveau.libelle;
+    let id;
+    try {
+      id = await rpc('pilotage_lot_equipement', { p_asset: asset, p_id: null, p_nature: 'compteur', p_libelle: libelle, p_contrat: null, p_prestataire: null, p_dernier: null,
+        p_commentaire: null, p_supprimer: false, p_situation: nouveau.situation || null, p_numero: nouveau.numero || null, p_unite: UNITE(libelle), p_prix: null });
+      if (nouveau.index !== '') await rpc('pilotage_releve', { p_compteur: id, p_id: null, p_le: nouveau.le, p_index: Number(String(nouveau.index).replace(',', '.')), p_type: typeDefaut, p_bail: bail || null, p_commentaire: null, p_supprimer: false });
+    } catch (e) { onErreur ? onErreur(e.message) : alert(e.message); }
+    setNouveau({ ...nouveau, libelle: '', autre: '', situation: '', numero: '', index: '' });
+    await recharger();
+  };
+  return <div style={{ fontSize: 13 }}>
+    {compteurs.map((c) => <Compteur key={c.id} c={c} asset={asset} bail={bail} typeDefaut={typeDefaut} appel={appel} />)}
+    <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+      <select value={nouveau.libelle} onChange={(e) => setNouveau({ ...nouveau, libelle: e.target.value })} aria-label="Compteur">
+        <option value="">Ajouter un compteur…</option>{COMPTEURS.map((x) => <option key={x} value={x}>{x}</option>)}<option value="autre">Autre…</option></select>
+      {nouveau.libelle && <>
+        {nouveau.libelle === 'autre' && <input placeholder="Lequel ?" value={nouveau.autre} onChange={(e) => setNouveau({ ...nouveau, autre: e.target.value })} style={{ width: 120 }} />}
+        <input placeholder="Situation (cave, palier, cuisine…)" value={nouveau.situation} onChange={(e) => setNouveau({ ...nouveau, situation: e.target.value })} style={{ width: 200 }} />
+        <input placeholder="N° du compteur" value={nouveau.numero} onChange={(e) => setNouveau({ ...nouveau, numero: e.target.value })} style={{ width: 120 }} />
+        <label className="muted">Relevé du <input type="date" value={nouveau.le} onChange={(e) => setNouveau({ ...nouveau, le: e.target.value })} /></label>
+        <input placeholder={'Index (' + UNITE(nouveau.libelle === 'autre' ? nouveau.autre : nouveau.libelle) + ')'} inputMode="decimal" value={nouveau.index} onChange={(e) => setNouveau({ ...nouveau, index: e.target.value })} style={{ width: 110 }} />
+        <button className="btn" disabled={nouveau.libelle === 'autre' && !nouveau.autre.trim()} onClick={ajouterCompteur}>Ajouter</button></>}
+    </div>
+  </div>;
+}
+
+function Compteur({ c, asset, bail, typeDefaut, appel }) {
+  const [r, setR] = useState({ le: new Date().toISOString().slice(0, 10), index: '', type: typeDefaut, com: '' });
+  const [prix, setPrix] = useState(c.prix_unitaire ?? '');
+  const rel = c.releves || [];
+  const [du, setDu] = useState(''); const [au, setAu] = useState('');
+  const i1 = rel.find((x) => String(x.id) === du) || rel[0]; const i2 = rel.find((x) => String(x.id) === au) || rel[rel.length - 1];
+  const conso = i1 && i2 && i2 !== i1 ? i2.index - i1.index : null;
+  const jours = i1 && i2 && i2 !== i1 ? Math.round((new Date(i2.le) - new Date(i1.le)) / 86400000) : null;
+  const pu = prix === '' ? null : Number(String(prix).replace(',', '.'));
+  const enregistrer = async () => {
+    const ok = await appel('pilotage_releve', { p_compteur: c.id, p_id: null, p_le: r.le, p_index: Number(String(r.index).replace(',', '.')), p_type: r.type, p_bail: bail || null, p_commentaire: r.com || null, p_supprimer: false });
+    if (ok) setR({ ...r, index: '', com: '' });
+  };
+  return <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '6px 10px', margin: '6px 0' }}>
+    <div className="row" style={{ justifyContent: 'space-between' }}>
+      <span><b>{c.libelle}</b>{c.situation ? ` · ${c.situation}` : ''}{c.numero ? ` · n° ${c.numero}` : ''} <span className="muted">({c.unite})</span></span>
+      <span className="row" style={{ gap: 6 }}>
+        <label className="muted">Prix unitaire <input inputMode="decimal" value={prix} onChange={(e) => setPrix(e.target.value)} style={{ width: 70 }}
+          onBlur={() => String(prix) !== String(c.prix_unitaire ?? '') && appel('pilotage_lot_equipement', { p_asset: asset, p_id: c.id, p_nature: 'compteur', p_libelle: c.libelle, p_contrat: null, p_prestataire: null, p_dernier: null, p_commentaire: null, p_supprimer: false, p_situation: c.situation, p_numero: c.numero, p_unite: c.unite, p_prix: pu })} /> €/{c.unite}</label>
+        <button className="lien" onClick={() => window.confirm(`Retirer le compteur « ${c.libelle} » et ses relevés ?`) && appel('pilotage_lot_equipement', { p_asset: asset, p_id: c.id, p_nature: 'compteur', p_libelle: c.libelle, p_contrat: null, p_prestataire: null, p_dernier: null, p_commentaire: null, p_supprimer: true })}>Retirer</button>
+      </span>
+    </div>
+    {rel.length > 0 && <div className="table-wrap"><table className="table-imp" style={{ fontSize: 12 }}>
+      <thead><tr><th>Date</th><th>Relevé</th><th>Index</th><th>Consommation</th><th>Jours</th><th>Par jour</th><th>Montant</th><th></th></tr></thead>
+      <tbody>{rel.map((x) => <tr key={x.id}><td>{date(x.le)}</td><td>{TYPES_RELEVE[x.type] || x.type}{x.commentaire ? ' · ' + x.commentaire : ''}</td><td>{nb(x.index)}</td>
+        <td>{x.conso != null ? nb(x.conso) + ' ' + c.unite : '—'}</td><td>{x.jours ?? '—'}</td><td>{x.par_jour != null ? nb(x.par_jour) : '—'}</td>
+        <td>{x.montant != null ? Number(x.montant).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }) : '—'}</td>
+        <td><button className="lien" onClick={() => appel('pilotage_releve', { p_compteur: c.id, p_id: x.id, p_le: null, p_index: null, p_type: null, p_bail: null, p_commentaire: null, p_supprimer: true })}>Supprimer</button></td></tr>)}</tbody></table></div>}
+    {rel.length >= 2 && <div className="row" style={{ gap: 6, marginTop: 4, background: 'var(--blue-bg)', padding: '4px 8px', borderRadius: 6 }}>
+      <b>Calcul</b> du <select value={du || String(rel[0].id)} onChange={(e) => setDu(e.target.value)}>{rel.map((x) => <option key={x.id} value={x.id}>{date(x.le)} ({nb(x.index)})</option>)}</select>
+      au <select value={au || String(rel[rel.length - 1].id)} onChange={(e) => setAu(e.target.value)}>{rel.map((x) => <option key={x.id} value={x.id}>{date(x.le)} ({nb(x.index)})</option>)}</select>
+      <span>: {conso != null ? <><b>{nb(conso)} {c.unite}</b> sur {jours} jours ({jours ? nb(conso / jours) : '—'} {c.unite}/jour){pu != null ? <> · <b>{(conso * pu).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</b> à {nb(pu, 4)} €/{c.unite}</> : ' · saisir le prix unitaire pour le montant'}</> : 'choisir deux relevés différents'}</span>
+    </div>}
+    <div className="row" style={{ gap: 6, marginTop: 4 }}>
+      <label className="muted">Nouveau relevé le <input type="date" value={r.le} onChange={(e) => setR({ ...r, le: e.target.value })} /></label>
+      <input placeholder={'Index (' + c.unite + ')'} inputMode="decimal" value={r.index} onChange={(e) => setR({ ...r, index: e.target.value })} style={{ width: 110 }} />
+      <select value={r.type} onChange={(e) => setR({ ...r, type: e.target.value })} aria-label="Type de relevé">{Object.entries(TYPES_RELEVE).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+      {r.index !== '' && rel.length > 0 && Number(String(r.index).replace(',', '.')) < rel[rel.length - 1].index && <input placeholder="Compteur changé ? (obligatoire)" value={r.com} onChange={(e) => setR({ ...r, com: e.target.value })} style={{ width: 190 }} />}
+      <button className="btn" disabled={r.index === '' || !r.le} onClick={enregistrer}>Enregistrer le relevé</button>
+      {r.index !== '' && rel.length > 0 && <span className="muted">Consommation depuis le {date(rel[rel.length - 1].le)} : {nb(Number(String(r.index).replace(',', '.')) - rel[rel.length - 1].index)} {c.unite}</span>}
+    </div>
+  </div>;
 }

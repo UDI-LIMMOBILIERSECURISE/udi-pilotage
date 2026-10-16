@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { ResumeIA, Tuiles, Filtres } from './App.jsx';
+import { Compteurs } from './SuiviMandat.jsx';
 import { preparer, SMS, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
@@ -653,7 +654,15 @@ function QuestionSuivi({ i, d, b, agir }) {
       {coches.length > 0 && <div className="row" style={{ marginTop: 6 }}>
         <label>Prochain relevé le <input type="date" value={v.date || prochainRelevé()} onChange={(e) => maj('date', e.target.value)} /></label>
         <span className="muted" style={{ fontSize: 12 }}>Tous les 6 mois, calé sur la régularisation des charges.</span>
-        <button className="btn plein" onClick={() => creer([{ libelle: 'Relevé ' + coches.join(', ').toLowerCase(), date: v.date || prochainRelevé(), per: 6 }], 'ok', 'Divisionnaires : ' + coches.join(', '))}>Valider et suivre</button>
+        <button className="btn plein" onClick={async () => {
+          // Les compteurs cochés sont créés sur le lot s'ils n'y sont pas encore (situation et relevés se saisissent ensuite dans le suivi)
+          try {
+            const lc = await rpc('pilotage_bail_compteurs', { p_bail: b.bail_id });
+            for (const nom of coches) if (lc?.lot && !(lc.compteurs || []).some((x) => x.libelle.toLowerCase() === nom.toLowerCase()))
+              await rpc('pilotage_lot_equipement', { p_asset: lc.lot, p_id: null, p_nature: 'compteur', p_libelle: nom, p_contrat: null, p_prestataire: null, p_dernier: null, p_commentaire: null, p_supprimer: false });
+          } catch { /* les compteurs pourront être ajoutés depuis le suivi */ }
+          await creer([{ libelle: 'Relevé ' + coches.join(', ').toLowerCase(), date: v.date || prochainRelevé(), per: 6 }], 'ok', 'Divisionnaires : ' + coches.join(', '));
+        }}>Valider et suivre</button>
       </div>}</>);
   }
 
@@ -739,6 +748,7 @@ function Suivis({ d, b, peut, agir }) {
         <span className="puce">{e.fait_le ? '✓' : ''}</span><span>{e.libelle}<span className="muted"> · {date(e.date)}{e.fait_le ? ' · fait le ' + date(e.fait_le) : ''}</span>
         {peut && e.fait_le && <button className="lien" style={{ marginLeft: 8 }} onClick={() => agir('pilotage_suivi_etape', { p_cle: o.cle, p_etape: String(e.ordre), p_detail: null, p_annuler: true })}>Annuler</button>}</span></li>)}</ol>
       {o.derniere_le && <div className="muted">Dernière réalisation : {date(o.derniere_le)}</div>}
+      {o.nature === 'compteur' && <RelevesBail b={b} ob={o} peut={peut} agir={agir} />}
       {CATEG_JUSTIF[o.nature] && <div className="muted" style={{ fontSize: 12 }}>Justificatif à déposer dans Rivage, catégorie « {CATEG_JUSTIF[o.nature]} » : reconnu automatiquement (passage toutes les 30 minutes).</div>}
       {peut && <div className="row" style={{ marginTop: 6 }}>
         <Realise ob={o} agir={agir} />
@@ -747,6 +757,25 @@ function Suivis({ d, b, peut, agir }) {
     </details>)}
     {peut && (ajout ? <NouveauSuivi b={b} agir={agir} fini={() => setAjout(false)} /> : <button className="lien" onClick={() => setAjout(true)}>+ Ajouter un suivi (assurance, équipement, compteurs…)</button>)}
   </>;
+}
+
+// Relevés des compteurs divisionnaires du lot, depuis le suivi du bail : saisie, consommation entre relevés, montant à refacturer.
+function RelevesBail({ b, ob, peut, agir }) {
+  const [c, setC] = useState(null); const [err, setErr] = useState('');
+  const charger = () => rpc('pilotage_bail_compteurs', { p_bail: b.bail_id }).then(setC).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, [b.bail_id]);
+  if (!c) return err ? <div className="err">{err}</div> : null;
+  const auj0 = auj();
+  const relevesDuJour = (c.compteurs || []).filter((x) => (x.releves || []).some((r) => r.le === auj0)).length;
+  return <div style={{ marginTop: 6 }}>
+    {err && <div className="err">{err}</div>}
+    {c.lot ? <Compteurs asset={c.lot} compteurs={c.compteurs || []} bail={b.bail_id} typeDefaut="periodique" recharger={charger} onErreur={setErr} />
+      : <div className="muted">Lot du bail inconnu dans Rivage.</div>}
+    {peut && (c.compteurs || []).length > 0 && <div className="row" style={{ marginTop: 4 }}>
+      <button className="btn plein" disabled={!relevesDuJour} onClick={() => agir('pilotage_obligation_realisee', { p_id: ob.id, p_le: auj0, p_prochaine: null })}>
+        Relevé fait : passer à l’échéance suivante</button>
+      {!relevesDuJour && <span className="muted" style={{ fontSize: 12 }}>Saisir d’abord au moins un relevé du jour.</span>}</div>}
+  </div>;
 }
 
 // ----- Paliers et franchises -----
