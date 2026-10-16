@@ -168,3 +168,5 @@ tr.sel td { background: #EEF4FA; }
 .versements { border: 1px solid var(--line); border-radius: 10px; }
 .versement { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 9px 12px; border-bottom: 1px solid #EEF1F4; font-size: 13px; align-items: center; }
 .versement:last-child { border-bottom: 0; }
+
+.grille-baux { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }

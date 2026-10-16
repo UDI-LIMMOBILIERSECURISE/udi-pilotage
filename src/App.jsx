@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
+import SuiviBaux from './SuiviBaux.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
@@ -62,7 +63,7 @@ function Espace() {
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
   const tabs = [['jour', 'Ma journée', true], ['agence', 'Toute l’agence', voit('agence')], ['sinistres', 'Sinistres', voit('sinistres')],
-    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
+    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['baux', 'Baux et obligations', voit('baux')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
     ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
   return (
     <>
@@ -79,6 +80,7 @@ function Espace() {
         {onglet === 'dg' && voit('dg') && <SortiesDG />}
         {onglet === 'compta' && voit('compta') && <Compta />}
         {onglet === 'impayes' && voit('impayes') && <Impayes />}
+        {onglet === 'baux' && voit('baux') && <SuiviBaux moi={moi} />}
         {onglet === 'mandats' && moi.voit_commissions && <Mandats />}
         {onglet === 'obligations' && moi.voit_reglages && <Obligations />}
         {onglet === 'regles' && moi.voit_reglages && <Regles />}
@@ -1134,3 +1136,5 @@ function SuggestionsBail({ d, peut, recharger }) {
         {peut && <button className="btn" onClick={() => maj(x.bail_id)}>Rattacher</button>}</div>)}
   </div>;
 }
+
+export { AvecDetail, ResumeIA, Tuiles, Filtres };
