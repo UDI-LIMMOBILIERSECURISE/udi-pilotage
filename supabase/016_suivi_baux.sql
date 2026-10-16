@@ -108,6 +108,17 @@ create table if not exists pilotage.suivis_etapes (
   unique (cle, etape)
 );
 
+alter table pilotage.parametres enable row level security;
+alter table pilotage.baux_fiche enable row level security;
+alter table pilotage.controle_questions enable row level security;
+alter table pilotage.baux_reponses enable row level security;
+alter table pilotage.baux_lectures enable row level security;
+alter table pilotage.baux_paliers enable row level security;
+alter table pilotage.baux_actes enable row level security;
+alter table pilotage.calendriers enable row level security;
+alter table pilotage.baux_obligations enable row level security;
+alter table pilotage.baux_echeance enable row level security;
+alter table pilotage.suivis_etapes enable row level security;
 revoke all on pilotage.parametres, pilotage.baux_fiche, pilotage.controle_questions, pilotage.baux_reponses, pilotage.baux_lectures,
   pilotage.baux_paliers, pilotage.baux_actes, pilotage.calendriers, pilotage.baux_obligations, pilotage.baux_echeance, pilotage.suivis_etapes
   from public, anon, authenticated;
