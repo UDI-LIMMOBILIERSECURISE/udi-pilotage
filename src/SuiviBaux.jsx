@@ -220,6 +220,7 @@ function Echeance({ d, b, peut, agir, ouvrirMail }) {
       {ech.douze_ans && <p className="muted">12 ans de durée le {date(ech.douze_ans)} : au-delà, déplafonnement possible du loyer du bail renouvelé.</p>}
       {ech.triennale && <p className="muted">Prochaine fin de période triennale : {date(ech.triennale)} (faculté de congé du preneur avec 6 mois de préavis).</p>}
       {(ech.blocages || []).map((x, i) => <div key={i} className="mini-alerte critique">{x}</div>)}
+      {habitation && d.rivage?.locataire_65?.detail && <p className="muted" style={{ margin: '6px 0 0' }}>Âge d’après Rivage : {d.rivage.locataire_65.detail}.{fiche.locataire_65 == null && d.rivage.locataire_65.connu ? ' Utilisé tant que la fiche n’est pas renseignée.' : ''}</p>}
       {habitation && <div className="row" style={{ marginTop: 6 }}>
         <ChampFiche b={b} fiche={fiche} champ="locataire_65" libelle="Locataire de plus de 65 ans à l’échéance" peut={peut} agir={agir} />
         {fiche.locataire_65 && <ChampFiche b={b} fiche={fiche} champ="ressources_sous_plafond" libelle="Ressources sous le plafond" peut={peut} agir={agir} />}
@@ -544,9 +545,10 @@ function Paliers({ d, b, peut, agir, ouvrirMail }) {
     {peut && (d.lecture?.resultat?.paliers || []).filter((x) => x?.debut && !ps.some((p) => p.debut === x.debut)).map((x, k) =>
       <div key={k} className="mini-alerte normale">✦ Lu dans le bail : {x.nature === 'franchise' ? 'franchise' : 'palier'} du {date(x.debut)}{x.fin ? ' au ' + date(x.fin) : ''}{x.loyer_annuel_ht != null ? `, loyer annuel ${Number(x.loyer_annuel_ht).toLocaleString('fr-FR')} € HT` : ''}{x.page ? ` (page ${x.page})` : ''}
         <button className="lien" style={{ marginLeft: 8 }} onClick={() => setF({ nature: x.nature === 'franchise' ? 'franchise' : 'palier', debut: x.debut, fin: x.fin || '', loyer: '', com: 'Lu dans le bail' + (x.page ? ', page ' + x.page : '') })}>Reprendre (saisir le montant Rivage)</button></div>)}
-    {ps.length > 0 && <div className="table-wrap"><table className="table-imp"><thead><tr><th>Nature</th><th>Du</th><th>Au</th><th>Loyer attendu dans Rivage</th><th>Note</th><th></th></tr></thead><tbody>
+    {ps.length > 0 && <div className="table-wrap"><table className="table-imp"><thead><tr><th>Nature</th><th>Du</th><th>Au</th><th>Loyer attendu dans Rivage</th><th>Programmé dans Rivage</th><th>Note</th><th></th></tr></thead><tbody>
       {ps.map((p) => <tr key={p.id}><td>{p.nature === 'franchise' ? 'Franchise' : 'Palier'}</td><td>{date(p.debut)}</td><td>{date(p.fin)}</td>
-        <td>{p.loyer_rivage != null ? Number(p.loyer_rivage).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }) : '—'}</td><td>{p.commentaire}</td>
+        <td>{p.loyer_rivage != null ? Number(p.loyer_rivage).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }) : '—'}</td>
+        <td style={{ color: p.programme_rivage ? 'var(--teal)' : 'var(--amber)' }}>{p.programme_rivage ? '✓ ligne d’appel trouvée' : 'Non trouvé'}</td><td>{p.commentaire}</td>
         <td>{peut && <><button className="lien" onClick={() => ouvrirMail('palier_locataire', { palier: p }, { cle: 'e:' + b.bail_id + ':palier' + p.id, etape: 'info', detail: 'Locataire informé du palier' })}>Mail locataire</button>{' '}
           <button className="lien" onClick={() => agir('pilotage_bail_palier', { p_bail: b.bail_id, p_id: p.id, p_nature: null, p_debut: null, p_fin: null, p_loyer: null, p_commentaire: null, p_supprimer: true })}>Supprimer</button></>}</td></tr>)}
     </tbody></table></div>}
