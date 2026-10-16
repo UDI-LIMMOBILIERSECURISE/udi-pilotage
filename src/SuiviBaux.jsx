@@ -13,9 +13,9 @@ const BLOCS = { pieces: 'Pièces du dossier', rivage: 'Croisement avec Rivage', 
 const NATURES = {
   assurance: 'Assurance', entretien: 'Entretien d\'équipement', compteur: 'Relevé de compteurs', garantie: 'Expiration de garantie', caution: 'Fin d\'engagement de la caution',
   dpe: 'Validité du DPE', tsb: 'Taxe sur les bureaux', surprime: 'Surprime d\'assurance', charges_regul: 'Régularisation des charges', etat_travaux: 'État prévisionnel des travaux',
-  tertiaire: 'Décret tertiaire (OPERAT)', destination: 'Contrôle de la destination',
+  tertiaire: 'Décret tertiaire (OPERAT)', destination: 'Contrôle de la destination', dg_ajust: 'Ajustement du dépôt de garantie',
 };
-const PERIODE = { assurance: 12, entretien: 12, compteur: 6, tsb: 12, surprime: 12, charges_regul: 12, etat_travaux: 36, tertiaire: 12, destination: 12 };
+const PERIODE = { assurance: 12, entretien: 12, compteur: 6, tsb: 12, surprime: 12, charges_regul: 12, etat_travaux: 36, tertiaire: 12, destination: 12, dg_ajust: 12 };
 const ETATS = {
   a_venir: 'À venir', a_informer: 'Bailleur à informer', attente_bailleur: 'Réponse du bailleur attendue', reconduit: 'Reconduit (sans réponse)', decide: 'Décision prise',
   conge_a_delivrer: 'Congé à délivrer', conge_en_cours: 'Congé en préparation', conge_depose: 'Congé déposé dans Rivage, à enregistrer', conge_delivre: 'Congé délivré', hors_delai: 'Délai dépassé', fin_auto: 'Fin automatique', info: 'Contrat à vérifier',
@@ -189,7 +189,7 @@ function DossierBail({ b, peut, moi, apres }) {
   </>;
 }
 
-function SmsRivage({ texte, fait }) {
+export function SmsRivage({ texte, fait }) {
   const [vu, setVu] = useState(false);
   return <>
     <button className="btn plein" onClick={() => { navigator.clipboard?.writeText(texte || ''); setVu(true); }}>Copier le SMS (à envoyer depuis Rivage)</button>
@@ -197,7 +197,7 @@ function SmsRivage({ texte, fait }) {
   </>;
 }
 
-function Realise({ ob, agir }) {
+export function Realise({ ob, agir }) {
   const [ouvert, setOuvert] = useState(false);
   const [le, setLe] = useState(auj());
   const [proch, setProch] = useState('');
@@ -210,7 +210,7 @@ function Realise({ ob, agir }) {
   </span>;
 }
 
-function EditeurMail({ mail, email, fermer, marquer, peut }) {
+export function EditeurMail({ mail, email, fermer, marquer, peut }) {
   const [objet, setObjet] = useState(mail.m.objet);
   const [corps, setCorps] = useState(mail.m.corps);
   const [to, setTo] = useState((mail.m.to || []).join(', '));
@@ -738,7 +738,8 @@ function QuestionSuivi({ i, d, b, agir }) {
     </div></>);
 
   // Régularisation des charges, état des travaux, destination : une échéance et une périodicité
-  const PAR_DEFAUT = { charges_regul: ['Régularisation des charges et état récapitulatif', 12], etat_travaux: ['État prévisionnel des travaux', 36], destination: ['Contrôle de la destination des lieux', 12] };
+  const PAR_DEFAUT = { charges_regul: ['Régularisation des charges et état récapitulatif', 12], etat_travaux: ['État prévisionnel des travaux', 36], destination: ['Contrôle de la destination des lieux', 12],
+    dg_ajust: ['Ajustement du dépôt de garantie à la révision (prochaine date de révision)', 12] };
   const [lib, per] = PAR_DEFAUT[n] || [NATURES[n], PERIODE[n] ?? 12];
   return boite(<div className="row">
     <b>{lib}</b>

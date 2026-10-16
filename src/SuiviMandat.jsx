@@ -3,6 +3,8 @@
 // par l'IA, équipements et compteurs par lot (repris dans le suivi des baux). Le GO reste celui du dossier complet (commission 25 %).
 import React, { useEffect, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
+import { preparer } from './mails.js';
+import { EditeurMail } from './SuiviBaux.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const court = (t) => (t || '').split(' · ')[0];
@@ -61,6 +63,7 @@ export default function DossierMandat({ m, apres }) {
       <Croisement {...ctx} />
       <Clauses {...ctx} />
     </>}
+    <SuivisMandat m={m} d={d} agir={agir} />
   </>;
 }
 
@@ -231,6 +234,89 @@ function ClauseSimple({ i, repondre }) {
         <button className="btn" disabled={!v.trim()} onClick={() => repondre(i, anomalies ? 'anomalie' : 'ok', v.trim())}>Enregistrer</button>
         <button className="btn gris" onClick={() => repondre(i, anomalies ? 'ok' : 'sans_objet', anomalies ? 'Aucune' : null)}>{anomalies ? 'Aucune' : 'Non prévu'}</button></>}
     </div>
+  </div>;
+}
+
+// ----- Suivis du mandat : PNO, échéance du mandat, entretien d'un lot vacant, DPE d'un lot -----
+// Échéance et entretien des lots vacants sont créés automatiquement (034) ; PNO et DPE se saisissent ici.
+// Un justificatif PNO ou DPE déposé dans Rivage fait passer le suivi à l'échéance suivante.
+const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE' };
+const CANAL_M = { mail_bailleur: 'Mail au bailleur', tache: 'Tâche', lrar: 'Recommandé', mail_locataire: 'Mail au locataire', sms_rivage: 'SMS (Rivage)' };
+const plusMois = (iso, n) => { const x = new Date(iso); x.setMonth(x.getMonth() + n); return x.toISOString().slice(0, 10); };
+
+function SuivisMandat({ m, d, agir }) {
+  const [mail, setMail] = useState(null);
+  const [ajout, setAjout] = useState(false);
+  const [email, setEmail] = useState('');
+  const [prenom, setPrenom] = useState('');
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || ''));
+    rpc('pilotage_moi').then((x) => setPrenom(x?.prenom || '')).catch(() => {});
+  }, []);
+  const obs = d.obligations || [];
+  const adresse = (ob) => (d.lots.find((l) => l.id === ob.asset_id) || d.lots[0] || {}).adresse || 'votre bien';
+  const ouvrir = (ob) => {
+    const x = preparer(ob.a_faire.modele, { bail: { adresse: adresse(ob) }, ob, contacts: d.contacts, mandat: d.mandat, moi: { prenom, email } });
+    if (x) setMail({ m: x, etape: { cle: ob.cle, etape: String(ob.a_faire.ordre), detail: ob.a_faire.libelle } });
+  };
+  const fait = (cle, etape, detail) => agir('pilotage_suivi_etape', { p_cle: cle, p_etape: etape, p_detail: detail, p_annuler: false });
+  const actifs = obs.filter((o) => o.actif);
+  return <>
+    <div className="groupe-tete" style={{ marginTop: 14 }}><b>Suivis du mandat ({actifs.length})</b></div>
+    {!obs.length && <p className="muted" style={{ fontSize: 13 }}>Aucun suivi. L’échéance du mandat et l’entretien des lots vacants se créent automatiquement ; ajoutez ici l’assurance PNO et le DPE.</p>}
+    {obs.map((o) => <details key={o.id} className={'mini-alerte ' + (o.actif ? o.gravite : 'normale')} style={{ opacity: o.actif ? 1 : 0.6 }} open={o.actif && (!!o.a_faire || o.en_retard)}>
+      <summary style={{ cursor: 'pointer' }}><b>{o.libelle}</b>{o.lot ? ` · lot ${o.lot}` : ''} · échéance le {date(o.prochaine)}{o.periodicite_mois ? ` · tous les ${o.periodicite_mois} mois` : ''}{!o.actif ? (o.nature === 'entretien_lot' ? ' · lot loué : suivi repris par le bail' : ' · clos') : o.en_retard ? ' · en retard' : ''}
+        {o.a_faire && o.actif && <div style={{ fontSize: 13 }}>→ {o.a_faire.libelle} ({CANAL_M[o.a_faire.canal]}, prévu le {date(o.a_faire.date)})</div>}</summary>
+      <ol className="etapes">{(o.etapes || []).map((e) => <li key={e.ordre} className={e.fait_le ? 'fait' : e.du ? 'retard' : ''}>
+        <span className="puce">{e.fait_le ? '✓' : ''}</span><span>{e.libelle}<span className="muted"> · {date(e.date)}{e.fait_le ? ' · fait le ' + date(e.fait_le) : ''}</span>
+        {e.fait_le && <button className="lien" style={{ marginLeft: 8 }} onClick={() => agir('pilotage_suivi_etape', { p_cle: o.cle, p_etape: String(e.ordre), p_detail: null, p_annuler: true })}>Annuler</button>}</span></li>)}</ol>
+      {o.derniere_le && <div className="muted">Dernière réalisation : {date(o.derniere_le)}</div>}
+      {['pno', 'dpe'].includes(o.nature) && <div className="muted" style={{ fontSize: 12 }}>Justificatif à déposer dans Rivage, catégorie « {o.nature === 'pno' ? 'Contrats d’assurance du bien' : 'Diagnostic de Performance Énergétique'} » (mandat, lot ou fiche du bailleur) : reconnu automatiquement.</div>}
+      {o.nature === 'mandat_echeance' && <div className="muted" style={{ fontSize: 12 }}>Créé d’après la date de fin du mandat dans Rivage. Après reconduction, mettez à jour la date de fin dans Rivage : le suivi repart tout seul sur la nouvelle date.</div>}
+      {o.actif && <div className="row" style={{ marginTop: 6 }}>
+        {o.a_faire?.modele && <button className="btn plein" onClick={() => ouvrir(o)}>Préparer le mail</button>}
+        {o.a_faire && <button className="btn" onClick={() => fait(o.cle, String(o.a_faire.ordre), o.a_faire.libelle)}>Marquer fait</button>}
+        <RealiseMandat ob={o} agir={agir} />
+        {!o.auto && <button className="btn gris" onClick={() => agir('pilotage_mandat_obligation', { p_mandat: m.id, p_id: o.id, p_nature: o.nature, p_libelle: null, p_periodicite: null, p_prochaine: null, p_actif: false, p_asset: null })}>Arrêter ce suivi</button>}
+      </div>}
+    </details>)}
+    {mail && <EditeurMail mail={mail} email={email} peut fermer={() => setMail(null)} marquer={async () => { await fait(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} />}
+    {ajout ? <NouveauSuiviMandat m={m} d={d} agir={agir} fini={() => setAjout(false)} />
+      : <button className="lien" onClick={() => setAjout(true)}>+ Ajouter un suivi (assurance PNO, DPE d’un lot)</button>}
+  </>;
+}
+
+function RealiseMandat({ ob, agir }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [le, setLe] = useState(new Date().toISOString().slice(0, 10));
+  const [proch, setProch] = useState('');
+  const lib = ob.nature === 'mandat_echeance' ? 'Reconduction vérifiée' : ob.nature === 'entretien_lot' ? 'Entretien réalisé' : 'Justificatif reçu';
+  if (!ouvert) return <button className="btn" onClick={() => setOuvert(true)}>{lib}</button>;
+  return <span className="row">
+    {ob.nature !== 'mandat_echeance' && <label className="muted">Le <input type="date" value={le} onChange={(e) => setLe(e.target.value)} /></label>}
+    <label className="muted">Prochaine échéance <input type="date" value={proch} onChange={(e) => setProch(e.target.value)} /></label>
+    <button className="btn plein" onClick={() => agir('pilotage_mandat_obligation_realisee', { p_id: ob.id, p_le: le, p_prochaine: proch || null })}>Valider</button>
+    <span className="muted" style={{ fontSize: 12 }}>{ob.periodicite_mois ? `Sans date, prochaine échéance dans ${ob.periodicite_mois} mois.` : 'Sans date, le suivi sera clos.'}</span>
+  </span>;
+}
+
+function NouveauSuiviMandat({ m, d, agir, fini }) {
+  const [nature, setNature] = useState('pno');
+  const [asset, setAsset] = useState('');
+  const [proch, setProch] = useState('');
+  return <div className="row" style={{ margin: '6px 0', background: 'var(--bg)', padding: 8, borderRadius: 8 }}>
+    <select value={nature} onChange={(e) => setNature(e.target.value)} aria-label="Nature du suivi">
+      <option value="pno">Assurance PNO du bailleur (annuelle)</option><option value="dpe">Validité du DPE d’un lot</option></select>
+    {nature === 'dpe' && <select value={asset} onChange={(e) => setAsset(e.target.value)} aria-label="Lot"><option value="">Lot…</option>
+      {d.lots.map((l) => <option key={l.id} value={l.id}>Lot {l.reference || l.id}</option>)}</select>}
+    <label className="muted">{nature === 'pno' ? 'Échéance de l’attestation' : 'Fin de validité'} <input type="date" value={proch} onChange={(e) => setProch(e.target.value)} /></label>
+    <button className="btn plein" disabled={!proch || (nature === 'dpe' && !asset)} onClick={async () => {
+      await agir('pilotage_mandat_obligation', { p_mandat: m.id, p_id: null, p_nature: nature, p_libelle: nature === 'pno' ? 'Attestation PNO' : 'Validité du DPE',
+        p_periodicite: nature === 'pno' ? 12 : null, p_prochaine: proch, p_actif: true, p_asset: nature === 'dpe' ? asset : null });
+      fini();
+    }}>Créer</button>
+    {nature === 'pno' && !proch && <button className="lien" onClick={() => setProch(plusMois(new Date().toISOString().slice(0, 10), 1))}>Attestation non reçue : demander tout de suite</button>}
+    <button className="lien" onClick={fini}>Annuler</button>
   </div>;
 }
 

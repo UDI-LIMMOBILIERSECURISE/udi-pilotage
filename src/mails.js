@@ -131,6 +131,32 @@ export function preparer(code, ctx) {
     case 'tertiaire':
       return L({ ...versBai, objet: `Décret tertiaire : déclaration annuelle — ${adr}`, corps: `${salutation(nomsBai)}\n\nLes locaux du ${adr} relèvent du dispositif « éco-énergie tertiaire ». Les consommations de l'année doivent être déclarées sur la plateforme OPERAT avant le ${d(ob.prochaine)}. Le bail précise qui, du bailleur ou du preneur, s'en charge : souhaitez-vous que nous fassions le point ensemble ?` });
 
+    // ----- Compléments 034 : compteurs, DPE, garantie, travaux, tertiaire, dépôt de garantie -----
+    case 'compteur_bailleur':
+      return L({ ...versBai, objet: `Relevé des compteurs sur place — ${adr}`, corps: `${salutation(nomsBai)}\n\nMalgré trois relances, ${civil(nomsLoc)} ne nous a pas transmis le relevé des compteurs divisionnaires (${ob.libelle || 'eau, chauffage'}) du ${adr}, nécessaire à la régularisation des charges.\n\nNous organisons donc un relevé sur place. Je vous tiendrai informé ; si le bail le prévoit, le coût du déplacement pourra être refacturé au locataire.` });
+    case 'dpe_relance':
+      return L({ ...versBai, objet: `Relance : validité du DPE — ${adr}`, corps: `${salutation(nomsBai)}\n\nJe reviens vers vous au sujet du diagnostic de performance énergétique du bien du ${adr}, qui arrive en fin de validité le ${d(ob.prochaine)}. Un DPE en cours de validité est obligatoire pour toute nouvelle mise en location.\n\nSouhaitez-vous que nous commandions le nouveau diagnostic ?` });
+    case 'garantie_bailleur':
+      return L({ ...versBai, objet: `Garantie du preneur non renouvelée — ${adr}`, corps: `${salutation(nomsBai)}\n\nLa garantie consentie par ${civil(nomsLoc)} (${fiche.garantie_type || 'garantie'}) pour les locaux du ${adr} expire le ${d(ob.prochaine)}, et malgré nos deux demandes nous n'avons pas reçu son renouvellement.\n\nNous allons mettre le preneur en demeure de la renouveler. Si rien n'est fait, il faudra décider avant l'expiration s'il convient de mettre en jeu la garantie : je reviendrai vers vous à ce moment-là.` });
+    case 'garantie_md':
+      return { ...versLoc, courrier: true, objet: `Mise en demeure — renouvellement de la garantie — ${adr}`, corps: `${civil(nomsLoc)}\n\nObjet : mise en demeure de renouveler la garantie prévue au bail, ${adr}\n\nMadame, Monsieur,\n\nLa garantie prévue à votre bail (${fiche.garantie_type || 'garantie'}) expire le ${d(ob.prochaine)}. Malgré nos courriers, vous ne nous avez pas justifié de son renouvellement.\n\nNous vous mettons en demeure de nous adresser ce renouvellement dans un délai de quinze jours à compter de la réception de la présente.\n\nÀ défaut, le bailleur se réserve d'exercer les droits qu'il tient du bail et de la garantie.\n\nNous vous prions d'agréer, Madame, Monsieur, l'expression de nos salutations distinguées.\n\n${moi.prenom || ''}\nUDI Gestion` };
+    case 'etat_travaux_preneur':
+      return L({ ...versLoc, objet: `État des travaux — ${adr}`, corps: `${salutation(nomsLoc)}\n\nComme le prévoit votre bail, vous trouverez ci-joint l'état récapitulatif des travaux réalisés au cours des trois dernières années et l'état prévisionnel des travaux envisagés pour les trois prochaines années, avec leur budget, pour les locaux du ${adr}.\n\nJe reste à votre disposition pour toute question.` });
+    case 'tertiaire_relance':
+      return L({ ...versBai, objet: `Relance : déclaration OPERAT — ${adr}`, corps: `${salutation(nomsBai)}\n\nJe reviens vers vous au sujet de la déclaration annuelle des consommations des locaux du ${adr} sur la plateforme OPERAT, attendue avant le ${d(ob.prochaine)}. Pouvez-vous me confirmer qu'elle a été faite, ou par qui elle sera faite ?` });
+    case 'dg_ajust':
+      return L({ ...versLoc, objet: `Ajustement du dépôt de garantie — ${adr}`, corps: `${salutation(nomsLoc)}\n\nÀ la suite de la révision de votre loyer, et comme le prévoit votre bail, le dépôt de garantie est ajusté au nouveau montant du loyer. Le complément correspondant figurera sur votre prochain avis d'échéance.\n\nJe reste à votre disposition pour toute question.` });
+
+    // ----- Suivis du mandat (mail au mandant) -----
+    case 'pno_1':
+      return L({ ...versBai, objet: `Attestation d'assurance propriétaire non occupant — ${adr}`, corps: `${salutation(nomsBai)}\n\nVotre attestation d'assurance propriétaire non occupant (PNO) pour ${adr} arrive à échéance le ${d(ob.prochaine)}. Pourriez-vous nous adresser la nouvelle attestation dès que vous l'aurez reçue de votre assureur ?` });
+    case 'pno_2':
+      return L({ ...versBai, objet: `Relance : attestation PNO — ${adr}`, corps: `${salutation(nomsBai)}\n\nSauf erreur de notre part, nous n'avons pas reçu votre nouvelle attestation d'assurance propriétaire non occupant pour ${adr}, attendue pour le ${d(ob.prochaine)}.\n\nPour un lot en copropriété, cette assurance de responsabilité civile est obligatoire ; elle vous protège aussi en cas de sinistre pendant une période de vacance. Merci de nous la transmettre rapidement.` });
+    case 'mandat_echeance':
+      return L({ ...versBai, objet: `Votre mandat de gestion — échéance du ${d(ob.prochaine)}`, corps: `${salutation(nomsBai)}\n\nLe mandat de gestion que vous nous avez confié${ctx.mandat?.reference ? ` (n° ${ctx.mandat.reference})` : ''} arrive au terme de sa période en cours le ${d(ob.prochaine)}.\n\nSans démarche de votre part, il sera reconduit tacitement${ctx.mandat?.duree_reconduction ? ` pour ${ctx.mandat.duree_reconduction} an(s)` : ''}, aux mêmes conditions. Si vous ne souhaitez pas le reconduire, il vous suffit de nous en informer avant cette date, dans les formes prévues au mandat.\n\nNous restons bien entendu à votre disposition pour faire le point sur la gestion de votre bien.` });
+    case 'entretien_lot':
+      return L({ ...versBai, objet: `Entretien à prévoir — ${adr}`, corps: `${salutation(nomsBai)}\n\nLe lot ${ob.lot ? ob.lot + ' ' : ''}du ${adr} est actuellement vacant. L'entretien annuel de l'équipement suivant est à prévoir avant le ${d(ob.prochaine)} : ${(ob.libelle || 'équipement').replace(/ \(lot vacant\)$/, '').replace(/^Entretien /, '')}. Pendant la vacance, il est à votre charge.\n\nSouhaitez-vous que nous le commandions pour votre compte ? Nous vous transmettrons l'attestation d'intervention.` });
+
     // ----- Paliers -----
     case 'palier_locataire':
       return L({ ...versLoc, objet: `Évolution de votre loyer — ${adr}`, corps: `${salutation(nomsLoc)}\n\nComme prévu à votre bail, votre loyer évolue à compter du ${d(ctx.palier?.debut)}. Le montant appelé sera de ${eur(ctx.palier?.loyer_rivage)} hors charges${commercial ? ' et hors taxes' : ''}.` });
@@ -142,6 +168,7 @@ export function preparer(code, ctx) {
 export const SMS = {
   assurance_sms: (ctx) => `UDI Gestion : votre attestation d'assurance pour ${ctx.bail?.adresse || 'votre logement'} expire le ${d(ctx.ob?.prochaine)}. Merci de nous l'envoyer par mail.`,
   compteur_sms: (ctx) => `UDI Gestion : merci de nous envoyer le relevé et la photo de vos compteurs (${ctx.ob?.libelle || 'eau, chauffage'}) pour ${ctx.bail?.adresse || 'votre logement'}.`,
+  compteur_sms3: (ctx) => `UDI Gestion : dernier rappel, merci de nous envoyer sous 5 jours le relevé et la photo de vos compteurs pour ${ctx.bail?.adresse || 'votre logement'}. A défaut, un relevé sur place sera organisé.`,
 };
 
 // Brouillon Gmail dans la boîte de l'utilisateur connecté (authuser = son adresse)
