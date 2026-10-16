@@ -1,4 +1,4 @@
-// Lecture d'un bail par l'IA : propose une réponse à chaque question du contrôle d'entrée, avec la page et l'extrait.
+// Lecture d'un bail ou d'un mandat de gestion par l'IA : propose une réponse à chaque question du contrôle d'entrée, avec la page et l'extrait.
 // La proposition n'est jamais validée seule : la gestionnaire confirme ou corrige dans le questionnaire.
 // Deux sources : le dernier bail déposé dans Rivage pour ce bail, ou un PDF envoyé depuis le poste (base64).
 // Appel par un membre (gestionnaire, superviseur, direction) ou par la tâche planifiée (en-tête x-pilotage-cron) :
@@ -39,21 +39,41 @@ Règles strictes :
 - Ajoute une clé "anomalies" : liste de phrases courtes signalant les incohérences ou blancs du document (montant non rempli, dates contradictoires, document qui n'est pas un bail...).
 Réponds uniquement par un objet JSON valide, sans texte autour.`
 
+const SYSTEME_MANDAT = `Tu lis un mandat de gestion locative (loi Hoguet) pour une agence de gestion française.
+On te donne le document et une liste de questions identifiées par une clé. Pour chaque clé, réponds à partir du seul document.
+Règles strictes :
+- N'invente rien. Si l'information n'est pas dans le document, mets "trouve": false et "valeur": null.
+- "valeur" : réponse courte en français (une phrase au plus), dates au format jj/mm/aaaa, montants avec le symbole €.
+- "page" : numéro de la page du PDF (1 = première page), sinon null. "extrait" : citation exacte et courte (200 caractères au plus), sinon null.
+- m_rv_dates : ajoute "signature" (AAAA-MM-JJ), "debut" (AAAA-MM-JJ, prise d'effet) et "duree_mois" (durée initiale, entier).
+- m_rv_reconduction : ajoute "code" parmi tacite, expresse, aucune, et "annees" (durée de chaque reconduction, entier).
+- m_rv_registre : ajoute "numero" (entier, numéro d'inscription au registre des mandats).
+- m_rv_gestion : ajoute "taux" (nombre : taux des honoraires de gestion en % TTC ; s'il n'est donné qu'en HT, multiplie par 1,2).
+- m_rv_mandants : ajoute "noms" (liste des mandants : personnes ou sociétés).
+- Ajoute une clé "anomalies" : liste de phrases courtes signalant les incohérences ou blancs du document (taux ou date en blanc, mandat non signé, numéro de registre absent...).
+Réponds uniquement par un objet JSON valide, sans texte autour.`
+
 function b64(buf: ArrayBuffer) {
   const u = new Uint8Array(buf); let s = ''
   for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000))
   return btoa(s)
 }
 
-async function lire(service: ReturnType<typeof createClient>, bail: string, pdf: string | null, nom: string | null, user: string | null) {
-  // Questions du contrôle d'entrée pour ce bail
-  const { data: questions, error: eq } = await service.rpc('pilotage_questions_bail', { p_bail: bail })
-  if (eq || !questions?.length) return { status: 404, body: { error: 'Bail introuvable' } }
+async function lire(service: ReturnType<typeof createClient>, bail: string, pdf: string | null, nom: string | null, user: string | null, mandat = false) {
+  // Questions du contrôle d'entrée pour ce bail (ou ce mandat)
+  const { data: questions, error: eq } = mandat
+    ? await service.rpc('pilotage_questions_mandat', { p_mandat: bail })
+    : await service.rpc('pilotage_questions_bail', { p_bail: bail })
+  if (eq || !questions?.length) return { status: 404, body: { error: mandat ? 'Mandat introuvable' : 'Bail introuvable' } }
 
   let source = nom ? `PDF envoyé : ${nom}` : ''
   if (!pdf) {
-    const { data: src } = await service.rpc('pilotage_lecture_source', { p_bail: bail })
-    if (!src?.url) return { status: 404, body: { error: 'Aucun bail déposé dans Rivage pour ce bail. Déposez-le dans Rivage ou lisez un PDF depuis votre poste.' } }
+    const { data: src } = mandat
+      ? await service.rpc('pilotage_mandat_source', { p_mandat: bail })
+      : await service.rpc('pilotage_lecture_source', { p_bail: bail })
+    if (!src?.url) return { status: 404, body: { error: mandat
+      ? 'Aucun mandat de gestion repéré dans Rivage (document dont le nom contient « mandat de gestion »). Déposez-le dans Rivage ou lisez un PDF depuis votre poste.'
+      : 'Aucun bail déposé dans Rivage pour ce bail. Déposez-le dans Rivage ou lisez un PDF depuis votre poste.' } }
     const r = await fetch(src.url)
     if (!r.ok) return { status: 502, body: { error: 'Le lien du document Rivage a expiré ou ne répond pas : relancez la mise à jour depuis Rivage, ou lisez le PDF depuis votre poste.' } }
     const buf = await r.arrayBuffer()
@@ -72,7 +92,7 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: m, max_tokens: 8000, system: SYSTEME, ...(m.includes('haiku') ? { temperature: 0 } : {}),
+        model: m, max_tokens: 8000, system: mandat ? SYSTEME_MANDAT : SYSTEME, ...(m.includes('haiku') ? { temperature: 0 } : {}),
         messages: [{ role: 'user', content: [
           { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } },
           { type: 'text', text: `Questions :\n${liste}` },
@@ -98,9 +118,11 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
 }
 
 // Vérification d'une pièce déposée dans Rivage (en cas de doute sur son nom) : l'IA dit si le document est bien la pièce attendue.
-async function verifierPiece(service: ReturnType<typeof createClient>, bail: string, upload: string, piece: string) {
-  const { data: src } = await service.rpc('pilotage_piece_source', { p_bail: bail, p_upload: upload })
-  if (!src?.url) return { status: 404, body: { error: 'Document introuvable dans Rivage pour ce bail.' } }
+async function verifierPiece(service: ReturnType<typeof createClient>, bail: string, upload: string, piece: string, mandat = false) {
+  const { data: src } = mandat
+    ? await service.rpc('pilotage_piece_mandat_source', { p_mandat: bail, p_upload: upload })
+    : await service.rpc('pilotage_piece_source', { p_bail: bail, p_upload: upload })
+  if (!src?.url) return { status: 404, body: { error: mandat ? 'Document introuvable dans Rivage pour ce mandat.' : 'Document introuvable dans Rivage pour ce bail.' } }
   const r = await fetch(src.url)
   if (!r.ok) return { status: 502, body: { error: 'Le lien du document Rivage a expiré : relancez la mise à jour depuis Rivage.' } }
   const buf = await r.arrayBuffer()
@@ -111,7 +133,7 @@ async function verifierPiece(service: ReturnType<typeof createClient>, bail: str
     : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64(buf) } }
   const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
   if (!cleApi) return { status: 500, body: { error: 'Service IA non configuré' } }
-  const consigne = `Pièce attendue dans le dossier d'un bail : « ${piece} ». Nom du fichier dans Rivage : « ${src.libelle || ''} ».
+  const consigne = `Pièce attendue dans le dossier d'un ${mandat ? 'mandat de gestion' : 'bail'} : « ${piece} ». Nom du fichier dans Rivage : « ${src.libelle || ''} ».
 Dis si ce document est bien cette pièce. N'invente rien. Réponds uniquement par un objet JSON :
 {"conforme": true ou false, "type_document": "ce qu'est réellement le document, en quelques mots", "date": "AAAA-MM-JJ ou null (date du document)", "raison": "une phrase"}`
   for (const m of MODELES) {
@@ -161,13 +183,15 @@ Deno.serve(async (req) => {
   const { data: moi } = await utilisateur.rpc('pilotage_moi')
   if (!moi || !['direction', 'superviseur', 'gestionnaire'].includes(moi.role)) return rep(403, { error: 'Réservé à la direction, au superviseur et aux gestionnaires' })
 
-  let corps: { bail_id?: string; pdf?: string; nom?: string; upload_id?: string; piece?: string }
+  let corps: { bail_id?: string; mandat_id?: string; pdf?: string; nom?: string; upload_id?: string; piece?: string }
   try { corps = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
-  if (!corps.bail_id) return rep(400, { error: 'Bail manquant' })
+  const mandat = !!corps.mandat_id
+  const id = corps.mandat_id || corps.bail_id
+  if (!id) return rep(400, { error: 'Bail ou mandat manquant' })
   if (corps.upload_id) {
-    const v = await verifierPiece(service, corps.bail_id, corps.upload_id, corps.piece || 'pièce du dossier')
+    const v = await verifierPiece(service, id, corps.upload_id, corps.piece || 'pièce du dossier', mandat)
     return rep(v.status, v.body)
   }
-  const r = await lire(service, corps.bail_id, corps.pdf || null, corps.nom || null, u.user.id)
+  const r = await lire(service, id, corps.pdf || null, corps.nom || null, u.user.id, mandat)
   return rep(r.status, r.body)
 })

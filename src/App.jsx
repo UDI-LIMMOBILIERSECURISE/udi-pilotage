@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
 import SuiviBaux from './SuiviBaux.jsx';
+import DossierMandat from './SuiviMandat.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
@@ -247,8 +248,12 @@ function Mandats() {
     <div className="bascule" style={{ marginBottom: 14 }}>{[['pipeline', 'Pipeline'], ['validation', `Validation${aValider ? ' (' + aValider + ')' : ''}`], ['commissions', 'Commissions par négociateur']].map(([k, l]) =>
       <button key={k} className={vue === k ? 'on' : ''} onClick={() => setVue(k)}>{l}</button>)}</div>
 
-    {vue === 'pipeline' && <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un mandat pour voir le détail, ce qui manque et les versements."
-      detail={s && <FicheMandat m={s} negos={negos} role={d.mon_role} majMandat={majMandat} majBail={majBail} />}>
+    {vue === 'pipeline' && s && <section className="panneau" style={{ marginTop: 8 }}>
+      <button className="btn" onClick={() => setSel(null)}>← Retour au pipeline</button>
+      <div style={{ maxWidth: 980, marginTop: 10 }}><FicheMandat m={s} negos={negos} role={d.mon_role} majMandat={majMandat} majBail={majBail} apres={charger} /></div>
+    </section>}
+    {vue === 'pipeline' && !s && <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un mandat pour voir le détail, ce qui manque, les versements et le contrôle d’entrée."
+      detail={null}>
       <div className="kanban">{COL_MANDAT.map(([k, l]) => { const items = mandats.filter((m) => k === 'Loué' ? ['Loué', 'Retiré sans location'].includes(m.statut) : m.statut === k);
         return <div key={k} className="kcol"><div className="kcol-tete"><b>{l}</b><span className="pastille">{items.length}</span></div>
           {!items.length && <div className="muted" style={{ padding: '8px 4px' }}>Aucun.</div>}
@@ -327,7 +332,7 @@ function Mandats() {
   </>;
 }
 
-function FicheMandat({ m, negos, role, majMandat, majBail }) {
+function FicheMandat({ m, negos, role, majMandat, majBail, apres }) {
   const et = etapesMandat(m);
   return <>
     <div className="muted">Mandat n°{m.reference}{m.nom ? ' · ' + m.nom : ''} · {m.statut}{m.apport_direction ? ' · apport direction' : ''}</div>
@@ -362,6 +367,7 @@ function FicheMandat({ m, negos, role, majMandat, majBail }) {
       {m.bail && <a className="btn" href={m.bail.lien} target="_blank" rel="noreferrer">Bail dans Rivage</a>}
     </div>
     {role === 'superviseur' && !m.go_le && <p className="muted">Romain : GO possible seulement si plus rien ne manque.</p>}
+    <DossierMandat m={m} apres={apres} />
   </>;
 }
 

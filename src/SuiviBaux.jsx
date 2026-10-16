@@ -573,6 +573,29 @@ function QuestionSuivi({ i, d, b, agir }) {
   });
   const [err, setErr] = useState('');
   const maj = (k, x) => setV((o) => ({ ...o, [k]: x }));
+  // Équipements et compteurs saisis au contrôle du mandat pour ce lot : repris ici (cases pré-cochées, date du dernier entretien)
+  const [dumandat, setDumandat] = useState([]);
+  useEffect(() => {
+    if (n !== 'entretien' && n !== 'compteur') return;
+    rpc('pilotage_bail_equipements', { p_bail: b.bail_id }).then((l) => {
+      const liste = (l || []).filter((e) => e.nature === (n === 'entretien' ? 'equipement' : 'compteur'));
+      setDumandat(liste);
+      if (!liste.length) return;
+      setV((o) => {
+        const x = { ...o };
+        const connus = n === 'entretien' ? (commercial ? EQUIPEMENTS_COM : EQUIPEMENTS_HAB) : COMPTEURS;
+        liste.forEach((e) => {
+          const nom = connus.find((c) => c.toLowerCase() === e.libelle.toLowerCase()) || e.libelle;
+          if (n === 'compteur') { if (connus.includes(nom)) x['c_' + nom] = true; return; }
+          if (!connus.includes(nom) && !x.autre) x.autre = nom;
+          x['eq_' + nom] = true;
+          if (e.dernier_entretien && !x['d_' + nom]) x['d_' + nom] = e.dernier_entretien;
+        });
+        return x;
+      });
+    }).catch(() => {});
+  }, [b.bail_id, n]);
+  const repris = dumandat.length > 0 && <div style={{ fontSize: 12, color: 'var(--blue)' }}>Repris du contrôle du mandat : {dumandat.map((e) => e.libelle + (e.contrat_entretien ? ` (contrat d’entretien${e.prestataire ? ' ' + e.prestataire : ''})` : '')).join(', ')}.</div>;
   const CHAUF = { gas: 'gaz', electric: 'électrique', fuel: 'fioul', fuel_oil: 'fioul', oil: 'fioul', heat_pump: 'pompe à chaleur', wood: 'bois' };
   const infoRivage = rv.chauffage ? `Rivage : chauffage ${rv.type_chauffage === 'collective' ? 'collectif' : rv.type_chauffage === 'individual' ? 'individuel' : ''} ${CHAUF[rv.chauffage] || rv.chauffage}${rv.entretien_chaudiere ? ', dernier entretien de chaudière le ' + date(rv.entretien_chaudiere) : ''}.` : 'Rivage : mode de chauffage non renseigné pour ce lot.';
   const creer = async (liste, statut, resume) => {
@@ -597,6 +620,7 @@ function QuestionSuivi({ i, d, b, agir }) {
     const coches = liste.concat(v.autre ? [v.autre] : []).filter((e) => v['eq_' + e]);
     return boite(<>
       <div><b>Équipements à entretenir à la charge du {commercial ? 'preneur' : 'locataire'}</b> <span className="muted">(un suivi annuel par équipement)</span></div>
+      {repris}
       <div className="muted" style={{ fontSize: 12 }}>{infoRivage}{rv.type_chauffage === 'collective' ? ' Chauffage collectif : son entretien relève de la copropriété, pas du locataire.' : ''}</div>
       {liste.map((e) => <div key={e} className="row" style={{ marginTop: 4 }}>
         <label style={{ minWidth: 220 }}><input type="checkbox" checked={!!v['eq_' + e]} onChange={(x) => maj('eq_' + e, x.target.checked)} /> {e}</label>
@@ -616,6 +640,7 @@ function QuestionSuivi({ i, d, b, agir }) {
     const coches = COMPTEURS.filter((c) => v['c_' + c]);
     return boite(<>
       <div><b>Compteurs du logement</b></div>
+      {repris}
       <div className="row" style={{ marginTop: 6 }}>
         <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Compteurs individuels : rien à relever')}>Tous individuels</button>
         <span className="muted">ou compteurs divisionnaires :</span>
