@@ -7,8 +7,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 
 const ORIGINES = ['https://udi-pilotage.vercel.app', 'http://localhost:5173', 'http://localhost:4173']
 const MODELES = [Deno.env.get('PILOTAGE_MODELE_LECTURE') || 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001']
-// Tâches simples (dire si un document est la bonne pièce, lire la date d'une attestation) : modèle léger d'abord, dix fois moins cher
-const MODELES_SIMPLES = ['claude-haiku-4-5-20251001', MODELES[0]]
+// Baux commerciaux et mandats (clauses négociées, enjeux financiers) : modèle le plus performant, puis Sonnet en secours.
+// Tâches courtes (dire si un document est la bonne pièce, lire la date d'une attestation) : Sonnet, à peine plus cher que Haiku
+// et plus fiable sur les scans (choix de Nicolas : privilégier la qualité tant que le coût reste modéré).
+const MODELE_EXPERT = Deno.env.get('PILOTAGE_MODELE_EXPERT') || 'claude-opus-5-5'
+const MODELES_SIMPLES = MODELES
 const MAX_OCTETS = 25 * 1024 * 1024
 
 function cors(req: Request) {
@@ -89,7 +92,8 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
   const liste = questions.map((q: { cle: string; libelle: string; aide?: string }) => `- ${q.cle} : ${q.libelle}${q.aide ? ' (' + q.aide + ')' : ''}`).join('\n')
 
   let texte = '', modele = ''
-  for (const m of MODELES) {
+  const expert = mandat || questions.some((q: { cle: string }) => q.cle.startsWith('c_'))
+  for (const m of expert ? [MODELE_EXPERT, ...MODELES] : MODELES) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
@@ -108,7 +112,7 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
       break
     }
     console.error('[pilotage-lecture-bail]', m, r.status, (await r.text()).slice(0, 300))
-    if (r.status !== 404 && r.status !== 400) break
+    if (r.status === 401) break  // clé refusée : inutile d'essayer un autre modèle
   }
   if (!texte) return { status: 502, body: { error: 'Le service IA n’a pas répondu' } }
   const debut = texte.indexOf('{'), fin = texte.lastIndexOf('}')
@@ -152,7 +156,7 @@ Dis si ce document est bien cette pièce. N'invente rien. Réponds uniquement pa
       catch { return { status: 502, body: { error: 'Réponse de l’IA illisible, réessayez.' } } }
     }
     console.error('[pilotage-lecture-bail] verif', m, rep.status, (await rep.text()).slice(0, 300))
-    if (rep.status !== 404 && rep.status !== 400) break
+    if (rep.status === 401) break
   }
   return { status: 502, body: { error: 'Le service IA n’a pas répondu' } }
 }
@@ -198,7 +202,7 @@ N'invente rien. Réponds uniquement par un objet JSON :
       return { upload: j.upload_id, conforme: res.conforme, expiration: res.date_expiration }
     }
     console.error('[pilotage-lecture-bail] justificatif', m, rep.status, (await rep.text()).slice(0, 300))
-    if (rep.status !== 404 && rep.status !== 400) break
+    if (rep.status === 401) break
   }
   return { upload: j.upload_id, erreur: 'IA indisponible' }
 }
