@@ -155,6 +155,52 @@ Dis si ce document est bien cette pièce. N'invente rien. Réponds uniquement pa
   return { status: 502, body: { error: 'Le service IA n’a pas répondu' } }
 }
 
+// Lecture d'un justificatif de suivi déposé dans Rivage (assurance, entretien, caution, DPE, régularisation) : dates d'expiration et du document.
+const ATTENDU: Record<string, string> = {
+  assurance: "attestation d'assurance habitation ou multirisque du locataire, en cours de validité",
+  entretien: "attestation d'entretien (chaudière, pompe à chaleur, climatisation...) ou contrat d'entretien",
+  dpe: 'diagnostic de performance énergétique (DPE)',
+  garantie: 'acte de caution ou garantie bancaire', caution: 'acte de caution',
+  charges_regul: 'avis de régularisation annuelle des charges',
+}
+async function lireJustificatif(service: ReturnType<typeof createClient>, j: { upload_id: string; obligation_id: number; nature: string; libelle: string; categorie: string; nom: string | null; url: string }) {
+  const r = await fetch(j.url)
+  if (!r.ok) return { upload: j.upload_id, erreur: 'lien expiré' }
+  const buf = await r.arrayBuffer()
+  if (buf.byteLength > MAX_OCTETS) return { upload: j.upload_id, erreur: 'trop volumineux' }
+  const type = (r.headers.get('content-type') || '').split(';')[0].trim()
+  const bloc = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(type)
+    ? { type: 'image', source: { type: 'base64', media_type: type, data: b64(buf) } }
+    : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64(buf) } }
+  const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!cleApi) return { upload: j.upload_id, erreur: 'IA non configurée' }
+  const consigne = `Document déposé comme justificatif du suivi « ${j.libelle} » (catégorie « ${j.categorie} »). Pièce attendue : ${ATTENDU[j.nature] || j.libelle}.
+N'invente rien. Réponds uniquement par un objet JSON :
+{"conforme": true si le document est bien la pièce attendue, sinon false,
+ "type_document": "ce qu'est le document, en quelques mots (avec l'assureur ou le prestataire s'il est indiqué)",
+ "date_document": "AAAA-MM-JJ ou null (date d'émission, ou date de l'intervention pour un entretien)",
+ "date_expiration": "AAAA-MM-JJ ou null (fin de validité ou de la période couverte, si elle est écrite)",
+ "raison": "une phrase"}`
+  for (const m of MODELES) {
+    const rep = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: m, max_tokens: 600, ...(m.includes('haiku') ? { temperature: 0 } : {}),
+        messages: [{ role: 'user', content: [bloc, { type: 'text', text: consigne }] }] }),
+    })
+    if (rep.ok) {
+      const t = ((await rep.json()).content || []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('\n')
+      let res: Record<string, unknown>
+      try { res = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)) } catch { return { upload: j.upload_id, erreur: 'réponse illisible' } }
+      await service.rpc('pilotage_justificatif_ia', { p_upload: j.upload_id, p_obligation: j.obligation_id, p_resultat: { ...res, modele: m } })
+      return { upload: j.upload_id, conforme: res.conforme, expiration: res.date_expiration }
+    }
+    console.error('[pilotage-lecture-bail] justificatif', m, rep.status, (await rep.text()).slice(0, 300))
+    if (rep.status !== 404 && rep.status !== 400) break
+  }
+  return { upload: j.upload_id, erreur: 'IA indisponible' }
+}
+
 Deno.serve(async (req) => {
   const h = { ...cors(req), 'Content-Type': 'application/json' }
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: h })
@@ -169,6 +215,14 @@ Deno.serve(async (req) => {
   if (enteteCron) {
     const ok = (await service.rpc('pilotage_cron_valide', { p_secret: enteteCron })).data === true
     if (!ok) return rep(401, { error: 'Non autorisé' })
+    let c: { justificatifs?: boolean } = {}
+    try { c = await req.json() } catch { /* corps vide : lecture des baux */ }
+    if (c.justificatifs) {
+      const { data: liste } = await service.rpc('pilotage_justificatifs_a_lire', { p_max: 5 })
+      const faits: unknown[] = []
+      for (const j of (liste || [])) faits.push(await lireJustificatif(service, j))
+      return rep(200, { ok: true, faits })
+    }
     const { data: aLire } = await service.rpc('pilotage_baux_a_lire', { p_max: 3 })
     const faits: unknown[] = []
     for (const id of (aLire || []) as string[]) faits.push({ bail: id, ...(await lire(service, id, null, null, null)).body })
