@@ -20,6 +20,9 @@ const ETATS = {
   conge_a_delivrer: 'Congé à délivrer', conge_en_cours: 'Congé en préparation', conge_depose: 'Congé déposé dans Rivage, à enregistrer', conge_delivre: 'Congé délivré', hors_delai: 'Délai dépassé', fin_auto: 'Fin automatique', info: 'Contrat à vérifier',
   derogatoire_terme: 'Opposition urgente', derogatoire_depasse: 'Dérogatoire dépassé', incomplet: 'Fiche incomplète',
 };
+// Catégorie Rivage où déposer le justificatif d'un suivi : le dépôt fait passer le suivi à l'échéance suivante (027)
+const CATEG_JUSTIF = { assurance: 'Attestation d’assurance habitation', entretien: 'Attestation d’entretien de chaudière ou Contrats d’entretien', dpe: 'Diagnostic de Performance Énergétique',
+  garantie: 'Acte de caution ou Documents de caution', caution: 'Acte de caution ou Documents de caution', charges_regul: 'Avis de régularisation de charges' };
 const CANAL = { mail_locataire: 'Mail au locataire', mail_bailleur: 'Mail au bailleur', sms_rivage: 'SMS (Rivage)', lrar: 'Recommandé', tache: 'Tâche' };
 
 function useEmail() {
@@ -137,6 +140,7 @@ function DossierBail({ b, peut, moi, apres }) {
     {actions.map((a) => <div key={a.k} className={'mini-alerte ' + (a.grav || 'normale')}>
       <b>{SEV[a.grav] || 'Normale'}</b> · {a.libelle}
       {a.ob && <div className="muted">{a.ob.libelle} · échéance le {date(a.ob.prochaine)} · {CANAL[a.ob.a_faire.canal]} prévu le {date(a.ob.a_faire.date)}</div>}
+      {a.ob && CATEG_JUSTIF[a.ob.nature] && <div className="muted" style={{ fontSize: 12 }}>Justificatif reçu : le déposer dans Rivage, catégorie « {CATEG_JUSTIF[a.ob.nature]} » (sur le bail ou le lot) ; le suivi passe alors à l’échéance suivante.</div>}
       {peut && <div className="row" style={{ marginTop: 6 }}>
         {a.ech && ech.action === 'informer' && <button className="btn plein" onClick={() => ouvrirMail('echeance_info', {}, { cle: ech.cle, etape: 'informe', detail: 'Bailleur informé' })}>Préparer le mail au bailleur</button>}
         {a.ech && ech.action === 'relancer' && <button className="btn plein" onClick={() => ouvrirMail('echeance_relance', {}, { cle: ech.cle, etape: 'relance', detail: 'Bailleur relancé' })}>Préparer la relance</button>}
@@ -735,6 +739,7 @@ function Suivis({ d, b, peut, agir }) {
         <span className="puce">{e.fait_le ? '✓' : ''}</span><span>{e.libelle}<span className="muted"> · {date(e.date)}{e.fait_le ? ' · fait le ' + date(e.fait_le) : ''}</span>
         {peut && e.fait_le && <button className="lien" style={{ marginLeft: 8 }} onClick={() => agir('pilotage_suivi_etape', { p_cle: o.cle, p_etape: String(e.ordre), p_detail: null, p_annuler: true })}>Annuler</button>}</span></li>)}</ol>
       {o.derniere_le && <div className="muted">Dernière réalisation : {date(o.derniere_le)}</div>}
+      {CATEG_JUSTIF[o.nature] && <div className="muted" style={{ fontSize: 12 }}>Justificatif à déposer dans Rivage, catégorie « {CATEG_JUSTIF[o.nature]} » : reconnu automatiquement (passage toutes les 30 minutes).</div>}
       {peut && <div className="row" style={{ marginTop: 6 }}>
         <Realise ob={o} agir={agir} />
         <button className="btn gris" onClick={() => agir('pilotage_bail_obligation', { p_bail: b.bail_id, p_id: o.id, p_nature: o.nature, p_libelle: null, p_periodicite: o.periodicite_mois, p_prochaine: null, p_actif: !o.actif })}>{o.actif ? 'Arrêter ce suivi' : 'Réactiver'}</button>
