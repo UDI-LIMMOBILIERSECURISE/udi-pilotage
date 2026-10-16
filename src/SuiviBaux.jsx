@@ -349,7 +349,7 @@ function Question({ i, d, b, peut, agir }) {
         {i.mode === 'fiche' && <div style={{ marginTop: 4 }}><ChampFiche b={b} fiche={d.fiche} champ={i.ref} peut={peut} agir={agir} /></div>}
         {i.repondu && <div className="muted" style={{ fontSize: 12 }}>Répondu par {i.par || '—'} le {date(i.le)}{i.suivi ? ` · suivi ${i.suivi === 'rivage' ? 'dans Rivage' : 'dans le back-office'}` : ''}{i.commentaire ? ' · ' + i.commentaire : ''}</div>}
       </div>
-      {peut && <div className="row" style={{ justifyContent: 'flex-end' }}>
+      {peut && !(i.genere && i.genere !== 'garantie' && !i.repondu) && <div className="row" style={{ justifyContent: 'flex-end' }}>
         <select value={suivi} onChange={(e) => setSuivi(e.target.value)} aria-label="Où se fait le suivi">
           <option value="">Suivi —</option><option value="rivage">Suivi dans Rivage</option><option value="backoffice">Suivi back-office</option></select>
         <input placeholder="Commentaire" value={com} onChange={(e) => setCom(e.target.value)} style={{ width: 150 }} />
@@ -359,11 +359,132 @@ function Question({ i, d, b, peut, agir }) {
         {i.repondu && <button className="lien" onClick={() => agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: null, p_suivi: null, p_valeur: null, p_commentaire: null })}>Effacer</button>}
       </div>}
     </div>
-    {peut && i.genere && !suiviExiste && i.statut !== 'sans_objet' && (creer
+    {peut && i.genere && i.genere !== 'garantie' && !i.repondu && <QuestionSuivi i={i} d={d} b={b} agir={agir} />}
+    {suiviExiste && <div className="muted" style={{ fontSize: 12 }}>Suivi « {NATURES[i.genere]} » en place : {(d.obligations || []).filter((o) => o.nature === i.genere && o.actif).map((o) => `${o.libelle} (échéance ${date(o.prochaine)})`).join(' · ')}</div>}
+    {peut && i.genere && i.repondu && i.statut !== 'sans_objet' && (creer
       ? <NouveauSuivi b={b} nature={i.genere} agir={agir} fini={() => setCreer(false)} />
-      : <button className="lien" onClick={() => setCreer(true)}>+ Créer le suivi « {NATURES[i.genere]} »</button>)}
-    {suiviExiste && <div className="muted" style={{ fontSize: 12 }}>Suivi « {NATURES[i.genere]} » en place.</div>}
+      : <button className="lien" onClick={() => setCreer(true)}>+ Ajouter un autre suivi « {NATURES[i.genere]} »</button>)}
   </div>;
+}
+
+// ----- Questions de suivi selon la nature de l'obligation : la réponse crée directement les suivis et leurs relances -----
+const EQUIPEMENTS_HAB = ['Chaudière gaz', 'Chaudière fioul', 'Pompe à chaleur', 'Ballon thermodynamique', 'Cheminée ou insert', 'Fosse septique', 'Citerne gaz'];
+const EQUIPEMENTS_COM = ['Chaudière ou chaufferie', 'Climatisation', 'Extincteurs', 'Portes et rideaux métalliques', 'Système de sécurité incendie', 'Séparateur d’hydrocarbures', 'Ventilation, extraction'];
+const COMPTEURS = ['Eau froide', 'Eau chaude', 'Chauffage', 'Électricité', 'Gaz'];
+const plus = (iso, mois) => { const x = new Date(iso); x.setMonth(x.getMonth() + mois); return x.toISOString().slice(0, 10); };
+const prochainRelevé = () => { const a = new Date(); const y = a.getFullYear(); const juin = `${y}-06-30`, dec = `${y}-12-31`; return auj() <= juin ? juin : dec; };
+const prochainMars = () => { const y = new Date().getFullYear(); return auj() < `${y}-03-01` ? `${y}-03-01` : `${y + 1}-03-01`; };
+const prochainSept = () => { const y = new Date().getFullYear(); return auj() < `${y}-09-30` ? `${y}-09-30` : `${y + 1}-09-30`; };
+
+function QuestionSuivi({ i, d, b, agir }) {
+  const commercial = d.controle?.portee === 'commercial';
+  const n = i.genere;
+  const [v, setV] = useState({});
+  const [err, setErr] = useState('');
+  const maj = (k, x) => setV((o) => ({ ...o, [k]: x }));
+  const creer = async (liste, statut, resume) => {
+    setErr('');
+    try {
+      for (const o of liste) await rpc('pilotage_bail_obligation', { p_bail: b.bail_id, p_id: null, p_nature: n, p_libelle: o.libelle, p_periodicite: o.per ?? null, p_prochaine: o.date, p_actif: true });
+      await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: statut, p_suivi: liste.length ? 'backoffice' : null, p_valeur: resume, p_commentaire: statut === 'anomalie' ? resume : null });
+    } catch (e) { setErr(e.message); }
+  };
+  const boite = (contenu) => <div style={{ margin: '6px 0', background: 'var(--bg)', padding: 10, borderRadius: 8, fontSize: 14 }}>{contenu}{err && <div className="err">{err}</div>}</div>;
+
+  if (n === 'assurance') return boite(<>
+    <div className="row"><b>Assurance du {commercial ? 'preneur' : 'locataire'}</b></div>
+    <div className="row" style={{ marginTop: 6 }}>
+      <label>Échéance de l’attestation en cours <input type="date" value={v.date || ''} onChange={(e) => maj('date', e.target.value)} /></label>
+      <button className="btn plein" disabled={!v.date} onClick={() => creer([{ libelle: 'Attestation d’assurance', date: v.date, per: 12 }], 'ok', 'Attestation valable jusqu’au ' + date(v.date))}>Valider et suivre</button>
+      <button className="btn" onClick={() => creer([{ libelle: 'Attestation d’assurance', date: auj(), per: 12 }], 'anomalie', 'Aucune attestation reçue : relance immédiate')}>Pas d’attestation reçue</button>
+    </div></>);
+
+  if (n === 'entretien') {
+    const liste = commercial ? EQUIPEMENTS_COM : EQUIPEMENTS_HAB;
+    const coches = liste.concat(v.autre ? [v.autre] : []).filter((e) => v['eq_' + e]);
+    return boite(<>
+      <div><b>Équipements à entretenir à la charge du {commercial ? 'preneur' : 'locataire'}</b> <span className="muted">(un suivi annuel par équipement)</span></div>
+      {liste.map((e) => <div key={e} className="row" style={{ marginTop: 4 }}>
+        <label style={{ minWidth: 220 }}><input type="checkbox" checked={!!v['eq_' + e]} onChange={(x) => maj('eq_' + e, x.target.checked)} /> {e}</label>
+        {v['eq_' + e] && <label className="muted">Dernier entretien le <input type="date" value={v['d_' + e] || ''} onChange={(x) => maj('d_' + e, x.target.value)} /></label>}
+      </div>)}
+      <div className="row" style={{ marginTop: 4 }}><input placeholder="Autre équipement" value={v.autre || ''} onChange={(e) => maj('autre', e.target.value)} />
+        {v.autre && <label><input type="checkbox" checked={!!v['eq_' + v.autre]} onChange={(x) => maj('eq_' + v.autre, x.target.checked)} /> suivre</label>}
+        {v.autre && v['eq_' + v.autre] && <label className="muted">Dernier entretien le <input type="date" value={v['d_' + v.autre] || ''} onChange={(x) => maj('d_' + v.autre, x.target.value)} /></label>}</div>
+      <p className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Sans date du dernier entretien, le justificatif est demandé tout de suite.</p>
+      <div className="row">
+        <button className="btn plein" disabled={!coches.length} onClick={() => creer(coches.map((e) => ({ libelle: 'Entretien ' + e.toLowerCase(), date: v['d_' + e] ? plus(v['d_' + e], 12) : plus(auj(), 1), per: 12 })), 'ok', 'Équipements suivis : ' + coches.join(', '))}>Valider et suivre</button>
+        <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Aucun équipement à entretenir')}>Aucun équipement</button>
+      </div></>);
+  }
+
+  if (n === 'compteur') {
+    const coches = COMPTEURS.filter((c) => v['c_' + c]);
+    return boite(<>
+      <div><b>Compteurs du logement</b></div>
+      <div className="row" style={{ marginTop: 6 }}>
+        <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Compteurs individuels : rien à relever')}>Tous individuels</button>
+        <span className="muted">ou compteurs divisionnaires :</span>
+        {COMPTEURS.map((c) => <label key={c}><input type="checkbox" checked={!!v['c_' + c]} onChange={(x) => maj('c_' + c, x.target.checked)} /> {c}</label>)}
+      </div>
+      {coches.length > 0 && <div className="row" style={{ marginTop: 6 }}>
+        <label>Prochain relevé le <input type="date" value={v.date || prochainRelevé()} onChange={(e) => maj('date', e.target.value)} /></label>
+        <span className="muted" style={{ fontSize: 12 }}>Tous les 6 mois, calé sur la régularisation des charges.</span>
+        <button className="btn plein" onClick={() => creer([{ libelle: 'Relevé ' + coches.join(', ').toLowerCase(), date: v.date || prochainRelevé(), per: 6 }], 'ok', 'Divisionnaires : ' + coches.join(', '))}>Valider et suivre</button>
+      </div>}</>);
+  }
+
+  if (n === 'caution') return boite(<>
+    <div><b>Caution</b></div>
+    <div className="row" style={{ marginTop: 6 }}>
+      <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Pas de caution')}>Pas de caution</button>
+      <button className="btn" onClick={() => creer([], 'ok', 'Caution à durée indéterminée')}>Durée indéterminée</button>
+      <label>Engagement limité jusqu’au <input type="date" value={v.date || ''} onChange={(e) => maj('date', e.target.value)} /></label>
+      <button className="btn plein" disabled={!v.date} onClick={() => creer([{ libelle: 'Fin d’engagement de la caution', date: v.date, per: null }], 'ok', 'Caution jusqu’au ' + date(v.date))}>Valider et suivre</button>
+    </div></>);
+
+  if (n === 'dpe') return boite(<>
+    <div><b>Diagnostic de performance énergétique</b></div>
+    <div className="row" style={{ marginTop: 6 }}>
+      <label>Classe <select value={v.classe || ''} onChange={(e) => maj('classe', e.target.value)}><option value="">—</option>{['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((c) => <option key={c}>{c}</option>)}</select></label>
+      <label>Fin de validité <input type="date" value={v.date || ''} onChange={(e) => maj('date', e.target.value)} /></label>
+      <button className="btn plein" disabled={!v.date || (!commercial && !v.classe)} onClick={() => creer([{ libelle: 'Validité du DPE' + (v.classe ? ' (classe ' + v.classe + ')' : ''), date: v.date, per: null }],
+        !commercial && ['F', 'G'].includes(v.classe) ? 'anomalie' : 'ok', (v.classe ? 'Classe ' + v.classe + ', ' : '') + 'valide jusqu’au ' + date(v.date) + (!commercial && ['F', 'G'].includes(v.classe) ? ' : loyer gelé à la révision' : ''))}>Valider et suivre</button>
+      <button className="btn" onClick={() => creer([], 'anomalie', 'Pas de DPE au dossier')}>Pas de DPE</button>
+    </div></>);
+
+  if (n === 'tsb') return boite(<>
+    <div><b>Taxe sur les bureaux (Île-de-France)</b></div>
+    <div className="row" style={{ marginTop: 6 }}>
+      <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Lot non concerné')}>Lot non concerné</button>
+      <button className="btn" onClick={() => creer([], 'ok', 'Lot concerné, refacturation non prévue au bail')}>Concerné, non refacturable</button>
+      <button className="btn plein" onClick={() => creer([{ libelle: 'Taxe sur les bureaux à refacturer', date: prochainMars(), per: 12 }], 'ok', 'Concerné et refacturable au preneur')}>Concerné et refacturable : suivre</button>
+    </div></>);
+
+  if (n === 'surprime') return boite(<>
+    <div><b>Surprime d’assurance liée à l’activité du preneur</b></div>
+    <div className="row" style={{ marginTop: 6 }}>
+      <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Pas de clause de surprime')}>Pas de clause</button>
+      <label>Renouvellement du contrat d’assurance de l’immeuble le <input type="date" value={v.date || ''} onChange={(e) => maj('date', e.target.value)} /></label>
+      <button className="btn plein" disabled={!v.date} onClick={() => creer([{ libelle: 'Surprime d’assurance à vérifier et refacturer', date: v.date, per: 12 }], 'ok', 'Clause de surprime refacturable')}>Valider et suivre</button>
+    </div></>);
+
+  if (n === 'tertiaire') return boite(<>
+    <div><b>Décret tertiaire</b></div>
+    <div className="row" style={{ marginTop: 6 }}>
+      <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Moins de 1 000 m² tertiaires')}>Non concerné</button>
+      <button className="btn plein" onClick={() => creer([{ libelle: 'Déclaration OPERAT', date: prochainSept(), per: 12 }], 'ok', 'Concerné : déclaration annuelle')}>Concerné : suivre</button>
+    </div></>);
+
+  // Régularisation des charges, état des travaux, destination : une échéance et une périodicité
+  const PAR_DEFAUT = { charges_regul: ['Régularisation des charges et état récapitulatif', 12], etat_travaux: ['État prévisionnel des travaux', 36], destination: ['Contrôle de la destination des lieux', 12] };
+  const [lib, per] = PAR_DEFAUT[n] || [NATURES[n], PERIODE[n] ?? 12];
+  return boite(<div className="row">
+    <b>{lib}</b>
+    <label>Prochaine échéance <input type="date" value={v.date || ''} onChange={(e) => maj('date', e.target.value)} /></label>
+    <button className="btn plein" disabled={!v.date} onClick={() => creer([{ libelle: lib, date: v.date, per }], 'ok', lib + ' : prochaine échéance le ' + date(v.date))}>Valider et suivre</button>
+    <button className="btn gris" onClick={() => creer([], 'sans_objet', 'Non prévu au bail')}>Non prévu au bail</button>
+  </div>);
 }
 
 function NouveauSuivi({ b, nature: n0, agir, fini }) {
