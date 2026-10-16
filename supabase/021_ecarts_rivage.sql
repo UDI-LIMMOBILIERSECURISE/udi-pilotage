@@ -2,12 +2,35 @@
 --   Bouton « Corriger dans Rivage » : une fois Rivage corrigé, le point disparaît ; si l'erreur persiste, il réapparaît.
 --   Pour cela, la réponse à un point du bloc Rivage mémorise l'écart constaté (colonne valeur) et ne vaut que pour lui.
 --   Valider « Conforme » ou « Anomalie » sur un écart exige une justification, contrôlée aussi en base.
+--   Pièces et clauses datées : seules celles exigées à la date du bail en vigueur sont demandées.
+--   Dates : la date de signature Rivage est aussi comparée à celle lue dans le bail.
 -- Remplace pilotage.controle_bail (020) et public.pilotage_bail_repondre (016).
+-- Obligations datées : une pièce ou une clause n'est exigée que pour les baux conclus ou renouvelés depuis son entrée en vigueur.
+-- Sources : Lefebvre Dalloz (inventaire des charges et état des travaux, baux conclus ou renouvelés depuis le 5/11/2014 ; une
+-- tacite prolongation n'est pas un renouvellement) ; swim.legal (état des lieux commercial, 1/9/2014) ; notaires de Paris
+-- (diagnostics électricité et gaz : 1/7/2017 en collectif avec permis avant 1975, 1/1/2018 pour les autres) ; notaires (DPE en
+-- location 1/7/2007, état des risques 1/6/2006, plomb 12/8/2008).
+alter table pilotage.controle_questions add column if not exists exige_depuis date, add column if not exists exige_note text;
+update pilotage.controle_questions set exige_depuis = v.d, exige_note = v.n
+from (values
+  ('c_doc_edl', date '2014-09-01', 'obligatoire pour les baux commerciaux conclus ou renouvelés depuis le 01/09/2014 (loi Pinel, art. L145-40-1).'),
+  ('c_doc_inventaire', date '2014-11-05', 'obligatoire pour les baux conclus ou renouvelés depuis le 05/11/2014 (art. L145-40-2, décret du 3/11/2014).'),
+  ('c_doc_travaux', date '2014-11-05', 'obligatoire pour les baux conclus ou renouvelés depuis le 05/11/2014 (art. L145-40-2).'),
+  ('c_cl_etat_travaux', date '2014-11-05', 'obligatoire pour les baux conclus ou renouvelés depuis le 05/11/2014 (art. L145-40-2).'),
+  ('c_doc_dpe', date '2007-07-01', 'annexé aux baux signés depuis le 01/07/2007.'),
+  ('c_doc_erp', date '2006-06-01', 'annexé aux baux signés depuis le 01/06/2006.'),
+  ('h_doc_dpe', date '2007-07-01', 'annexé aux baux signés depuis le 01/07/2007.'),
+  ('h_doc_erp', date '2006-06-01', 'annexé aux baux signés depuis le 01/06/2006.'),
+  ('h_doc_plomb', date '2008-08-12', 'annexé aux baux signés depuis le 12/08/2008.'),
+  ('h_doc_elec_gaz', date '2017-07-01', 'annexés aux baux signés depuis le 01/07/2017 (immeuble collectif, permis avant 1975) ou le 01/01/2018 (autres logements).')
+) v(c, d, n) where cle = v.c;
+update pilotage.controle_questions set libelle = 'Date de signature, prise d''effet et durée du bail en cours' where cle in ('c_rv_dates', 'h_rv_dates');
+
 create or replace function pilotage.controle_bail(p_bail text) returns jsonb
 language plpgsql stable security definer set search_path = pilotage, public as $$
 declare
   o jsonb; lot record; f pilotage.baux_fiche; typ text; v_portee text; items jsonb := '[]'::jsonb; q record; rep pilotage.baux_reponses;
-  auto text; detail text; valeur_ia jsonb; lecture jsonb; docs text[]; loyer numeric; dg numeric; idx jsonb; restant integer := 0; anomalies integer := 0; ia_diff text; vide boolean; ia_ok boolean;
+  auto text; detail text; valeur_ia jsonb; lecture jsonb; docs text[]; loyer numeric; dg numeric; idx jsonb; restant integer := 0; anomalies integer := 0; ia_diff text; vide boolean; ia_ok boolean; v_date_bail date;
 begin
   select data into o from pilotage.objets where type = 'LeasingContract' and id = p_bail;
   if o is null then return null; end if;
@@ -19,12 +42,18 @@ begin
   select array_agg(distinct u.data->>'nature') into docs from pilotage.objets u
    where u.type = 'Upload' and u.supprime_le is null
      and exists (select 1 from jsonb_array_elements(coalesce(u.data->'resourceables', '[]'::jsonb)) rr where rr->>'id' in (p_bail, o->>'asset_id'));
+  -- Date du bail en vigueur (conclusion ou dernier renouvellement) : date de signature dans Rivage, à défaut date d'effet.
+  v_date_bail := coalesce(nullif(o->>'signed_at','')::date, nullif(o->>'start_date','')::date);
   loyer := round((o->>'rent_in_cents')::numeric / 100, 2); dg := round((o->>'deposit_in_cents')::numeric / 100, 2); idx := coalesce(o->'quarter_revision_index', o->'signing_quarter_revision_index');
 
   for q in select * from pilotage.controle_questions where controle_questions.portee = v_portee order by case bloc when 'pieces' then 1 when 'rivage' then 2 else 3 end, ordre loop
     select * into rep from pilotage.baux_reponses where bail_id = p_bail and cle = q.cle;
     auto := null; detail := null; valeur_ia := lecture->q.cle;
-    if q.mode = 'document' then
+    if q.exige_depuis is not null and v_date_bail is not null and v_date_bail < q.exige_depuis then
+      -- Obligation postérieure au bail : non exigée pour ce bail (tant qu'il n'est pas renouvelé).
+      auto := 'sans_objet';
+      detail := 'Non exigé pour ce bail signé le ' || to_char(v_date_bail, 'DD/MM/YYYY') || ' : ' || q.exige_note;
+    elsif q.mode = 'document' then
       if q.ref = any(coalesce(docs, '{}')) then auto := 'ok'; detail := 'Déposé dans Rivage.'; else detail := 'Absent dans Rivage.'; end if;
     elsif q.mode = 'fiche' then
       detail := case q.ref
@@ -45,13 +74,15 @@ begin
                  || ' · Bailleur : ' || coalesce(pilotage.bailleurs_mandat(lot.mandat_id), '—');
           vide := jsonb_array_length(coalesce(o->'tenants','[]'::jsonb)) = 0;
         when 'dates' then
-          detail := 'Début ' || coalesce(to_char((o->>'start_date')::date, 'DD/MM/YYYY'), '—') || ', durée ' || coalesce(o->>'duration_in_months', '—') || ' mois';
-          vide := o->>'start_date' is null or coalesce(nullif(o->>'duration_in_months','')::integer, 0) = 0;
+          detail := 'Signé le ' || coalesce(to_char((o->>'signed_at')::date, 'DD/MM/YYYY'), '—') || ', début ' || coalesce(to_char((o->>'start_date')::date, 'DD/MM/YYYY'), '—') || ', durée ' || coalesce(o->>'duration_in_months', '—') || ' mois';
+          vide := o->>'signed_at' is null or o->>'start_date' is null or coalesce(nullif(o->>'duration_in_months','')::integer, 0) = 0;
+          if valeur_ia is not null and nullif(valeur_ia->>'signature','') is not null and valeur_ia->>'signature' <> coalesce(o->>'signed_at','') then
+            ia_diff := 'signé le ' || to_char((valeur_ia->>'signature')::date, 'DD/MM/YYYY'); end if;
           if valeur_ia is not null and nullif(valeur_ia->>'debut','') is not null and valeur_ia->>'debut' <> coalesce(o->>'start_date','') then
-            ia_diff := 'date d''effet du ' || to_char((valeur_ia->>'debut')::date, 'DD/MM/YYYY'); end if;
+            ia_diff := concat_ws(', ', ia_diff, 'date d''effet du ' || to_char((valeur_ia->>'debut')::date, 'DD/MM/YYYY')); end if;
           if valeur_ia is not null and nullif(valeur_ia->>'duree_mois','') is not null and valeur_ia->>'duree_mois' <> coalesce(o->>'duration_in_months','') then
             ia_diff := concat_ws(', ', ia_diff, 'durée de ' || (valeur_ia->>'duree_mois') || ' mois'); end if;
-          ia_ok := valeur_ia->>'debut' = o->>'start_date' and valeur_ia->>'duree_mois' = o->>'duration_in_months';
+          ia_ok := ia_diff is null and valeur_ia->>'debut' = o->>'start_date' and valeur_ia->>'duree_mois' = o->>'duration_in_months';
         when 'loyer' then
           detail := 'Loyer ' || coalesce(replace(to_char(loyer, 'FM999G999G990D00'), ',', ' '), '—') || ' € HC, appelé tous les ' || coalesce(o->>'frequency_in_months', '1') || ' mois'
                  || case when (o->>'rent_supplement_in_cents') is not null then ', complément ' || round((o->>'rent_supplement_in_cents')::numeric / 100, 2) || ' €' else '' end;
@@ -115,14 +146,14 @@ begin
       rep := null;
     end if;
     if rep.statut is null then
-      if coalesce(auto, '') <> 'ok' then restant := restant + 1; end if;
+      if coalesce(auto, '') not in ('ok', 'sans_objet') then restant := restant + 1; end if;
     end if;
     if coalesce(rep.statut, auto) = 'anomalie' then anomalies := anomalies + 1; end if;
     items := items || jsonb_build_object('cle', q.cle, 'bloc', q.bloc, 'libelle', q.libelle, 'aide', q.aide, 'mode', q.mode, 'ref', q.ref, 'genere', q.genere,
       'auto', auto, 'detail', detail, 'ia', valeur_ia,
-      'statut', coalesce(rep.statut, case when auto = 'ok' then 'ok' end), 'repondu', rep.statut is not null,
+      'statut', coalesce(rep.statut, case when auto in ('ok', 'sans_objet') then auto end), 'repondu', rep.statut is not null,
       'suivi', rep.suivi, 'valeur', rep.valeur, 'commentaire', rep.commentaire, 'par', pilotage.prenom_membre(rep.par), 'le', rep.le,
-      'a_traiter', rep.statut is null and coalesce(auto, '') <> 'ok');
+      'a_traiter', rep.statut is null and coalesce(auto, '') not in ('ok', 'sans_objet'));
   end loop;
   return jsonb_build_object('portee', v_portee, 'items', items, 'restant', restant, 'anomalies', anomalies,
     'go_le', f.go_le, 'go_par', pilotage.prenom_membre(f.go_par), 'lecture_le', (select max(le) from pilotage.baux_lectures where bail_id = p_bail));

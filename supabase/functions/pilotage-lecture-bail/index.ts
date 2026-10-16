@@ -26,7 +26,7 @@ Règles strictes :
 - "valeur" : réponse courte en français (une phrase au plus), avec les dates au format jj/mm/aaaa et les montants avec le symbole €.
 - "page" : numéro de la page du PDF où se trouve l'information (1 = première page), sinon null.
 - "extrait" : citation exacte et courte (200 caractères au plus) du passage qui fonde la réponse, sinon null.
-- Pour les clés de dates et durée (c_rv_dates, h_rv_dates), ajoute "debut" (AAAA-MM-JJ, date de prise d'effet du bail en cours) et "duree_mois" (entier).
+- Pour les clés de dates et durée (c_rv_dates, h_rv_dates), ajoute "signature" (AAAA-MM-JJ, date de signature du bail en cours), "debut" (AAAA-MM-JJ, date de prise d'effet du bail en cours) et "duree_mois" (entier).
 - Pour les clés de dépôt de garantie (c_rv_dg, h_rv_dg), ajoute "montant" (nombre, en euros).
 - Pour les clés de loyer (c_rv_loyer, h_rv_loyer), ajoute "montant_mensuel" (loyer mensuel hors charges et hors taxes, nombre ; loyer annuel divisé par 12 s'il est exprimé à l'année).
 - Pour les clés de charges (c_rv_charges, h_rv_charges), ajoute "montant_mensuel" (provision ou forfait mensuel, nombre ; 0 s'il n'y en a pas).

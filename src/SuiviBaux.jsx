@@ -329,9 +329,13 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
     {d.lecture && <LectureIA l={d.lecture} />}
     {ouvert && ['pieces', 'rivage', 'clauses'].map((bloc) => <div key={bloc}>
       <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS[bloc]}</b></div>
-      {c.items.filter((i) => i.bloc === bloc && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche'))
+      {c.items.filter((i) => i.bloc === bloc && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche') && !(i.auto === 'sans_objet' && !i.repondu))
         .sort((x, y) => (y.auto === 'anomalie') - (x.auto === 'anomalie'))
         .map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
+      {(() => { const so = c.items.filter((i) => i.bloc === bloc && i.auto === 'sans_objet' && !i.repondu);
+        return so.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 13 }}>– {so.length} point(s) non exigé(s) à la date de ce bail</summary>
+          <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{so.map((i) => <li key={i.cle}>{i.libelle} · {i.detail}</li>)}</ul></details>; })()}
       {(() => { const ok = c.items.filter((i) => i.bloc === bloc && i.auto === 'ok' && !i.repondu && i.mode !== 'fiche');
         return ok.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {ok.length} point(s) conforme(s) automatiquement{bloc === 'rivage' ? ' : identiques dans le bail et dans Rivage' : bloc === 'pieces' ? ' : pièces déposées dans Rivage' : ''}</summary>
