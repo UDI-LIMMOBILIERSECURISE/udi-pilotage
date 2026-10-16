@@ -17,7 +17,7 @@ const NATURES = {
 const PERIODE = { assurance: 12, entretien: 12, compteur: 6, tsb: 12, surprime: 12, charges_regul: 12, etat_travaux: 36, tertiaire: 12, destination: 12 };
 const ETATS = {
   a_venir: 'À venir', a_informer: 'Bailleur à informer', attente_bailleur: 'Réponse du bailleur attendue', reconduit: 'Reconduit (sans réponse)', decide: 'Décision prise',
-  conge_a_delivrer: 'Congé à délivrer', conge_delivre: 'Congé délivré', hors_delai: 'Délai dépassé', fin_auto: 'Fin automatique', info: 'Contrat à vérifier',
+  conge_a_delivrer: 'Congé à délivrer', conge_en_cours: 'Congé en préparation', conge_depose: 'Congé déposé dans Rivage, à enregistrer', conge_delivre: 'Congé délivré', hors_delai: 'Délai dépassé', fin_auto: 'Fin automatique', info: 'Contrat à vérifier',
   derogatoire_terme: 'Opposition urgente', derogatoire_depasse: 'Dérogatoire dépassé', incomplet: 'Fiche incomplète',
 };
 const CANAL = { mail_locataire: 'Mail au locataire', mail_bailleur: 'Mail au bailleur', sms_rivage: 'SMS (Rivage)', lrar: 'Recommandé', tache: 'Tâche' };
@@ -249,7 +249,8 @@ function Echeance({ d, b, peut, agir, ouvrirMail }) {
         <select value={mode} onChange={(e) => setMode(e.target.value)} aria-label="Mode de délivrance">
           <option value="">Mode de délivrance</option><option value="commissaire">Commissaire de justice</option><option value="lrar">LRAR</option><option value="remise">Remise contre émargement</option></select>
         <button className="btn" disabled={!conge || !mode} onClick={() => agir('pilotage_echeance_decision', { p_bail: b.bail_id, p_decision: null, p_proposition: null, p_conge: conge, p_conge_mode: mode })}>Enregistrer</button></div>}
-      {ech.conge_le && <p>Congé délivré le {date(ech.conge_le)} ({ech.conge_mode}).</p>}
+      {ech.etat === 'conge_en_cours' && <p className="muted">Congé décidé le {date(ech.choix_le)} : acte en préparation. Relance automatique le {date(ech.relance_conge)} si le congé n’est ni enregistré ici ni déposé dans Rivage (document dont le nom contient « congé »).</p>}
+      {ech.conge_le && <p>Congé délivré le {date(ech.conge_le)} ({ech.conge_mode}) : enregistré aussi dans « Actes et notifications ».</p>}
       {peut && !ech.action && ech.etat !== 'a_venir' && <button className="lien" onClick={() => ouvrirMail('echeance_info', {}, { cle: ech.cle, etape: 'informe', detail: 'Bailleur informé' })}>Préparer à nouveau le mail d’information au bailleur</button>}
     </>}
   </>;
