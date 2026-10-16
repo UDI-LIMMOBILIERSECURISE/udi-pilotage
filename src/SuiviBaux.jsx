@@ -411,8 +411,18 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
             : <button className="lien" style={{ marginLeft: 8 }} onClick={() => { const m = window.prompt('Qu’est-ce qui ne va pas ? (obligatoire)'); if (m && m.trim()) agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: 'rivage', p_valeur: null, p_commentaire: m.trim() }); }}>Contester</button>)}</li>)}</ul></details>}
 
       <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.clauses}</b></div>
-      {c.items.filter((i) => i.bloc === 'clauses' && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche') && !(i.auto === 'sans_objet' && !i.repondu))
+      {/* Clauses : seules celles à traiter restent ouvertes ; les réponses données sont résumées sur une ligne chacune */}
+      {c.items.filter((i) => i.bloc === 'clauses' && !i.repondu && !(i.auto === 'ok' && i.mode !== 'fiche') && i.auto !== 'sans_objet')
         .map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
+      {(() => { const faites = c.items.filter((i) => i.bloc === 'clauses' && i.repondu);
+        return faites.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {faites.length} clause(s) traitée(s)</summary>
+          <div style={{ marginTop: 4 }}>{faites.map((i) => <div key={i.cle} style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 38%) 1fr auto', gap: 10, padding: '3px 0', borderTop: '1px solid var(--line)', fontSize: 13 }}>
+            <span>{i.statut === 'anomalie' ? '⚠ ' : i.statut === 'sans_objet' ? '– ' : '✓ '}{i.libelle}</span>
+            <span>{[i.mode === 'fiche' ? court(i.detail) : null, i.genere ? i.valeur : null, i.commentaire !== i.valeur ? i.commentaire : null].filter(Boolean).join(' · ') || (i.statut === 'sans_objet' ? 'Sans objet' : 'Oui')}
+              <span className="muted"> ({i.par || '—'}, {date(i.le)})</span></span>
+            {peut && <button className="lien" onClick={() => agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: null, p_suivi: null, p_valeur: null, p_commentaire: null })}>Revenir</button>}
+          </div>)}</div></details>; })()}
       {(() => { const so = c.items.filter((i) => i.bloc === 'clauses' && i.auto === 'sans_objet' && !i.repondu);
         return so.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 13 }}>– {so.length} point(s) non exigé(s) à la date de ce bail</summary>
@@ -491,12 +501,12 @@ function LectureIA({ l }) {
   const r = l.resultat || {};
   const an = Array.isArray(r.anomalies) ? r.anomalies : []; const rf = Array.isArray(r.refacturations) ? r.refacturations : [];
   if (!an.length && !rf.length) return null;
-  return <div className="resume-ia" style={{ marginTop: 8 }}>
-    <span className="resume-ia-titre">✦ Lecture du bail</span> <span className="muted">({l.source}, le {date(l.le)})</span>
+  return <details className="resume-ia" style={{ marginTop: 8 }}>
+    <summary style={{ cursor: 'pointer' }}><span className="resume-ia-titre">✦ Lecture du bail</span> <span className="muted">({l.source}, le {date(l.le)} · {an.length} point(s) signalé(s), {rf.length} somme(s) refacturable(s))</span></summary>
     {an.length > 0 && <><div style={{ marginTop: 4 }}><b>Points signalés</b></div><ul style={{ margin: '2px 0 6px', paddingLeft: 18 }}>{an.map((x, k) => <li key={k}>{String(x)}</li>)}</ul></>}
     {rf.length > 0 && <><div><b>Sommes refacturables selon le bail</b></div><ul style={{ margin: '2px 0 6px', paddingLeft: 18 }}>{rf.map((x, k) => <li key={k}>{x.nature}{x.article ? ` (art. ${x.article})` : ''}{x.page ? `, page ${x.page}` : ''}</li>)}</ul></>}
     <div className="muted" style={{ fontSize: 12 }}>Proposition de l’IA à vérifier sur le document : chaque point se valide dans le questionnaire.</div>
-  </div>;
+  </details>;
 }
 
 function Question({ i, d, b, peut, agir }) {

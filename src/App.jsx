@@ -3,6 +3,7 @@ import { supabase, rpc } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
 import SuiviBaux from './SuiviBaux.jsx';
 import DossierMandat from './SuiviMandat.jsx';
+import Commissions from './Commissions.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
@@ -64,7 +65,7 @@ function Espace() {
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
   const tabs = [['jour', 'Ma journée', true], ['agence', 'Toute l’agence', voit('agence')], ['sinistres', 'Sinistres', voit('sinistres')],
-    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['baux', 'Baux et obligations', voit('baux')], ['obligations', 'Obligations suivies', moi.voit_reglages],
+    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['mandats', 'Mandats', moi.voit_commissions], ['baux', 'Baux et obligations', voit('baux')], ['commissions', 'Commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
     ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
   return (
     <>
@@ -83,6 +84,7 @@ function Espace() {
         {onglet === 'impayes' && voit('impayes') && <Impayes />}
         {onglet === 'baux' && voit('baux') && <SuiviBaux moi={moi} />}
         {onglet === 'mandats' && moi.voit_commissions && <Mandats />}
+        {onglet === 'commissions' && moi.voit_commissions && <Commissions />}
         {onglet === 'obligations' && moi.voit_reglages && <Obligations />}
         {onglet === 'regles' && moi.voit_reglages && <Regles />}
         {onglet === 'equipe' && moi.voit_reglages && <Equipe moi={moi} />}
@@ -236,18 +238,14 @@ function Mandats() {
   const parNego = negos.map((n) => ({ ...n, lignes: lignes.filter((l) => l.benef === n.user_id) })).filter((n) => n.lignes.length || n.role === 'negociateur');
   const s = mandats.find((m) => m.id === sel);
   return <>
-    <div className="entete"><div><h1>Mandats et commissions</h1>
-      <p className="sub">Validation des mandats et des baux, avancement de chaque mandat et commissions des négociateurs. Commissions calculées pour les mandats commencés depuis le 01/01/2026.</p></div></div>
+    <div className="entete"><div><h1>Mandats</h1>
+      <p className="sub">Avancement de chaque mandat, contrôle d’entrée et GO « dossier complet ». Les commissions des commerciaux sont dans l’onglet Commissions.</p></div></div>
     {err && <div className="banner">{err}</div>}
     {sansGo.length > 0 && <div className="banner">⚠ {sansGo.length} mandat{sansGo.length > 1 ? 's' : ''} loué{sansGo.length > 1 ? 's' : ''} sans GO : {sansGo.map((m) => 'n°' + m.reference).join(', ')}</div>}
-    <Tuiles items={[[suivis.length, 'Mandats suivis (2026)'], [aValider, 'Validations en attente', true],
-      [suivis.filter((m) => m.statut === 'Loué').length, 'Loués'],
-      [euro(lignes.filter((l) => l.v.du && !l.facture).reduce((t, l) => t + Number(l.v.montant), 0)), 'Commissions dues à facturer'],
-      [euro(lignes.filter((l) => l.facture).reduce((t, l) => t + Number(l.facture.montant ?? l.v.montant), 0)), 'Déjà facturé']]} />
+    <Tuiles items={[[suivis.length, 'Mandats depuis 2026'], [suivis.filter((m) => !m.go_le && m.statut !== 'Retiré sans location').length, 'GO à donner', true],
+      [suivis.filter((m) => m.statut === 'Loué').length, 'Loués'], [d.mandats.length, 'Mandats au total']]} />
     <label className="switch" style={{ float: 'right', marginTop: 6 }}><input type="checkbox" checked={anciens} onChange={(e) => setAnciens(e.target.checked)} /> Afficher aussi les mandats antérieurs à 2026 ({d.mandats.length - suivis.length})</label>
-    <div className="bascule" style={{ marginBottom: 14 }}>{[['pipeline', 'Pipeline'], ['validation', `Validation${aValider ? ' (' + aValider + ')' : ''}`], ['commissions', 'Commissions par négociateur']].map(([k, l]) =>
-      <button key={k} className={vue === k ? 'on' : ''} onClick={() => setVue(k)}>{l}</button>)}</div>
-
+    <div style={{ clear: 'both', height: 8 }} />
     {vue === 'pipeline' && s && <section className="panneau" style={{ marginTop: 8 }}>
       <button className="btn" onClick={() => setSel(null)}>← Retour au pipeline</button>
       <div style={{ maxWidth: 980, marginTop: 10 }}><FicheMandat m={s} negos={negos} role={d.mon_role} majMandat={majMandat} majBail={majBail} apres={charger} /></div>
@@ -269,66 +267,11 @@ function Mandats() {
               <div className="barres">{et.map(([l2, ok, ko]) => <span key={l2} title={l2} className={ok ? 'fait' : ko ? 'retard' : ''} />)}</div>
               <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}>
                 <span className={m.manques.length ? '' : 'muted'} style={{ color: m.manques.length ? 'var(--amber)' : undefined }}>{m.manques.length ? m.manques.length + ' point(s) à compléter' : 'Complet'}</span>
-                {m.suivi_commission && <span className="mono">{euro(m.total_reel ?? m.total_prev)}</span>}</div>
+              </div>
             </button>; })}
         </div>; })}</div>
     </AvecDetail>}
 
-    {vue === 'validation' && <>
-      <h2>Mandats</h2>
-      <div className="table-wrap"><table>
-        <thead><tr><th>Mandat</th><th>Bailleur</th><th>Début</th><th>Négociateur</th><th>Apport direction</th><th>Loyer prévu</th><th>GO dossier complet</th><th>À compléter</th></tr></thead>
-        <tbody>{mandats.map((m) => <tr key={m.id} className={m.suivi_commission && m.bail && !m.go_le ? 'anomalie' : ''}>
-          <td><button className="lien" onClick={() => { setSel(m.id); setVue('pipeline'); }}>n°{m.reference}</button>{m.nom ? ' · ' + m.nom : ''}{!m.suivi_commission && <div className="muted">avant 2026</div>}</td>
-          <td>{m.bailleur}</td>
-          <td>{date(m.debut)}</td>
-          <td><select value={m.negociateur || ''} onChange={(e) => majMandat(m.id, 'negociateur', e.target.value)}><option value="">— à attribuer —</option>{negos.map((n) => <option key={n.user_id} value={n.user_id}>{n.prenom}</option>)}</select></td>
-          <td><input type="checkbox" checked={m.apport_direction} onChange={(e) => majMandat(m.id, 'apport_direction', String(e.target.checked))} /></td>
-          <td><input style={{ width: 90 }} defaultValue={m.loyer_prevu_saisi ?? ''} key={'lp' + m.id + m.loyer_prevu_saisi} placeholder={m.loyer_prev != null ? String(m.loyer_prev) : 'CC'} onBlur={(e) => e.target.value !== String(m.loyer_prevu_saisi ?? '') && majMandat(m.id, 'loyer_prevu', e.target.value)} /></td>
-          <td>{m.go_le ? <span>✓ {date(m.go_le)}{m.go_par ? ' · ' + m.go_par : ''} <button className="lien" onClick={() => majMandat(m.id, 'go', '')}>annuler</button></span>
-            : <button className="btn plein" onClick={() => majMandat(m.id, 'go', auj())}>Donner le GO</button>}</td>
-          <td className="muted">{m.manques.filter((x) => !x.startsWith('GO')).join(' · ') || '—'}</td>
-        </tr>)}</tbody></table></div>
-      {d.mon_role === 'superviseur' && <p className="muted">Le GO n’est possible que sur un dossier sans autre point à compléter ; sinon Nicolas le donne.</p>}
-      <h2 style={{ marginTop: 22 }}>Baux signés depuis le 01/01/2026</h2>
-      <div className="table-wrap"><table>
-        <thead><tr><th>Bail</th><th>Bailleur · mandat</th><th>Locataire</th><th>Signé le</th><th>Loyer CC</th><th>Honoraires location TTC</th><th>Loué par</th><th>Validation</th></tr></thead>
-        <tbody>{baux.map((b) => <tr key={b.id}>
-          <td><a href={b.lien} target="_blank" rel="noreferrer">{b.reference}</a>{b.mise_en_location_du_mandat && <div className="muted">mise en location du mandat</div>}</td>
-          <td>{b.bailleur}<div className="muted">{b.mandat}</div></td>
-          <td>{b.locataires}</td>
-          <td>{date(b.signe_le || b.debut)}</td>
-          <td>{euro(b.loyer_cc)}</td>
-          <td>{euro(b.honoraires_location_ttc)}</td>
-          <td><select value={b.loue_par || ''} onChange={(e) => majBail(b.id, 'loue_par', e.target.value)}><option value="">— à renseigner —</option>{negos.map((n) => <option key={n.user_id} value={n.user_id}>{n.prenom}</option>)}</select></td>
-          <td>{b.valide_le ? <span>✓ {date(b.valide_le)}{b.valide_par ? ' · ' + b.valide_par : ''} <button className="lien" onClick={() => majBail(b.id, 'valide', '')}>annuler</button></span>
-            : <button className="btn plein" onClick={() => majBail(b.id, 'valide', auj())}>Valider</button>}</td>
-        </tr>)}
-        {!baux.length && <tr><td colSpan="8" className="muted">Aucun bail signé depuis le 01/01/2026.</td></tr>}</tbody></table></div>
-    </>}
-
-    {vue === 'commissions' && <>
-      <div className="row" style={{ marginBottom: 12 }}>{parNego.map((n) => <button key={n.user_id} className={'chip' + ((nego || parNego[0]?.user_id) === n.user_id ? ' on' : '')} onClick={() => setNego(n.user_id)}>{n.prenom}<span className="n">{n.lignes.length}</span></button>)}</div>
-      {(() => { const n = parNego.find((x) => x.user_id === (nego || parNego[0]?.user_id)); if (!n) return <p className="muted">Aucun négociateur.</p>;
-        const dus = n.lignes.filter((l) => l.v.du && !l.facture); const fact = n.lignes.filter((l) => l.facture); const att = n.lignes.filter((l) => !l.v.du && !l.facture);
-        const tot = (arr) => arr.reduce((t, l) => t + Number(l.facture?.montant ?? l.v.montant), 0);
-        return <>
-          <Tuiles items={[[euro(tot(dus)), 'À facturer maintenant'], [euro(tot(fact)), 'Déjà facturé'], [euro(tot(att)), 'À venir (conditions non remplies)']]} />
-          <div className="table-wrap"><table>
-            <thead><tr><th>Mandat</th><th>Versement</th><th>Condition</th><th>Montant HT</th><th>État</th><th>N° de facture</th></tr></thead>
-            <tbody>{n.lignes.map((l) => <tr key={l.m.id + l.v.cle} className={l.v.montant < 0 ? 'anomalie' : ''}>
-              <td><button className="lien" onClick={() => { setSel(l.m.id); setVue('pipeline'); }}>n°{l.m.reference}</button> · {l.m.bailleur}</td>
-              <td>{l.v.libelle}</td>
-              <td className="muted">{l.v.condition}</td>
-              <td style={{ fontWeight: 700, color: l.v.montant < 0 ? 'var(--red)' : undefined }}>{euro(l.v.montant)}{l.v.montant < 0 && <div className="muted">reprise sur commissions à venir</div>}</td>
-              <td>{l.facture ? <span className="etq ok">Facturé</span> : l.v.du ? <span className="etq encours">À facturer</span> : <span className="etq neutre">En attente</span>}</td>
-              <td><input style={{ width: 110 }} defaultValue={l.facture?.facture || ''} key={'f' + l.m.id + l.v.cle + (l.facture?.facture || '')} placeholder={l.v.du ? 'n° facture' : '—'} disabled={!l.v.du && !l.facture}
-                onBlur={(e) => e.target.value !== (l.facture?.facture || '') && facturer(l.m.id, l.v.cle, e.target.value, l.v.montant)} /></td>
-            </tr>)}
-            {!n.lignes.length && <tr><td colSpan="6" className="muted">Aucun mandat attribué depuis le 01/01/2026.</td></tr>}</tbody></table></div>
-          <p className="muted">Barème : rentrée = 8 mois d’honoraires de gestion HT (6 mois si apport direction), versée 50 % à la signature, 25 % au GO, 25 % + ajustement au loyer réel à la mise en location ; mise en location = 40 % des honoraires de location HT. Un versement devient « à facturer » quand sa condition est remplie et validée.</p>
-        </>; })()}
-    </>}
   </>;
 }
 
@@ -346,21 +289,12 @@ function FicheMandat({ m, negos, role, majMandat, majBail, apres }) {
     <ol className="etapes">{et.map(([l, ok, ko]) => <li key={l} className={ok ? 'fait' : ko ? 'retard' : ''}><span className="puce">{ok ? '✓' : ''}</span><span>{l}</span></li>)}</ol>
     <Champs items={[['Négociateur', m.negociateur_prenom || 'à attribuer'], ['Mandat signé le', date(m.signe_le)], ['Début', date(m.debut)], ['Lots', String(m.lots)],
       ['Taux de gestion TTC', m.taux_ttc != null ? m.taux_ttc + ' %' : '—'], ['Loyer prévu', euro(m.loyer_prev)], ['Loyer réel', euro(m.loyer_reel)],
-      ['Honoraires / mois HT', euro(m.honoraires_mois_ht)], [`Rému mandat (${m.mois} mois)`, euro(m.total_reel ?? m.total_prev)],
       ['GO', m.go_le ? date(m.go_le) + (m.go_par ? ' · ' + m.go_par : '') : 'non donné'],
-      ['Bail', m.bail ? `${m.bail.reference} · ${date(m.bail.signe_le || m.bail.debut)} · ${euro(m.bail.loyer_cc)} CC` : '—'],
-      ['Loué par', m.bail ? (m.bail.loue_par_prenom || 'à renseigner') : '—'], ['Bail validé', m.bail ? (m.bail.valide_le ? date(m.bail.valide_le) : 'non') : '—']]} />
-    {m.suivi_commission ? <><h3>Versements au négociateur</h3>
-      <div className="versements">{m.versements.map((v) => { const f = m.factures?.[v.cle];
-        return <div key={v.cle} className="versement">
-          <span>{v.libelle}</span><b style={{ color: v.montant < 0 ? 'var(--red)' : undefined }}>{euro(v.montant)}</b>
-          <span className="muted">{v.condition}</span>
-          {f ? <span className="etq ok">Facturé {f.facture}</span> : v.du ? <span className="etq encours">À facturer</span> : <span className="etq neutre">En attente</span>}
-        </div>; })}</div></> : <p className="muted">Mandat commencé avant 2026 : pas de commission de rentrée.</p>}
+      ['Bail', m.bail ? `${m.bail.reference} · ${date(m.bail.signe_le || m.bail.debut)} · ${euro(m.bail.loyer_cc)} CC` : '—']]} />
+    {m.suivi_commission && <p className="muted" style={{ fontSize: 12 }}>Commissions de ce mandat : onglet Commissions.</p>}
     <div className="row" style={{ marginTop: 14, gap: 8 }}>
       <select value={m.negociateur || ''} onChange={(e) => majMandat(m.id, 'negociateur', e.target.value)}><option value="">Négociateur…</option>{negos.map((n) => <option key={n.user_id} value={n.user_id}>{n.prenom}</option>)}</select>
       {!m.go_le && m.statut !== 'Retiré sans location' && <button className="btn plein" onClick={() => majMandat(m.id, 'go', auj())}>Valider le dossier complet (GO)</button>}
-      {m.bail && !m.bail.valide_le && <button className="btn plein" onClick={() => majBail(m.bail.id, 'valide', auj())}>Valider le bail</button>}
       {!m.bail && m.statut !== 'Retiré sans location' && <button className="btn gris" onClick={() => majMandat(m.id, 'retire', auj())}>Retiré sans location</button>}
       {m.retire_le && <button className="btn gris" onClick={() => majMandat(m.id, 'retire', '')}>Annuler « retiré »</button>}
       <a className="btn" href={m.lien} target="_blank" rel="noreferrer">Propriétaire dans Rivage</a>
