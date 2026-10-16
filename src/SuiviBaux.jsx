@@ -284,6 +284,7 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
   const manquants = c.items.filter((i) => i.bloc === 'pieces' && i.statut !== 'ok' && i.statut !== 'sans_objet').map((i) => i.libelle);
   // Écarts détectés (Rivage vide, différence avec le bail lu, incohérence légale) : restent visibles même une fois répondus.
   const ecarts = c.items.filter((i) => i.auto === 'anomalie' && i.bloc !== 'pieces');
+  const ficheRivage = 'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id;
   const lire = async (fichier) => {
     setLecture({ charge: true, err: '' });
     let body = { bail_id: b.bail_id };
@@ -319,6 +320,11 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
         <a href={'#q-' + i.cle} onClick={() => setOuvert(true)} style={{ color: 'inherit' }}>{i.libelle}</a> · {i.detail}
         {i.repondu ? <b> → {i.statut === 'ok' ? 'validé conforme' : i.statut === 'anomalie' ? 'anomalie confirmée' : 'sans objet'} par {i.par || '—'}{i.commentaire ? ' : ' + i.commentaire : ' sans justification'}</b> : <b> → à traiter</b>}
       </li>)}</ul>
+      <div className="row" style={{ marginTop: 6 }}>
+        <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>
+        <button className="btn gris" onClick={() => recharger()}>Revérifier après correction</button>
+      </div>
+      <div style={{ fontSize: 12, marginTop: 4 }}>Une fois Rivage corrigé, le point disparaît ; si l’écart persiste, il reste affiché. Une réponse donnée sur un écart ne vaut que pour cet écart : si Rivage change, le point est recontrôlé.</div>
     </div>}
     {d.lecture && <LectureIA l={d.lecture} />}
     {ouvert && ['pieces', 'rivage', 'clauses'].map((bloc) => <div key={bloc}>
@@ -395,6 +401,7 @@ function Question({ i, d, b, peut, agir }) {
         <select value={suivi} onChange={(e) => setSuivi(e.target.value)} aria-label="Où se fait le suivi">
           <option value="">Suivi —</option><option value="rivage">Suivi dans Rivage</option><option value="backoffice">Suivi back-office</option></select>
         <input placeholder={ecart ? 'Justification (obligatoire)' : 'Commentaire'} value={com} onChange={(e) => setCom(e.target.value)} style={{ width: 150 }} />
+        {ecart && <a className="btn plein" href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>}
         <button className="btn" onClick={() => repondre('ok')}>Conforme</button>
         <button className="btn" onClick={() => repondre('anomalie')}>Anomalie</button>
         <button className="btn gris" onClick={() => repondre('sans_objet')}>Sans objet</button>
