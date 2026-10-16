@@ -1,5 +1,5 @@
 // Mise à jour du reflet pilotage depuis l'API Rivage (lecture seule).
-// Appelée chaque nuit par pg_cron (en-tête x-pilotage-cron) ou à la demande par la direction (jeton de session).
+// Appelée chaque semaine (et chaque mois pour les référentiels comptables) par pg_cron (en-tête x-pilotage-cron), ou à la demande par la direction (jeton de session).
 // Complète les webhooks : rattrape ce qui n'a pas été envoyé et les objets créés avant leur mise en place.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 
@@ -7,16 +7,21 @@ const RIVAGE = 'https://rivage.immo'
 const ORIGINES = ['https://udi-pilotage.vercel.app', 'http://localhost:5173', 'http://localhost:4173']
 
 // Modèle Rivage -> chemin API. Ordre : référentiels d'abord.
-const MODELES: [string, string][] = [
-  ['GliProvider', '/api/v1/gli_providers'],
-  ['ManagementContract', '/api/v1/management_contracts'],
-  ['AssetGroup', '/api/v1/asset_groups'],
-  ['Asset', '/api/v1/assets'],
-  ['LeasingContract', '/api/v1/leasing_contracts'],
-  ['Profile', '/api/v1/profiles'],
-  ['Incident', '/api/v1/incidents'],
-  ['AccountingEventGroup', '/api/v1/accounting_event_groups'],
-  ['AccountingAccount', '/api/v1/accounting_accounts'],
+// Les webhooks mettent le reflet à jour en continu, dès qu'un objet change dans Rivage. L'API ne donne pas de date de
+// modification ni de filtre « modifié depuis » : la relecture complète ne sert donc qu'au rattrapage, et elle est espacée.
+//   hebdo   : chaque semaine (mandats, lots, baux, profils, incidents)
+//   mensuel : chaque mois (référentiels comptables, volumineux et peu changeants)
+// Un appel à la demande (bouton « Mettre à jour maintenant ») relit tout.
+const MODELES: [string, string, 'hebdo' | 'mensuel'][] = [
+  ['GliProvider', '/api/v1/gli_providers', 'hebdo'],
+  ['ManagementContract', '/api/v1/management_contracts', 'hebdo'],
+  ['AssetGroup', '/api/v1/asset_groups', 'hebdo'],
+  ['Asset', '/api/v1/assets', 'hebdo'],
+  ['LeasingContract', '/api/v1/leasing_contracts', 'hebdo'],
+  ['Profile', '/api/v1/profiles', 'hebdo'],
+  ['Incident', '/api/v1/incidents', 'hebdo'],
+  ['AccountingEventGroup', '/api/v1/accounting_event_groups', 'mensuel'],
+  ['AccountingAccount', '/api/v1/accounting_accounts', 'mensuel'],
 ]
 
 // Données personnelles : on ne garde que ce qui sert au suivi (identité, e-mail, téléphone).
@@ -75,10 +80,15 @@ Deno.serve(async (req) => {
     return rep(500, { error: 'Clé Rivage mal formée : ' + diag })
   }
 
-  const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur })
+  // Tâche planifiée : relecture hebdomadaire (corps vide) ou mensuelle ({"mode":"mensuel"}) ; à la demande : tout
+  let mode = 'complet'
+  if (cronValide) { try { mode = (await req.json())?.mode === 'mensuel' ? 'mensuel' : 'hebdo' } catch { mode = 'hebdo' } }
+  const aLire = MODELES.filter(([, , f]) => mode !== 'hebdo' || f === 'hebdo')
+
+  const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur + (mode === 'complet' ? '' : ' (' + mode + ')') })
   const compteurs: Record<string, number> = {}
   try {
-    for (const [modele, chemin] of MODELES) {
+    for (const [modele, chemin] of aLire) {
       let page = 1, total = 1, n = 0
       while (page <= total) {
         const r = await fetch(`${RIVAGE}${chemin}?page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })

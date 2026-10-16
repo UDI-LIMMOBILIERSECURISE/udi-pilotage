@@ -105,7 +105,8 @@ function DossierBail({ b, peut, moi, apres }) {
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
 
-  const agir = async (fn, args) => { setErr(''); try { await rpc(fn, args); await charger(); apres(); } catch (e) { setErr(e.message); } };
+  // Après chaque action, le calcul du bail est refait tout de suite pour la liste (cache 032)
+  const agir = async (fn, args) => { setErr(''); try { await rpc(fn, args); await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await charger(); apres(); } catch (e) { setErr(e.message); } };
   const ech = d.echeance || {}; const fiche = d.fiche || {};
   const ctx = { bail: b, fiche, ech, contacts: d.contacts, moi: { prenom: moi.prenom, email } };
   const ouvrirMail = (code, extra, etape) => {

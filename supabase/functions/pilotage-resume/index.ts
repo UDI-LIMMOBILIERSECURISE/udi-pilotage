@@ -23,7 +23,7 @@ const CONSIGNES: Record<string, string> = {
   alerte: "Il s'agit d'une alerte de contrôle automatique sur un dossier de gestion locative.",
   impaye: "Il s'agit d'un dossier de suivi d'impayé locatif (garantie loyers impayés GLI Zelok ou Mila, caution, huissier, avocat). Les champs du dossier viennent du tableau de suivi de l'agence ; echanges contient le fil des mises à jour de l'équipe (repris de Monday puis saisis dans le pilotage), du plus récent au plus ancien ; rivage contient les données du bail si le dossier y est rattaché. Résume en 4 à 6 phrases : où en est le dossier (garantie, prise en charge, indemnisation, procédure, audience), les montants connus, ce qui s'est passé de marquant dans les échanges (avec les dates), ce qui est en attente et qui doit agir. Ne recopie pas les échanges, synthétise-les. Signification des champs (vocabulaire du tableau de l'agence) : garantie = dispositif qui couvre l'impayé ; prise_en_charge = réponse de l'assureur sur la prise en charge du sinistre (OUI, En cours, NON REFUS = refusé, DECOMPTE MAJ OK = décompte à jour, VOIE HUISSIER, LOC REGUL DETTE = le locataire a régularisé) ; indemnisation_recue = indemnisation versée par l'assureur à l'agence (OK RECUE = reçue par l'agence, QUITTANCE SUBRO FINALE = quittance subrogative finale) ; indemnite_versee_bailleur = reversement de cette indemnité au propriétaire par l'agence (OK FAIT = reversée) ; dette_remb_loc = le locataire a-t-il remboursé sa dette ; solde_a_rembourser_assureur et indemnisation_a_rembourser = ce que l'agence doit rendre à l'assureur quand le locataire a payé après indemnisation ; intervenants = membres de l'équipe qui suivent le dossier ; declaration_le = date de déclaration du sinistre à l'assureur ; maj_assureur_le = dernière mise à jour du dossier chez l'assureur. Un champ vide signifie seulement que l'information n'a pas été saisie : ne le présente pas comme un manque dans le dossier sauf s'il est utile au suivi.",
   bail: "Il s'agit du suivi d'un bail géré par l'agence : échéance et procédure d'information du bailleur (echeance : type de bail, date d'échéance, date limite du congé, étape en cours, décision du bailleur, blocages), contrôle d'entrée (controle : points restant à traiter, anomalies, GO), suivis récurrents (obligations : assurance, entretien, compteurs, garanties, taxes, avec l'étape de relance à faire), paliers de loyer, actes (demandes de renouvellement, congés) et lecture du bail par l'IA si elle existe. Résume en 3 à 5 phrases : où en est le bail, ce qui est urgent (dates limites), ce qui reste à contrôler, et la prochaine action. Ne donne aucun avis juridique au-delà des règles rappelées dans les données.",
-  mandat: "Il s'agit d'un mandat de gestion rentré par un négociateur, suivi de sa signature jusqu'à la mise en location, et de la commission du négociateur. Barème : rentrée = 8 mois d'honoraires de gestion HT (6 si apport direction), versée 50 % à la signature, 25 % au GO de la direction (dossier complet validé), 25 % + ajustement au loyer réel à la mise en location ; mise en location = 40 % des honoraires de location HT à celui qui a loué. manques liste ce qui reste à faire ; versements donne chaque versement, son montant, sa condition et s'il est dû (du) ; factures les versements déjà facturés. Un bien loué sans GO est une anomalie à signaler. Résume en 3 à 5 phrases où en est le mandat, ce qui bloque et ce qui est dû au négociateur.",
+  mandat: "Il s'agit d'un mandat de gestion suivi de sa signature jusqu'à la mise en location : statut, négociateur, GO de la direction (dossier complet validé après le contrôle d'entrée), bail de mise en location. manques liste ce qui reste à faire. Un bien loué sans GO est une anomalie à signaler. Les commissions sont suivies ailleurs : n'en parle pas. Résume en 3 à 5 phrases où en est le mandat, ce qui bloque et la prochaine action.",
 }
 
 const SYSTEME = `Tu es l'assistant de supervision d'une agence de gestion locative française (UDI Gestion).
@@ -34,7 +34,7 @@ Règles strictes :
 - Si une information utile manque (null, vide), dis-le simplement plutôt que de supposer.
 - Mets en avant ce qui demande une action (retard, montant à rembourser ou à réclamer, pièce ou étape manquante, incident à la charge du locataire à imputer, etc.).
 - Termine par la prochaine action concrète à faire, formulée à l'infinitif.
-- Dates au format jj/mm/aaaa, montants avec le symbole €.
+- Dates au format jj/mm/aaaa, montants avec le symbole €. Écris toujours les échéances en dates (« avant le 15/11/2026 »), jamais en durée relative (« dans 3 jours ») : le résumé est conservé tant que le dossier ne change pas.
 - Ne cite jamais les noms techniques des champs ni des valeurs comme true, false ou null : écris en français courant.
 - Ne tire aucune conclusion juridique ou factuelle qui ne découle pas directement d'une donnée fournie.`
 
@@ -99,8 +99,9 @@ Deno.serve(async (req) => {
   const contenu = JSON.stringify(dossier)
   const cle = `${corps.type}:${corps.id}`
   const aujourdhui = new Date().toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })
-  // Le jour fait partie de l'empreinte : un résumé qui parle de délais est refait chaque jour
-  const emp = await empreinte(aujourdhui + contenu)
+  // Résumé conservé tant que les données du dossier ne changent pas (le jour n'entre plus dans l'empreinte) :
+  // l'IA n'est rappelée qu'après une mise à jour (webhook Rivage, saisie dans le pilotage) ou sur « Actualiser ».
+  const emp = await empreinte(contenu)
   const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   if (!corps.forcer) {

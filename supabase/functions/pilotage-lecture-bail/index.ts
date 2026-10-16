@@ -7,6 +7,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 
 const ORIGINES = ['https://udi-pilotage.vercel.app', 'http://localhost:5173', 'http://localhost:4173']
 const MODELES = [Deno.env.get('PILOTAGE_MODELE_LECTURE') || 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001']
+// Tâches simples (dire si un document est la bonne pièce, lire la date d'une attestation) : modèle léger d'abord, dix fois moins cher
+const MODELES_SIMPLES = ['claude-haiku-4-5-20251001', MODELES[0]]
 const MAX_OCTETS = 25 * 1024 * 1024
 
 function cors(req: Request) {
@@ -136,7 +138,7 @@ async function verifierPiece(service: ReturnType<typeof createClient>, bail: str
   const consigne = `Pièce attendue dans le dossier d'un ${mandat ? 'mandat de gestion' : 'bail'} : « ${piece} ». Nom du fichier dans Rivage : « ${src.libelle || ''} ».
 Dis si ce document est bien cette pièce. N'invente rien. Réponds uniquement par un objet JSON :
 {"conforme": true ou false, "type_document": "ce qu'est réellement le document, en quelques mots", "date": "AAAA-MM-JJ ou null (date du document)", "raison": "une phrase"}`
-  for (const m of MODELES) {
+  for (const m of MODELES_SIMPLES) {
     const rep = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
@@ -181,7 +183,7 @@ N'invente rien. Réponds uniquement par un objet JSON :
  "date_document": "AAAA-MM-JJ ou null (date d'émission, ou date de l'intervention pour un entretien)",
  "date_expiration": "AAAA-MM-JJ ou null (fin de validité ou de la période couverte, si elle est écrite)",
  "raison": "une phrase"}`
-  for (const m of MODELES) {
+  for (const m of MODELES_SIMPLES) {
     const rep = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
