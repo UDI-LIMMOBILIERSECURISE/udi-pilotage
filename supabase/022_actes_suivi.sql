@@ -109,10 +109,10 @@ begin
     end if;
     -- 022 : après la décision de congé, l'acte est en cours chez le commissaire de justice (ou en préparation) :
     -- pas d'alerte pendant 10 jours ; ensuite relance tant que l'acte n'est ni enregistré ni déposé dans Rivage.
-    -- Un document dont le libellé contient « congé », déposé dans Rivage sur ce bail ou ce lot après la décision, est repéré.
+    -- Un document dont le libellé contient « congé » (avec ou sans accent, majuscules comprises), déposé dans Rivage sur ce bail ou ce lot après la décision, est repéré.
     if e.conge_le is null then
       select min(u.maj_le::date) into depot from pilotage.objets u
-       where u.type = 'Upload' and u.supprime_le is null and (u.data->>'label') ilike any (array['%congé%', '%conge%'])
+       where u.type = 'Upload' and u.supprime_le is null and lower(translate(coalesce(u.data->>'label', ''), 'éèêëÉÈÊË', 'eeeeeeee')) like '%conge%'
          and u.maj_le >= coalesce(e.decision_le, '-infinity'::timestamptz)
          and exists (select 1 from jsonb_array_elements(coalesce(u.data->'resourceables', '[]'::jsonb)) rr where rr->>'id' in (p_bail, o->>'asset_id'));
       relance_conge := (e.decision_le::date + 10);
