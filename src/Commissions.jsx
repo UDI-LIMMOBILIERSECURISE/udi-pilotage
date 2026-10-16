@@ -64,7 +64,7 @@ function Suivi({ lignes, membres, qui, setQui, agir }) {
       <thead><tr><th>Dossier</th><th>Phase</th><th>Calcul</th><th>Condition</th><th>Montant HT</th><th>État</th><th>N° de facture</th></tr></thead>
       <tbody>{liste.map((l) => <tr key={l.objet + l.regle} className={Number(l.montant) < 0 ? 'anomalie' : ''}>
         <td>{l.type === 'mandat' ? `Mandat n°${l.mandat_ref}` : `Bail ${l.bail_ref} · ${l.locataires || ''}`}<div className="muted">{l.bailleur}</div></td>
-        <td>{l.phase_libelle}<div className="muted">{BENEF[l.beneficiaire_role]}</div></td>
+        <td>{l.phase_libelle}<div className="muted">{BENEF[l.beneficiaire_role]}{l.regle_perso ? ' · règle personnelle' : ''}</div></td>
         <td className="muted">{l.base === 'forfait' ? 'Forfait' : `${l.pourcentage} % × ${l.base_libelle} (${euro(l.base_montant)})`}</td>
         <td className="muted">{l.condition}</td>
         <td style={{ fontWeight: 700, color: Number(l.montant) < 0 ? 'var(--red)' : undefined }}>{euro(l.montant)}{Number(l.montant) < 0 && <div className="muted">reprise sur commissions à venir</div>}</td>
@@ -114,33 +114,55 @@ function Affectations({ mandats, baux, membres, lignes, agir, role }) {
   </>;
 }
 
-// ----- Paramètres de rémunération -----
+// ----- Paramètres de rémunération : règles générales et règles par commercial -----
 function Parametres({ d, direction, agir }) {
-  const vide = { phase: 'mandat_signe', beneficiaire: 'negociateur', pourcentage: '', base: 'gestion', forfait: '' };
+  const vide = { phase: 'mandat_signe', beneficiaire: 'negociateur', pourcentage: '', base: 'gestion', forfait: '', mois: '' };
   const [n, setN] = useState(vide);
+  const [qui, setQui] = useState('');   // '' = règles générales, sinon user_id du commercial
   const params = d.parametres || [];
+  const membres = d.membres || [];
+  const regles = (d.regles || []).filter((r) => (r.membre || '') === qui);
+  const avecPerso = new Set((d.regles || []).filter((r) => r.membre && r.actif).map((r) => r.membre));
+  const nom = (id) => membres.find((m) => m.user_id === id)?.prenom || '—';
+  const copierGenerales = async () => {
+    for (const r of (d.regles || []).filter((x) => !x.membre && x.actif)) {
+      await agir('pilotage_regle_remu', { p_id: null, p_phase: r.phase, p_beneficiaire: r.beneficiaire, p_pourcentage: r.pourcentage, p_base: r.base, p_forfait: r.forfait,
+        p_actif: true, p_supprimer: false, p_membre: qui, p_mois: r.mois ?? null });
+    }
+  };
   return <>
     <h2>Règles de rémunération</h2>
-    <p className="muted">Appliquées à tous les commerciaux, sur les mandats et les baux depuis le 01/01/2026. Une modification recalcule les montants non encore facturés ; les versements déjà facturés gardent leur montant facturé.</p>
+    <div className="row" style={{ marginBottom: 8 }}>
+      <button className={'chip' + (qui === '' ? ' on' : '')} onClick={() => setQui('')}>Règles générales</button>
+      {membres.map((m) => <button key={m.user_id} className={'chip' + (qui === m.user_id ? ' on' : '')} onClick={() => setQui(m.user_id)}>
+        {m.prenom}{avecPerso.has(m.user_id) && <span className="n">perso</span>}</button>)}
+    </div>
+    <p className="muted">{qui === '' ? <>Appliquées à tous les commerciaux qui n’ont pas de règles personnelles{avecPerso.size ? ` (règles personnelles : ${[...avecPerso].map(nom).join(', ')})` : ''}.</>
+      : avecPerso.has(qui) ? <>{nom(qui)} est payé(e) uniquement selon les règles ci-dessous (les règles générales ne s’appliquent plus à lui ou elle).</>
+      : <>{nom(qui)} est payé(e) selon les règles générales. Ajouter une règle ici, ou copier les règles générales pour les ajuster, crée son barème personnel.</>}
+      {' '}Une modification recalcule les montants non encore facturés ; les versements déjà facturés gardent leur montant.</p>
+    {direction && qui !== '' && !avecPerso.has(qui) && <button className="btn" onClick={copierGenerales}>Copier les règles générales pour {nom(qui)}</button>}
     <div className="table-wrap"><table>
-      <thead><tr><th>Phase</th><th>Bénéficiaire</th><th>%</th><th>Calculé sur</th><th>Forfait HT</th><th>Active</th><th></th></tr></thead>
-      <tbody>{(d.regles || []).map((r) => <Regle key={r.id} r={r} direction={direction} agir={agir} />)}</tbody></table></div>
+      <thead><tr><th>Phase</th><th>Bénéficiaire</th><th>%</th><th>Calculé sur</th><th>Mois</th><th>Forfait HT</th><th>Active</th><th></th></tr></thead>
+      <tbody>{regles.map((r) => <Regle key={r.id} r={r} direction={direction} agir={agir} />)}
+        {!regles.length && <tr><td colSpan="8" className="muted">{qui === '' ? 'Aucune règle générale.' : 'Pas de règle personnelle.'}</td></tr>}</tbody></table></div>
     {direction && <div className="row" style={{ gap: 6, marginTop: 8 }}>
-      <b>Ajouter une règle :</b>
+      <b>Ajouter une règle {qui === '' ? 'générale' : 'pour ' + nom(qui)} :</b>
       <select value={n.phase} onChange={(e) => setN({ ...n, phase: e.target.value, base: BASES_PHASE(e.target.value)[0] })}>{Object.entries(PHASES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <select value={n.beneficiaire} onChange={(e) => setN({ ...n, beneficiaire: e.target.value })}>{Object.entries(BENEF).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <select value={n.base} onChange={(e) => setN({ ...n, base: e.target.value })}>{BASES_PHASE(n.phase).map((k) => <option key={k} value={k}>{BASES[k]}</option>)}</select>
       {n.base === 'forfait' ? <input placeholder="Montant HT" inputMode="decimal" value={n.forfait} onChange={(e) => setN({ ...n, forfait: e.target.value })} style={{ width: 100 }} />
         : <input placeholder="%" inputMode="decimal" value={n.pourcentage} onChange={(e) => setN({ ...n, pourcentage: e.target.value })} style={{ width: 70 }} />}
+      {n.base === 'gestion' && <input placeholder="Mois (défaut)" inputMode="decimal" value={n.mois} onChange={(e) => setN({ ...n, mois: e.target.value })} style={{ width: 100 }} />}
       <button className="btn plein" onClick={async () => { await agir('pilotage_regle_remu', { p_id: null, p_phase: n.phase, p_beneficiaire: n.beneficiaire, p_pourcentage: n.pourcentage === '' ? null : Number(n.pourcentage.replace(',', '.')),
-        p_base: n.base, p_forfait: n.forfait === '' ? null : Number(n.forfait.replace(',', '.')), p_actif: true, p_supprimer: false }); setN(vide); }}>Ajouter</button>
+        p_base: n.base, p_forfait: n.forfait === '' ? null : Number(n.forfait.replace(',', '.')), p_actif: true, p_supprimer: false, p_membre: qui || null, p_mois: n.mois === '' ? null : Number(n.mois.replace(',', '.')) }); setN(vide); }}>Ajouter</button>
     </div>}
-    <h2 style={{ marginTop: 22 }}>Paramètres</h2>
+    <h2 style={{ marginTop: 22 }}>Paramètres généraux</h2>
     <div className="table-wrap"><table><tbody>{params.map((p) => <tr key={p.cle}><td>{p.libelle}</td>
       <td><input style={{ width: 80 }} defaultValue={p.valeur} key={p.cle + p.valeur} disabled={!direction}
         onBlur={(e) => e.target.value !== String(p.valeur) && agir('pilotage_param_remu', { p_cle: p.cle, p_valeur: Number(e.target.value.replace(',', '.')) })} /></td></tr>)}</tbody></table></div>
     <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-      <p>Bases : les honoraires viennent de Rivage, convertis en HT (÷ 1,2). Honoraires de gestion = loyer charges comprises × taux de gestion TTC ÷ 1,2, multiplié par le nombre de mois ci-dessus (réduit si le mandat est apporté par la direction).
+      <p>Bases : les honoraires viennent de Rivage, convertis en HT (÷ 1,2). Honoraires de gestion = loyer charges comprises × taux de gestion TTC ÷ 1,2, multiplié par le nombre de mois de la règle (à défaut, le paramètre général ; réduit dans la même proportion si le mandat est apporté par la direction).
         Les bases location et EDL ne sont connues qu’au bail signé : une ligne est calculée pour chaque bail signé (mise en location et relocations).</p>
       <p>Limite Rivage : seule la part locataire des honoraires d’état des lieux est transmise ; la part bailleur n’est pas détaillée (elle est comprise dans les honoraires bailleur).</p>
     </div>
@@ -148,16 +170,18 @@ function Parametres({ d, direction, agir }) {
 }
 
 function Regle({ r, direction, agir }) {
-  const [v, setV] = useState({ phase: r.phase, beneficiaire: r.beneficiaire, pourcentage: r.pourcentage ?? '', base: r.base, forfait: r.forfait ?? '' });
-  const modifie = v.phase !== r.phase || v.beneficiaire !== r.beneficiaire || String(v.pourcentage) !== String(r.pourcentage ?? '') || v.base !== r.base || String(v.forfait) !== String(r.forfait ?? '');
+  const [v, setV] = useState({ phase: r.phase, beneficiaire: r.beneficiaire, pourcentage: r.pourcentage ?? '', base: r.base, forfait: r.forfait ?? '', mois: r.mois ?? '' });
+  const modifie = v.phase !== r.phase || v.beneficiaire !== r.beneficiaire || String(v.pourcentage) !== String(r.pourcentage ?? '') || v.base !== r.base || String(v.forfait) !== String(r.forfait ?? '') || String(v.mois) !== String(r.mois ?? '');
   const enreg = (actif, supprimer = false) => agir('pilotage_regle_remu', { p_id: r.id, p_phase: v.phase, p_beneficiaire: v.beneficiaire,
-    p_pourcentage: v.pourcentage === '' ? null : Number(String(v.pourcentage).replace(',', '.')), p_base: v.base, p_forfait: v.forfait === '' ? null : Number(String(v.forfait).replace(',', '.')), p_actif: actif, p_supprimer: supprimer });
-  if (!direction) return <tr style={{ opacity: r.actif ? 1 : 0.5 }}><td>{PHASES[r.phase]}</td><td>{BENEF[r.beneficiaire]}</td><td>{r.pourcentage ?? '—'}</td><td>{BASES[r.base]}</td><td>{euro(r.forfait)}</td><td>{r.actif ? 'Oui' : 'Non'}</td><td></td></tr>;
+    p_pourcentage: v.pourcentage === '' ? null : Number(String(v.pourcentage).replace(',', '.')), p_base: v.base, p_forfait: v.forfait === '' ? null : Number(String(v.forfait).replace(',', '.')), p_actif: actif, p_supprimer: supprimer,
+    p_membre: r.membre || null, p_mois: v.base === 'gestion' && v.mois !== '' ? Number(String(v.mois).replace(',', '.')) : null });
+  if (!direction) return <tr style={{ opacity: r.actif ? 1 : 0.5 }}><td>{PHASES[r.phase]}</td><td>{BENEF[r.beneficiaire]}</td><td>{r.pourcentage ?? '—'}</td><td>{BASES[r.base]}</td><td>{r.base === 'gestion' ? (r.mois ?? 'défaut') : '—'}</td><td>{euro(r.forfait)}</td><td>{r.actif ? 'Oui' : 'Non'}</td><td></td></tr>;
   return <tr style={{ opacity: r.actif ? 1 : 0.5 }}>
     <td><select value={v.phase} onChange={(e) => setV({ ...v, phase: e.target.value, base: BASES_PHASE(e.target.value).includes(v.base) ? v.base : BASES_PHASE(e.target.value)[0] })}>{Object.entries(PHASES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
     <td><select value={v.beneficiaire} onChange={(e) => setV({ ...v, beneficiaire: e.target.value })}>{Object.entries(BENEF).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
     <td>{v.base === 'forfait' ? '—' : <input style={{ width: 60 }} inputMode="decimal" value={v.pourcentage} onChange={(e) => setV({ ...v, pourcentage: e.target.value })} />}</td>
     <td><select value={v.base} onChange={(e) => setV({ ...v, base: e.target.value })}>{BASES_PHASE(v.phase).map((k) => <option key={k} value={k}>{BASES[k]}</option>)}</select></td>
+    <td>{v.base === 'gestion' ? <input style={{ width: 60 }} placeholder="défaut" inputMode="decimal" value={v.mois} onChange={(e) => setV({ ...v, mois: e.target.value })} /> : '—'}</td>
     <td>{v.base === 'forfait' ? <input style={{ width: 80 }} inputMode="decimal" value={v.forfait} onChange={(e) => setV({ ...v, forfait: e.target.value })} /> : '—'}</td>
     <td><input type="checkbox" checked={r.actif} onChange={(e) => enreg(e.target.checked)} /></td>
     <td className="row" style={{ gap: 6 }}>{modifie && <button className="btn plein" onClick={() => enreg(r.actif)}>Enregistrer</button>}
