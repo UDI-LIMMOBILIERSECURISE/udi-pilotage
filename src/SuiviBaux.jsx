@@ -156,18 +156,34 @@ function DossierBail({ b, peut, moi, apres }) {
     </div>)}
     {mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={peut} />}
 
-    <Echeance d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
-    {synthese
-      ? <Synthese d={d} b={b} peut={peut} soumis={soumis} parametrer={() => setParametrer(true)} />
-      : <>
-        {(d.controle?.go_le || !soumis) && <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}><button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse du bail</button></div>}
-        <Controle d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} />
-      </>}
-    <Suivis d={d} b={b} peut={peut} agir={agir} />
-    <Paliers d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
-    <Actes d={d} b={b} peut={peut} agir={agir} />
-    {journal.length > 0 && <><h3>Journal</h3><ol className="histo">{journal.slice(0, 30).map((j, i) =>
-      <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol></>}
+    {synthese ? <>
+      {/* Mode synthèse (même présentation que le mandat) : la fiche d'abord, le détail replié en dessous */}
+      <Synthese d={d} b={b} peut={peut} soumis={soumis} parametrer={() => setParametrer(true)} />
+      <details className="replie" open={!!ech.action || ['a_informer', 'attente_bailleur', 'conge_a_delivrer', 'conge_en_cours', 'conge_depose', 'hors_delai'].includes(ech.etat)} style={{ marginTop: 14 }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Échéance du bail · {date(ech.echeance)}{ETATS[ech.etat] ? ' · ' + ETATS[ech.etat] : ''}</summary>
+        <Echeance d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
+      </details>
+      <details className="replie" style={{ marginTop: 10 }} open={(d.obligations || []).some((o) => o.actif && (o.a_faire || o.en_retard))}>
+        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Suivis et relances ({(d.obligations || []).filter((o) => o.actif).length})</summary>
+        <Suivis d={d} b={b} peut={peut} agir={agir} />
+      </details>
+      <Paliers d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
+      <Actes d={d} b={b} peut={peut} agir={agir} />
+      {journal.length > 0 && <details className="replie" style={{ marginTop: 10 }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Journal ({journal.length})</summary>
+        <ol className="histo">{journal.slice(0, 30).map((j, i) =>
+          <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol>
+      </details>}
+    </> : <>
+      <Echeance d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
+      {(d.controle?.go_le || !soumis) && <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}><button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse du bail</button></div>}
+      <Controle d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} />
+      <Suivis d={d} b={b} peut={peut} agir={agir} />
+      <Paliers d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
+      <Actes d={d} b={b} peut={peut} agir={agir} />
+      {journal.length > 0 && <><h3>Journal</h3><ol className="histo">{journal.slice(0, 30).map((j, i) =>
+        <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol></>}
+    </>}
     <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={b.lien} target="_blank" rel="noreferrer">Ouvrir le bail dans Rivage</a></div>
   </>;
 }
@@ -415,7 +431,7 @@ function Synthese({ d, b, peut, soumis, parametrer }) {
   const aRevoir = c.items.filter((i) => (i.bloc === 'rivage' && !regle(i) && i.auto === 'anomalie'));
   const pieces = c.items.filter((i) => i.bloc === 'pieces' && !regle(i));
   const conditions = c.items.filter((i) => i.bloc === 'rivage' && i.statut !== 'sans_objet' && i.detail);
-  const clauses = c.items.filter((i) => i.bloc === 'clauses' && !i.genere && i.statut && i.statut !== 'sans_objet' && i.auto !== 'sans_objet');
+  const clauses = c.items.filter((i) => i.bloc === 'clauses' && i.statut && i.statut !== 'sans_objet' && i.auto !== 'sans_objet');
   const obs = (d.obligations || []).filter((o) => o.actif);
   const ligne = { display: 'grid', gridTemplateColumns: 'minmax(160px, 34%) 1fr', gap: 10, padding: '4px 0', borderTop: '1px solid var(--line)', fontSize: 13 };
   return <>
@@ -437,9 +453,11 @@ function Synthese({ d, b, peut, soumis, parametrer }) {
         {ech.limite ? ` · congé au plus tard le ${date(ech.limite)}` : ''}{ech.triennale ? ` · prochaine triennale ${date(ech.triennale)}` : ''}{ech.douze_ans ? ` · 12 ans le ${date(ech.douze_ans)}` : ''}</span></div>}
       {conditions.map((i) => <div key={i.cle} style={ligne}><b>{i.libelle}</b><span>{court(i.detail)}
         {i.repondu && i.auto === 'anomalie' && i.statut === 'ok' && <span className="muted"> · écart justifié : {i.commentaire}</span>}</span></div>)}
-      {clauses.map((i) => <div key={i.cle} style={ligne}><b>{i.libelle}</b><span>{i.statut === 'anomalie' ? '⚠ ' : ''}{[i.mode === 'fiche' ? court(i.detail) : null, i.commentaire].filter(Boolean).join(' · ') || 'Oui'}</span></div>)}
+      {clauses.map((i) => <div key={i.cle} style={ligne}><b>{i.libelle}</b><span>{i.statut === 'anomalie' ? '⚠ ' : ''}{[i.mode === 'fiche' ? court(i.detail) : null, i.genere ? i.valeur : null, i.commentaire !== i.valeur ? i.commentaire : null].filter(Boolean).join(' · ') || 'Oui'}</span></div>)}
       {(d.paliers || []).length > 0 && <div style={ligne}><b>Paliers et franchises</b><span>{d.paliers.map((p) => `${p.nature === 'franchise' ? 'Franchise' : 'Palier'} du ${date(p.debut)}${p.fin ? ' au ' + date(p.fin) : ''}`).join(' ; ')}</span></div>}
-      <div style={ligne}><b>Suivis en place</b><span>{obs.length ? obs.map((o) => `${o.libelle} (échéance ${date(o.prochaine)})`).join(' ; ') : 'Aucun'}</span></div>
+      {obs.length ? obs.map((o) => <div key={o.id} style={ligne}><b>Suivi · {NATURES[o.nature] || o.nature}</b><span>{o.libelle} · prochaine échéance le {date(o.prochaine)}{o.periodicite_mois ? ` · tous les ${o.periodicite_mois} mois` : ''}{o.derniere_le ? ` · dernier le ${date(o.derniere_le)}` : ''}
+        {o.en_retard ? <b style={{ color: 'var(--red)' }}> · en retard</b> : o.a_faire ? <span style={{ color: 'var(--amber)' }}> · {o.a_faire.libelle}</span> : null}</span></div>)
+        : <div style={ligne}><b>Suivis</b><span>Aucun suivi en place</span></div>}
       {(d.actes || []).length > 0 && <div style={ligne}><b>Actes</b><span>{d.actes.map((a) => `${ACTES[a.nature]} du ${a.auteur} le ${date(a.signifie_le)}`).join(' ; ')}</span></div>}
     </div>
   </>;
