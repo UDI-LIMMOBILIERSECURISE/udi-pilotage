@@ -97,6 +97,42 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
   return { status: 200, body: { ok: true, modele, source } }
 }
 
+// Vérification d'une pièce déposée dans Rivage (en cas de doute sur son nom) : l'IA dit si le document est bien la pièce attendue.
+async function verifierPiece(service: ReturnType<typeof createClient>, bail: string, upload: string, piece: string) {
+  const { data: src } = await service.rpc('pilotage_piece_source', { p_bail: bail, p_upload: upload })
+  if (!src?.url) return { status: 404, body: { error: 'Document introuvable dans Rivage pour ce bail.' } }
+  const r = await fetch(src.url)
+  if (!r.ok) return { status: 502, body: { error: 'Le lien du document Rivage a expiré : relancez la mise à jour depuis Rivage.' } }
+  const buf = await r.arrayBuffer()
+  if (buf.byteLength > MAX_OCTETS) return { status: 413, body: { error: 'Document trop volumineux (25 Mo au plus).' } }
+  const type = (r.headers.get('content-type') || '').split(';')[0].trim()
+  const bloc = type.startsWith('image/') && ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(type)
+    ? { type: 'image', source: { type: 'base64', media_type: type, data: b64(buf) } }
+    : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64(buf) } }
+  const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!cleApi) return { status: 500, body: { error: 'Service IA non configuré' } }
+  const consigne = `Pièce attendue dans le dossier d'un bail : « ${piece} ». Nom du fichier dans Rivage : « ${src.libelle || ''} ».
+Dis si ce document est bien cette pièce. N'invente rien. Réponds uniquement par un objet JSON :
+{"conforme": true ou false, "type_document": "ce qu'est réellement le document, en quelques mots", "date": "AAAA-MM-JJ ou null (date du document)", "raison": "une phrase"}`
+  for (const m of MODELES) {
+    const rep = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: m, max_tokens: 600, ...(m.includes('haiku') ? { temperature: 0 } : {}),
+        messages: [{ role: 'user', content: [bloc, { type: 'text', text: consigne }] }] }),
+    })
+    if (rep.ok) {
+      const j = await rep.json()
+      const t = (j.content || []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('\n')
+      try { return { status: 200, body: { ok: true, modele: m, ...JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)) } } }
+      catch { return { status: 502, body: { error: 'Réponse de l’IA illisible, réessayez.' } } }
+    }
+    console.error('[pilotage-lecture-bail] verif', m, rep.status, (await rep.text()).slice(0, 300))
+    if (rep.status !== 404 && rep.status !== 400) break
+  }
+  return { status: 502, body: { error: 'Le service IA n’a pas répondu' } }
+}
+
 Deno.serve(async (req) => {
   const h = { ...cors(req), 'Content-Type': 'application/json' }
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: h })
@@ -125,9 +161,13 @@ Deno.serve(async (req) => {
   const { data: moi } = await utilisateur.rpc('pilotage_moi')
   if (!moi || !['direction', 'superviseur', 'gestionnaire'].includes(moi.role)) return rep(403, { error: 'Réservé à la direction, au superviseur et aux gestionnaires' })
 
-  let corps: { bail_id?: string; pdf?: string; nom?: string }
+  let corps: { bail_id?: string; pdf?: string; nom?: string; upload_id?: string; piece?: string }
   try { corps = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   if (!corps.bail_id) return rep(400, { error: 'Bail manquant' })
+  if (corps.upload_id) {
+    const v = await verifierPiece(service, corps.bail_id, corps.upload_id, corps.piece || 'pièce du dossier')
+    return rep(v.status, v.body)
+  }
   const r = await lire(service, corps.bail_id, corps.pdf || null, corps.nom || null, u.user.id)
   return rep(r.status, r.body)
 })

@@ -94,9 +94,10 @@ function DossierBail({ b, peut, moi, apres }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [mail, setMail] = useState(null); // { m, etape: { cle, etape, detail } }
+  const [parametrer, setParametrer] = useState(false);
   const email = useEmail();
   const charger = () => rpc('pilotage_bail_dossier', { p_bail: b.bail_id }).then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { setD(null); setMail(null); charger(); }, [b.bail_id]);
+  useEffect(() => { setD(null); setMail(null); setParametrer(false); charger(); }, [b.bail_id]);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
 
@@ -112,6 +113,10 @@ function DossierBail({ b, peut, moi, apres }) {
     .filter((i) => i.repondu && i.auto === 'anomalie' && i.statut === 'ok' && i.commentaire)
     .map((i) => ({ le: i.le, detail: `Écart justifié · ${i.libelle} : ${i.detail} · justification : ${i.commentaire}`, par: i.par }))]
     .sort((x, y) => new Date(y.le) - new Date(x.le));
+  // Deux modes : contrôle d'entrée tant qu'il n'est pas bouclé ; ensuite synthèse du bail, avec « Modifier le paramétrage ».
+  // Contrôle non requis (habitation antérieure au contrôle d'entrée) : synthèse directement.
+  const soumis = ['commercial', 'derogatoire', 'professionnel'].includes(ech.type) || (b.debut && b.debut >= '2026-10-16');
+  const synthese = !parametrer && (!!d.controle?.go_le || !soumis);
   const etapeFaite = (cle, etape, detail) => agir('pilotage_suivi_etape', { p_cle: cle, p_etape: etape, p_detail: detail, p_annuler: false });
 
   // Actions du moment : échéance + obligations
@@ -147,7 +152,12 @@ function DossierBail({ b, peut, moi, apres }) {
     {mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={peut} />}
 
     <Echeance d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
-    <Controle d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} />
+    {synthese
+      ? <Synthese d={d} b={b} peut={peut} soumis={soumis} parametrer={() => setParametrer(true)} />
+      : <>
+        {(d.controle?.go_le || !soumis) && <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}><button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse du bail</button></div>}
+        <Controle d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} />
+      </>}
     <Suivis d={d} b={b} peut={peut} agir={agir} />
     <Paliers d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
     <Actes d={d} b={b} peut={peut} agir={agir} />
@@ -284,9 +294,9 @@ function ChampFiche({ b, fiche, champ, libelle, peut, agir }) {
 // ----- Contrôle d'entrée -----
 function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
   const c = d.controle || { items: [] };
-  const [ouvert, setOuvert] = useState(!c.go_le);
+  const [ouvert, setOuvert] = useState(true); // après le GO, on n'arrive ici que par « Modifier le paramétrage »
   const [lecture, setLecture] = useState({ charge: false, err: '' });
-  useEffect(() => { setOuvert(!c.go_le); }, [b.bail_id]);
+  useEffect(() => { setOuvert(true); }, [b.bail_id]);
   const manquants = c.items.filter((i) => i.bloc === 'pieces' && i.statut !== 'ok' && i.statut !== 'sans_objet').map((i) => i.libelle);
   // Écarts détectés (Rivage vide, différence avec le bail lu, incohérence légale) : restent visibles même une fois répondus.
   const ecarts = c.items.filter((i) => i.auto === 'anomalie' && i.bloc !== 'pieces');
@@ -299,7 +309,6 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
   const rivageOuverts = c.items.filter((i) => i.bloc === 'rivage' && !regle(i));
   const rivageFaits = c.items.filter((i) => i.bloc === 'rivage' && regle(i));
   const repondrePiece = async (i, statut) => {
-    if (statut === null && d.controle?.go_le) await agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false });
     await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: statut, p_suivi: statut ? (i.mode === 'document' || i.bloc === 'rivage' ? 'rivage' : 'backoffice') : null, p_valeur: null, p_commentaire: null });
   };
   const lire = async (fichier) => {
@@ -351,22 +360,23 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
         : <div className="mini-alerte haute">
           <b>{piecesManquantes.length} pièce(s) manquante(s)</b>
           {piecesManquantes.map((i) => <div key={i.cle} className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid rgba(0,0,0,.08)', padding: '5px 0', color: 'var(--ink)' }}>
-            <div style={{ flex: 1, minWidth: 220 }}>{i.libelle}{i.mode !== 'document' && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--blue)', background: 'var(--blue-bg)', borderRadius: 10, padding: '1px 8px' }}>Suivi back-office</span>}
-              {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}</div>
+            <div style={{ flex: 1, minWidth: 220 }}>{i.libelle}
+              {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
+              {i.statut === 'anomalie' && i.commentaire && <div style={{ fontSize: 12, color: 'var(--red)' }}>{i.commentaire}</div>}</div>
             {peut && <div className="row">
-              {i.mode === 'document'
-                ? <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Déposer dans Rivage ↗</a>
-                : <button className="btn" onClick={() => repondrePiece(i, 'ok')}>Reçue</button>}
+              <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Déposer dans Rivage ↗</a>
               <button className="lien" onClick={() => repondrePiece(i, 'sans_objet')}>Sans objet</button>
             </div>}
           </div>)}
-          <div style={{ fontSize: 12, marginTop: 4 }}>Une pièce déposée dans Rivage disparaît de cette liste à la prochaine mise à jour.</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>Une pièce déposée dans Rivage disparaît de cette liste à la prochaine mise à jour : elle est reconnue par sa catégorie Rivage ou par son nom (même approximatif).</div>
         </div>}
       {piecesFaites.length > 0 && <details style={{ padding: '4px 0' }}>
         <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 13 }}>{piecesFaites.length} pièce(s) au dossier, sans objet ou non exigée(s)</summary>
         <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{piecesFaites.map((i) => <li key={i.cle}>{i.libelle} · {
-          i.repondu ? (i.statut === 'ok' ? 'reçue' : 'sans objet') + ` (${i.par || '—'}, ${date(i.le)})` : i.auto === 'ok' ? 'déposée dans Rivage' : i.detail}
+          i.repondu ? (i.statut === 'ok' ? (i.commentaire || 'reçue') : 'sans objet') + ` (${i.par || '—'}, ${date(i.le)})` : i.detail}
+          {peut && i.auto === 'ok' && i.piece?.par_nom && !i.repondu && <VerifPiece i={i} b={b} agir={agir} />}
           {peut && i.repondu && <button className="lien" style={{ marginLeft: 8 }} onClick={() => repondrePiece(i, null)}>Revenir</button>}</li>)}</ul></details>}
+      {piecesFaites.some((i) => i.auto === 'ok' && i.piece?.par_nom && !i.repondu) && <div className="muted" style={{ fontSize: 12 }}>Pièces reconnues par leur nom : en cas de doute, « Vérifier avec l’IA » lit le document et confirme le dépôt.</div>}
 
       <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.rivage}</b></div>
       {rivageOuverts.length === 0 && <div style={{ color: 'var(--teal)', fontSize: 13, padding: '6px 0' }}>✓ Aucun point à traiter.</div>}
@@ -377,7 +387,7 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
           {i.repondu && <span className="muted"> · {i.statut === 'sans_objet' ? 'sans objet' : i.auto === 'anomalie' ? 'écart justifié : ' + (i.commentaire || '—') : 'validé'} ({i.par || '—'}, {date(i.le)})</span>}
           {peut && (i.repondu
             ? <button className="lien" style={{ marginLeft: 8 }} onClick={() => repondrePiece(i, null)}>Revenir</button>
-            : <button className="lien" style={{ marginLeft: 8 }} onClick={() => { const m = window.prompt('Qu’est-ce qui ne va pas ? (obligatoire)'); if (m && m.trim()) agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: 'rivage', p_valeur: null, p_commentaire: m.trim() }).then(() => d.controle?.go_le && agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })); }}>Contester</button>)}</li>)}</ul></details>}
+            : <button className="lien" style={{ marginLeft: 8 }} onClick={() => { const m = window.prompt('Qu’est-ce qui ne va pas ? (obligatoire)'); if (m && m.trim()) agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: 'rivage', p_valeur: null, p_commentaire: m.trim() }); }}>Contester</button>)}</li>)}</ul></details>}
 
       <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.clauses}</b></div>
       {c.items.filter((i) => i.bloc === 'clauses' && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche') && !(i.auto === 'sans_objet' && !i.repondu))
@@ -387,6 +397,70 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
           <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 13 }}>– {so.length} point(s) non exigé(s) à la date de ce bail</summary>
           <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{so.map((i) => <li key={i.cle}>{i.libelle} · {i.detail}</li>)}</ul></details>; })()}
     </>}
+  </>;
+}
+
+// ----- Synthèse du bail (contrôle bouclé) : conditions paramétrées, lisibles d'un coup d'œil -----
+const court = (t) => (t || '').split(' · ')[0];
+function Synthese({ d, b, peut, soumis, parametrer }) {
+  const c = d.controle || { items: [] };
+  const ech = d.echeance || {};
+  const regle = (i) => i.statut === 'ok' || i.statut === 'sans_objet';
+  const ficheRivage = 'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id;
+  const aRevoir = c.items.filter((i) => (i.bloc === 'rivage' && !regle(i) && i.auto === 'anomalie'));
+  const pieces = c.items.filter((i) => i.bloc === 'pieces' && !regle(i));
+  const conditions = c.items.filter((i) => i.bloc === 'rivage' && i.statut !== 'sans_objet' && i.detail);
+  const clauses = c.items.filter((i) => i.bloc === 'clauses' && !i.genere && i.statut && i.statut !== 'sans_objet' && i.auto !== 'sans_objet');
+  const obs = (d.obligations || []).filter((o) => o.actif);
+  const ligne = { display: 'grid', gridTemplateColumns: 'minmax(160px, 34%) 1fr', gap: 10, padding: '4px 0', borderTop: '1px solid var(--line)', fontSize: 13 };
+  return <>
+    <div className="row" style={{ justifyContent: 'space-between', marginTop: 18 }}>
+      <h3 style={{ margin: 0 }}>Synthèse du bail</h3>
+      {peut && <button className="btn" onClick={parametrer}>Modifier le paramétrage</button>}
+    </div>
+    <div className="muted" style={{ fontSize: 12 }}>{c.go_le ? `Contrôle d’entrée validé (GO) le ${date(c.go_le)} par ${c.go_par || '—'}.` : soumis ? '' : 'Contrôle d’entrée non requis pour ce bail. « Modifier le paramétrage » permet de le compléter.'}</div>
+    {(aRevoir.length > 0 || pieces.length > 0) && <div className="mini-alerte haute">
+      {aRevoir.length > 0 && <div><b>À revoir depuis le dernier contrôle :</b> {aRevoir.map((i) => `${i.libelle} (${i.detail})`).join(' ; ')}</div>}
+      {pieces.length > 0 && <div><b>Pièces manquantes :</b> {pieces.map((i) => i.libelle).join(', ')}</div>}
+      {peut && <div className="row" style={{ marginTop: 6 }}>
+        <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>
+        <button className="btn gris" onClick={parametrer}>Traiter</button></div>}
+    </div>}
+    <div style={{ marginTop: 8 }}>
+      <div style={ligne}><b>Type de bail</b><span>{TYPES_BAIL[ech.type] || '—'}</span></div>
+      {ech.echeance && <div style={ligne}><b>Échéance</b><span>{ech.mode === 'prolongation' ? `Tacite prolongation depuis le ${date(ech.echeance)}` : date(ech.echeance)}
+        {ech.limite ? ` · congé au plus tard le ${date(ech.limite)}` : ''}{ech.triennale ? ` · prochaine triennale ${date(ech.triennale)}` : ''}{ech.douze_ans ? ` · 12 ans le ${date(ech.douze_ans)}` : ''}</span></div>}
+      {conditions.map((i) => <div key={i.cle} style={ligne}><b>{i.libelle}</b><span>{court(i.detail)}
+        {i.repondu && i.auto === 'anomalie' && i.statut === 'ok' && <span className="muted"> · écart justifié : {i.commentaire}</span>}</span></div>)}
+      {clauses.map((i) => <div key={i.cle} style={ligne}><b>{i.libelle}</b><span>{i.statut === 'anomalie' ? '⚠ ' : ''}{[i.mode === 'fiche' ? court(i.detail) : null, i.commentaire].filter(Boolean).join(' · ') || 'Oui'}</span></div>)}
+      {(d.paliers || []).length > 0 && <div style={ligne}><b>Paliers et franchises</b><span>{d.paliers.map((p) => `${p.nature === 'franchise' ? 'Franchise' : 'Palier'} du ${date(p.debut)}${p.fin ? ' au ' + date(p.fin) : ''}`).join(' ; ')}</span></div>}
+      <div style={ligne}><b>Suivis en place</b><span>{obs.length ? obs.map((o) => `${o.libelle} (échéance ${date(o.prochaine)})`).join(' ; ') : 'Aucun'}</span></div>
+      {(d.actes || []).length > 0 && <div style={ligne}><b>Actes</b><span>{d.actes.map((a) => `${ACTES[a.nature]} du ${a.auteur} le ${date(a.signifie_le)}`).join(' ; ')}</span></div>}
+    </div>
+  </>;
+}
+
+// Vérification par l'IA d'une pièce reconnue seulement par son nom dans Rivage.
+function VerifPiece({ i, b, agir }) {
+  const [etat, setEtat] = useState({ charge: false, r: null, err: '' });
+  const verifier = async () => {
+    setEtat({ charge: true, r: null, err: '' });
+    const { data, error } = await supabase.functions.invoke('pilotage-lecture-bail', { body: { bail_id: b.bail_id, upload_id: i.piece.id, piece: i.libelle } });
+    if (error || data?.error) { setEtat({ charge: false, r: null, err: data?.error || 'Vérification impossible pour le moment.' }); return; }
+    if (data.conforme) {
+      await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'ok', p_suivi: 'rivage', p_valeur: null,
+        p_commentaire: `Confirmé par l’IA : « ${i.piece.libelle} » est ${data.type_document || 'la pièce attendue'}${data.date ? ' du ' + date(data.date) : ''}` });
+      setEtat({ charge: false, r: null, err: '' });
+    } else {
+      // Pas la bonne pièce : elle repasse en manquante, avec ce que l'IA a lu ; un nouveau dépôt la fait recontrôler.
+      await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: 'rivage', p_valeur: null,
+        p_commentaire: `Selon l’IA, « ${i.piece.libelle} » n’est pas la pièce attendue : ${data.type_document || 'document différent'}${data.raison ? ' (' + data.raison + ')' : ''}` });
+      setEtat({ charge: false, r: null, err: '' });
+    }
+  };
+  return <>
+    <button className="lien" style={{ marginLeft: 8 }} disabled={etat.charge} onClick={verifier}>{etat.charge ? 'Lecture…' : 'Vérifier avec l’IA'}</button>
+    {etat.err && <span className="err" style={{ marginLeft: 8 }}>{etat.err}</span>}
   </>;
 }
 
@@ -426,13 +500,12 @@ function Question({ i, d, b, peut, agir }) {
   const couleur = i.statut === 'ok' ? 'var(--teal)' : i.statut === 'anomalie' ? 'var(--red)' : i.statut === 'sans_objet' ? 'var(--muted)' : 'var(--amber)';
   const suiviExiste = i.genere && (d.obligations || []).some((o) => o.nature === i.genere && o.actif);
   // Revenir sur une réponse : la question redevient à traiter ; les suivis qu'elle a créés peuvent être arrêtés ;
-  // si le GO était donné, il est retiré puisque le contrôle n'est plus bouclé.
+  // le GO reste acquis : modifier le paramétrage fait partie de la vie du bail.
   const revenir = async () => {
     const crees = i.genere ? (d.obligations || []).filter((o) => o.nature === i.genere && o.actif) : [];
     const arreter = crees.length > 0 && window.confirm(`Arrêter aussi les suivis créés par cette réponse ?\n${crees.map((o) => '- ' + o.libelle).join('\n')}\n\nOK : les arrêter · Annuler : les garder`);
     try {
       for (const o of arreter ? crees : []) await rpc('pilotage_bail_obligation', { p_bail: b.bail_id, p_id: o.id, p_nature: o.nature, p_libelle: null, p_periodicite: o.periodicite_mois, p_prochaine: null, p_actif: false });
-      if (d.controle?.go_le) await rpc('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false });
     } catch { /* l'erreur éventuelle s'affiche au rechargement */ }
     await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: null, p_suivi: null, p_valeur: null, p_commentaire: null });
   };
@@ -650,12 +723,15 @@ function Suivis({ d, b, peut, agir }) {
 function Paliers({ d, b, peut, agir, ouvrirMail }) {
   const [f, setF] = useState({ nature: 'palier', debut: '', fin: '', loyer: '', com: '' });
   const ps = d.paliers || [];
+  const lus = (d.lecture?.resultat?.paliers || []).filter((x) => x?.debut && !ps.some((p) => p.debut === x.debut));
+  const [form, setForm] = useState(false);
+  // Rien à afficher : un simple bouton, le formulaire ne s'ouvre qu'à la demande.
+  if (!ps.length && !lus.length && !form) return peut ? <div style={{ marginTop: 10 }}><button className="lien" onClick={() => setForm(true)}>+ Ajouter un palier ou une franchise de loyer</button></div> : null;
   return <>
     <h3>Paliers et franchises de loyer</h3>
-    {!ps.length && <p className="muted">Aucun palier ni franchise saisi.</p>}
-    {peut && (d.lecture?.resultat?.paliers || []).filter((x) => x?.debut && !ps.some((p) => p.debut === x.debut)).map((x, k) =>
+    {peut && lus.map((x, k) =>
       <div key={k} className="mini-alerte normale">✦ Lu dans le bail : {x.nature === 'franchise' ? 'franchise' : 'palier'} du {date(x.debut)}{x.fin ? ' au ' + date(x.fin) : ''}{x.loyer_annuel_ht != null ? `, loyer annuel ${Number(x.loyer_annuel_ht).toLocaleString('fr-FR')} € HT` : ''}{x.page ? ` (page ${x.page})` : ''}
-        <button className="lien" style={{ marginLeft: 8 }} onClick={() => setF({ nature: x.nature === 'franchise' ? 'franchise' : 'palier', debut: x.debut, fin: x.fin || '', loyer: '', com: 'Lu dans le bail' + (x.page ? ', page ' + x.page : '') })}>Reprendre (saisir le montant Rivage)</button></div>)}
+        <button className="lien" style={{ marginLeft: 8 }} onClick={() => { setForm(true); setF({ nature: x.nature === 'franchise' ? 'franchise' : 'palier', debut: x.debut, fin: x.fin || '', loyer: '', com: 'Lu dans le bail' + (x.page ? ', page ' + x.page : '') }); }}>Reprendre (saisir le montant Rivage)</button></div>)}
     {ps.length > 0 && <div className="table-wrap"><table className="table-imp"><thead><tr><th>Nature</th><th>Du</th><th>Au</th><th>Loyer attendu dans Rivage</th><th>Programmé dans Rivage</th><th>Note</th><th></th></tr></thead><tbody>
       {ps.map((p) => <tr key={p.id}><td>{p.nature === 'franchise' ? 'Franchise' : 'Palier'}</td><td>{date(p.debut)}</td><td>{date(p.fin)}</td>
         <td>{p.loyer_rivage != null ? Number(p.loyer_rivage).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }) : '—'}</td>
@@ -663,14 +739,16 @@ function Paliers({ d, b, peut, agir, ouvrirMail }) {
         <td>{peut && <><button className="lien" onClick={() => ouvrirMail('palier_locataire', { palier: p }, { cle: 'e:' + b.bail_id + ':palier' + p.id, etape: 'info', detail: 'Locataire informé du palier' })}>Mail locataire</button>{' '}
           <button className="lien" onClick={() => agir('pilotage_bail_palier', { p_bail: b.bail_id, p_id: p.id, p_nature: null, p_debut: null, p_fin: null, p_loyer: null, p_commentaire: null, p_supprimer: true })}>Supprimer</button></>}</td></tr>)}
     </tbody></table></div>}
-    <p className="muted" style={{ fontSize: 12 }}>Le montant attendu est saisi dans la même unité que le loyer de Rivage (par appel). Le pilotage rappelle la mise à jour 30 jours avant et signale tout écart avec Rivage une fois le palier commencé.</p>
-    {peut && <div className="row">
+    {peut && !form && <button className="lien" onClick={() => setForm(true)}>+ Ajouter un palier ou une franchise</button>}
+    {peut && form && <p className="muted" style={{ fontSize: 12 }}>Le montant attendu est saisi dans la même unité que le loyer de Rivage (par appel). Le pilotage rappelle la mise à jour 30 jours avant et signale tout écart avec Rivage une fois le palier commencé.</p>}
+    {peut && form && <div className="row">
       <select value={f.nature} onChange={(e) => setF({ ...f, nature: e.target.value })} aria-label="Nature"><option value="palier">Palier</option><option value="franchise">Franchise</option></select>
       <label className="muted">Du <input type="date" value={f.debut} onChange={(e) => setF({ ...f, debut: e.target.value })} /></label>
       <label className="muted">Au <input type="date" value={f.fin} onChange={(e) => setF({ ...f, fin: e.target.value })} /></label>
       <input type="number" placeholder="Loyer attendu" value={f.loyer} onChange={(e) => setF({ ...f, loyer: e.target.value })} style={{ width: 130 }} aria-label="Loyer attendu dans Rivage" />
       <input placeholder="Note (article du bail)" value={f.com} onChange={(e) => setF({ ...f, com: e.target.value })} aria-label="Note" />
-      <button className="btn" disabled={!f.debut} onClick={async () => { await agir('pilotage_bail_palier', { p_bail: b.bail_id, p_id: null, p_nature: f.nature, p_debut: f.debut, p_fin: f.fin || null, p_loyer: f.loyer === '' ? (f.nature === 'franchise' ? 0 : null) : Number(f.loyer), p_commentaire: f.com || null, p_supprimer: false }); setF({ nature: 'palier', debut: '', fin: '', loyer: '', com: '' }); }}>Ajouter</button>
+      <button className="btn" disabled={!f.debut} onClick={async () => { await agir('pilotage_bail_palier', { p_bail: b.bail_id, p_id: null, p_nature: f.nature, p_debut: f.debut, p_fin: f.fin || null, p_loyer: f.loyer === '' ? (f.nature === 'franchise' ? 0 : null) : Number(f.loyer), p_commentaire: f.com || null, p_supprimer: false }); setF({ nature: 'palier', debut: '', fin: '', loyer: '', com: '' }); setForm(false); }}>Ajouter</button>
+      <button className="lien" onClick={() => setForm(false)}>Annuler</button>
     </div>}
   </>;
 }
@@ -681,9 +759,10 @@ function Actes({ d, b, peut, agir }) {
   const vide = { nature: 'demande_renouvellement', auteur: 'preneur', signifie: '', forme: 'acte', ref: '', effet: '', com: '' };
   const [f, setF] = useState(vide);
   const as = d.actes || [];
+  const [form, setForm] = useState(false);
+  if (!as.length && !form) return peut ? <div style={{ marginTop: 4 }}><button className="lien" onClick={() => setForm(true)}>+ Enregistrer un acte reçu (demande de renouvellement, congé du preneur…)</button></div> : null;
   return <>
     <h3>Actes et notifications</h3>
-    {!as.length && <p className="muted">Aucun acte saisi.</p>}
     {as.map((a) => <div key={a.id} className="mini-alerte normale">
       <b>{ACTES[a.nature]}</b> du {a.auteur} · signifié le {date(a.signifie_le)}{a.forme ? ` (${a.forme === 'acte' ? 'acte de commissaire de justice' : a.forme})` : ''}{a.reference ? ` · réf. ${a.reference}` : ''}
       {a.effet_le && <div className="muted">Prise d’effet : {date(a.effet_le)}</div>}
@@ -695,14 +774,16 @@ function Actes({ d, b, peut, agir }) {
         <button className="lien" onClick={() => agir('pilotage_bail_acte', { p_bail: b.bail_id, p_id: a.id, p_nature: null, p_auteur: null, p_signifie: null, p_forme: null, p_reference: null, p_effet: null, p_reponse: null, p_commentaire: null, p_supprimer: true })}>Supprimer</button>
       </div>}
     </div>)}
-    {peut && <div className="row">
+    {peut && !form && <button className="lien" onClick={() => setForm(true)}>+ Enregistrer un acte</button>}
+    {peut && form && <div className="row">
       <select value={f.nature} onChange={(e) => setF({ ...f, nature: e.target.value })} aria-label="Nature de l’acte">{Object.entries(ACTES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <select value={f.auteur} onChange={(e) => setF({ ...f, auteur: e.target.value })} aria-label="Auteur"><option value="preneur">du preneur</option><option value="bailleur">du bailleur</option></select>
       <label className="muted">Signifié le <input type="date" value={f.signifie} onChange={(e) => setF({ ...f, signifie: e.target.value })} /></label>
       <select value={f.forme} onChange={(e) => setF({ ...f, forme: e.target.value })} aria-label="Forme"><option value="acte">Commissaire de justice</option><option value="lrar">LRAR</option><option value="remise">Remise en main propre</option><option value="autre">Autre</option></select>
       <input placeholder="Référence" value={f.ref} onChange={(e) => setF({ ...f, ref: e.target.value })} style={{ width: 120 }} aria-label="Référence" />
       <label className="muted">Effet le <input type="date" value={f.effet} onChange={(e) => setF({ ...f, effet: e.target.value })} /></label>
-      <button className="btn" disabled={!f.signifie} onClick={async () => { await agir('pilotage_bail_acte', { p_bail: b.bail_id, p_id: null, p_nature: f.nature, p_auteur: f.auteur, p_signifie: f.signifie, p_forme: f.forme, p_reference: f.ref || null, p_effet: f.effet || null, p_reponse: null, p_commentaire: f.com || null, p_supprimer: false }); setF(vide); }}>Ajouter</button>
+      <button className="btn" disabled={!f.signifie} onClick={async () => { await agir('pilotage_bail_acte', { p_bail: b.bail_id, p_id: null, p_nature: f.nature, p_auteur: f.auteur, p_signifie: f.signifie, p_forme: f.forme, p_reference: f.ref || null, p_effet: f.effet || null, p_reponse: null, p_commentaire: f.com || null, p_supprimer: false }); setF(vide); setForm(false); }}>Ajouter</button>
+      <button className="lien" onClick={() => setForm(false)}>Annuler</button>
     </div>}
   </>;
 }
