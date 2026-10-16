@@ -210,12 +210,13 @@ function Echeance({ d, b, peut, agir, ouvrirMail }) {
         <div className="muted">{ETATS[ech.etat] || ech.etat}{ech.manquee ? ` · délai de congé dépassé pour l’échéance du ${date(ech.manquee)}` : ''}</div></div>
         <div className="echeance-n">{date(ech.echeance)}</div></div>
       <ol className="etapes">{[
-        ['Information du bailleur', ech.info, ech.informe_le],
-        ['Relance', ech.relance, ech.relance_le],
-        ['Décision attendue, sinon LRAR', ech.decision, ech.lrar_le || ech.choix_le],
-        ['Date limite du congé', ech.limite, ech.conge_le],
-      ].filter((x) => x[1] || x[2]).map(([l, pr, fait]) => <li key={l} className={fait ? 'fait' : pr && pr < auj() ? 'retard' : ''}>
-        <span className="puce">{fait ? '✓' : ''}</span><span>{l}<span className="muted"> · prévu le {date(pr)}{fait ? ` · fait le ${date(fait)}` : ''}</span></span></li>)}</ol>
+        ['Information du bailleur', ech.info, ech.informe_le, 'informe'],
+        ['Relance', ech.relance, ech.relance_le, 'relance'],
+        ['Décision attendue, sinon LRAR', ech.decision, ech.lrar_le || ech.choix_le, ech.lrar_le ? 'lrar' : null],
+        ['Date limite du congé', ech.limite, ech.conge_le, null],
+      ].filter((x) => x[1] || x[2]).map(([l, pr, fait, code]) => <li key={l} className={fait ? 'fait' : pr && pr < auj() ? 'retard' : ''}>
+        <span className="puce">{fait ? '✓' : ''}</span><span>{l}<span className="muted"> · prévu le {date(pr)}{fait ? ` · fait le ${date(fait)}` : ''}</span>
+        {peut && fait && code && <button className="lien" style={{ marginLeft: 8 }} onClick={() => agir('pilotage_suivi_etape', { p_cle: ech.cle, p_etape: code, p_detail: null, p_annuler: true })}>Annuler</button>}</span></li>)}</ol>
       {ech.mode === 'prolongation' && <p className="muted">Un congé délivré aujourd’hui prendrait effet au plus tôt le {date(ech.effet_conge_au_plus_tot)} (6 mois, pour le dernier jour d’un trimestre civil).</p>}
       {ech.douze_ans && <p className="muted">12 ans de durée le {date(ech.douze_ans)} : au-delà, déplafonnement possible du loyer du bail renouvelé.</p>}
       {ech.triennale && <p className="muted">Prochaine fin de période triennale : {date(ech.triennale)} (faculté de congé du preneur avec 6 mois de préavis).</p>}
@@ -317,7 +318,8 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
       {(() => { const ok = c.items.filter((i) => i.bloc === bloc && i.auto === 'ok' && !i.repondu && i.mode !== 'fiche');
         return ok.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {ok.length} point(s) conforme(s) automatiquement{bloc === 'rivage' ? ' : identiques dans le bail et dans Rivage' : bloc === 'pieces' ? ' : pièces déposées dans Rivage' : ''}</summary>
-          <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{ok.map((i) => <li key={i.cle}>{i.libelle}{i.detail ? ' · ' + i.detail : ''}</li>)}</ul></details>; })()}
+          <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{ok.map((i) => <li key={i.cle}>{i.libelle}{i.detail ? ' · ' + i.detail : ''}
+            {peut && <button className="lien" style={{ marginLeft: 8 }} onClick={() => { const m = window.prompt('Qu’est-ce qui ne va pas ? (obligatoire)'); if (m && m.trim()) agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: null, p_valeur: null, p_commentaire: m.trim() }).then(() => d.controle?.go_le && agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })); }}>Contester</button>}</li>)}</ul></details>; })()}
     </div>)}
   </>;
 }
@@ -342,6 +344,17 @@ function Question({ i, d, b, peut, agir }) {
   const repondre = (statut) => agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: statut, p_suivi: suivi || null, p_valeur: null, p_commentaire: com || null });
   const couleur = i.statut === 'ok' ? 'var(--teal)' : i.statut === 'anomalie' ? 'var(--red)' : i.statut === 'sans_objet' ? 'var(--muted)' : 'var(--amber)';
   const suiviExiste = i.genere && (d.obligations || []).some((o) => o.nature === i.genere && o.actif);
+  // Revenir sur une réponse : la question redevient à traiter ; les suivis qu'elle a créés peuvent être arrêtés ;
+  // si le GO était donné, il est retiré puisque le contrôle n'est plus bouclé.
+  const revenir = async () => {
+    const crees = i.genere ? (d.obligations || []).filter((o) => o.nature === i.genere && o.actif) : [];
+    const arreter = crees.length > 0 && window.confirm(`Arrêter aussi les suivis créés par cette réponse ?\n${crees.map((o) => '- ' + o.libelle).join('\n')}\n\nOK : les arrêter · Annuler : les garder`);
+    try {
+      for (const o of arreter ? crees : []) await rpc('pilotage_bail_obligation', { p_bail: b.bail_id, p_id: o.id, p_nature: o.nature, p_libelle: null, p_periodicite: o.periodicite_mois, p_prochaine: null, p_actif: false });
+      if (d.controle?.go_le) await rpc('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false });
+    } catch { /* l'erreur éventuelle s'affiche au rechargement */ }
+    await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: null, p_suivi: null, p_valeur: null, p_commentaire: null });
+  };
   return <div style={{ borderTop: '1px solid var(--line)', padding: '8px 0' }}>
     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 220 }}>
@@ -361,7 +374,7 @@ function Question({ i, d, b, peut, agir }) {
         <button className="btn" onClick={() => repondre('ok')}>Conforme</button>
         <button className="btn" onClick={() => repondre('anomalie')}>Anomalie</button>
         <button className="btn gris" onClick={() => repondre('sans_objet')}>Sans objet</button>
-        {i.repondu && <button className="lien" onClick={() => agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: null, p_suivi: null, p_valeur: null, p_commentaire: null })}>Effacer</button>}
+        {i.repondu && <button className="btn gris" onClick={() => revenir()}>Revenir sur ma réponse</button>}
       </div>}
     </div>
     {peut && i.genere && i.genere !== 'garantie' && !i.repondu && <QuestionSuivi i={i} d={d} b={b} agir={agir} />}
@@ -528,7 +541,8 @@ function Suivis({ d, b, peut, agir }) {
     {obs.map((o) => <details key={o.id} className={'mini-alerte ' + (o.actif ? o.gravite : 'normale')} style={{ opacity: o.actif ? 1 : 0.6 }}>
       <summary style={{ cursor: 'pointer' }}><b>{o.libelle}</b> · {NATURES[o.nature]} · échéance le {date(o.prochaine)}{o.periodicite_mois ? ` · tous les ${o.periodicite_mois} mois` : ''}{!o.actif ? ' · clos' : o.en_retard ? ' · en retard' : ''}</summary>
       <ol className="etapes">{(o.etapes || []).map((e) => <li key={e.ordre} className={e.fait_le ? 'fait' : e.du ? 'retard' : ''}>
-        <span className="puce">{e.fait_le ? '✓' : ''}</span><span>{e.libelle}<span className="muted"> · {date(e.date)}{e.fait_le ? ' · fait le ' + date(e.fait_le) : ''}</span></span></li>)}</ol>
+        <span className="puce">{e.fait_le ? '✓' : ''}</span><span>{e.libelle}<span className="muted"> · {date(e.date)}{e.fait_le ? ' · fait le ' + date(e.fait_le) : ''}</span>
+        {peut && e.fait_le && <button className="lien" style={{ marginLeft: 8 }} onClick={() => agir('pilotage_suivi_etape', { p_cle: o.cle, p_etape: String(e.ordre), p_detail: null, p_annuler: true })}>Annuler</button>}</span></li>)}</ol>
       {o.derniere_le && <div className="muted">Dernière réalisation : {date(o.derniere_le)}</div>}
       {peut && <div className="row" style={{ marginTop: 6 }}>
         <Realise ob={o} agir={agir} />
