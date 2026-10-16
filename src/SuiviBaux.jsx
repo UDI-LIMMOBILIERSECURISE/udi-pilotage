@@ -379,9 +379,18 @@ const prochainSept = () => { const y = new Date().getFullYear(); return auj() < 
 function QuestionSuivi({ i, d, b, agir }) {
   const commercial = d.controle?.portee === 'commercial';
   const n = i.genere;
-  const [v, setV] = useState({});
+  const rv = d.rivage || {};
+  // Pré-remplissage depuis Rivage : chauffage individuel gaz, fioul ou pompe à chaleur, dernier entretien de chaudière
+  const [v, setV] = useState(() => {
+    if (n !== 'entretien' || rv.type_chauffage === 'collective') return {};
+    const eq = { gas: commercial ? 'Chaudière ou chaufferie' : 'Chaudière gaz', fuel: commercial ? 'Chaudière ou chaufferie' : 'Chaudière fioul', fuel_oil: commercial ? 'Chaudière ou chaufferie' : 'Chaudière fioul',
+      oil: commercial ? 'Chaudière ou chaufferie' : 'Chaudière fioul', heat_pump: commercial ? 'Climatisation' : 'Pompe à chaleur' }[rv.chauffage];
+    return eq ? { ['eq_' + eq]: true, ['d_' + eq]: rv.entretien_chaudiere || '' } : {};
+  });
   const [err, setErr] = useState('');
   const maj = (k, x) => setV((o) => ({ ...o, [k]: x }));
+  const CHAUF = { gas: 'gaz', electric: 'électrique', fuel: 'fioul', fuel_oil: 'fioul', oil: 'fioul', heat_pump: 'pompe à chaleur', wood: 'bois' };
+  const infoRivage = rv.chauffage ? `Rivage : chauffage ${rv.type_chauffage === 'collective' ? 'collectif' : rv.type_chauffage === 'individual' ? 'individuel' : ''} ${CHAUF[rv.chauffage] || rv.chauffage}${rv.entretien_chaudiere ? ', dernier entretien de chaudière le ' + date(rv.entretien_chaudiere) : ''}.` : 'Rivage : mode de chauffage non renseigné pour ce lot.';
   const creer = async (liste, statut, resume) => {
     setErr('');
     try {
@@ -404,6 +413,7 @@ function QuestionSuivi({ i, d, b, agir }) {
     const coches = liste.concat(v.autre ? [v.autre] : []).filter((e) => v['eq_' + e]);
     return boite(<>
       <div><b>Équipements à entretenir à la charge du {commercial ? 'preneur' : 'locataire'}</b> <span className="muted">(un suivi annuel par équipement)</span></div>
+      <div className="muted" style={{ fontSize: 12 }}>{infoRivage}{rv.type_chauffage === 'collective' ? ' Chauffage collectif : son entretien relève de la copropriété, pas du locataire.' : ''}</div>
       {liste.map((e) => <div key={e} className="row" style={{ marginTop: 4 }}>
         <label style={{ minWidth: 220 }}><input type="checkbox" checked={!!v['eq_' + e]} onChange={(x) => maj('eq_' + e, x.target.checked)} /> {e}</label>
         {v['eq_' + e] && <label className="muted">Dernier entretien le <input type="date" value={v['d_' + e] || ''} onChange={(x) => maj('d_' + e, x.target.value)} /></label>}
