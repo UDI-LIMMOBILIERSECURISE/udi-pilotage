@@ -28,6 +28,11 @@ Règles strictes :
 - "extrait" : citation exacte et courte (200 caractères au plus) du passage qui fonde la réponse, sinon null.
 - Pour les clés de dates et durée (c_rv_dates, h_rv_dates), ajoute "debut" (AAAA-MM-JJ, date de prise d'effet du bail en cours) et "duree_mois" (entier).
 - Pour les clés de dépôt de garantie (c_rv_dg, h_rv_dg), ajoute "montant" (nombre, en euros).
+- Pour les clés de loyer (c_rv_loyer, h_rv_loyer), ajoute "montant_mensuel" (loyer mensuel hors charges et hors taxes, nombre ; loyer annuel divisé par 12 s'il est exprimé à l'année).
+- Pour les clés de charges (c_rv_charges, h_rv_charges), ajoute "montant_mensuel" (provision ou forfait mensuel, nombre ; 0 s'il n'y en a pas).
+- Pour la clé de TVA (c_rv_tva), ajoute "taux" (nombre : 20 si le loyer est soumis à la TVA à 20 %, 0 s'il ne l'est pas).
+- Pour les clés d'indice (c_rv_indice, h_rv_indice), ajoute "code" parmi : irl, ilc, ilat, icc.
+- Pour la clé de révision (c_rv_revision), ajoute "annees" (entier : 1 pour une révision annuelle, 3 pour une révision triennale).
 - Pour les clés de type de bail (c_cl_type, h_cl_type), ajoute "code" parmi : vide, meuble, etudiant, mobilite, mixte, commercial, derogatoire, professionnel, autre.
 - Ajoute une clé "paliers" : liste des paliers ou franchises de loyer prévus par le bail, chacun {"nature": "palier" ou "franchise", "debut": "AAAA-MM-JJ", "fin": "AAAA-MM-JJ" ou null, "loyer_annuel_ht": nombre ou null, "page": n}. Liste vide s'il n'y en a pas.
 - Ajoute une clé "refacturations" : liste des sommes que le bail permet de refacturer au preneur (taxes, assurances, honoraires, travaux...), chacune {"nature": "...", "article": "...", "page": n}.
