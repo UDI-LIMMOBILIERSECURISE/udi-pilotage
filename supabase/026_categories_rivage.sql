@@ -90,7 +90,7 @@ begin
        order by coalesce(u.data->>'nature' = any(coalesce(q.natures, array[q.ref])), false) desc, u.maj_le desc limit 1;
       if up.id is not null then
         auto := 'ok';
-        detail := 'Déposé dans Rivage : « ' || coalesce(up.label, 'catégorie « ' || coalesce(pilotage.categorie_rivage(up.nature), '?') || ' »') || ' »' || case when up.par_nature then '' else ' (reconnu par son nom)' end;
+        detail := case when up.label is null then 'Déposé dans Rivage (catégorie « ' || coalesce(pilotage.categorie_rivage(up.nature), '?') || ' »)' else 'Déposé dans Rivage : « ' || up.label || ' »' end || case when up.par_nature then '' else ' (reconnu par son nom)' end;
         piece := jsonb_build_object('id', up.id, 'libelle', up.label, 'par_nom', not up.par_nature);
       else detail := 'Absent dans Rivage.'; end if;
     elsif q.mode = 'fiche' then
@@ -225,7 +225,7 @@ begin
        order by coalesce(u.data->>'nature' = any(coalesce(q.natures, array[q.ref])), false) desc, u.maj_le desc limit 1;
       if up.id is not null then
         auto := 'ok';
-        detail := 'Déposé dans Rivage : « ' || coalesce(up.label, 'catégorie « ' || coalesce(pilotage.categorie_rivage(up.nature), '?') || ' »') || ' »' || case when up.par_nature then '' else ' (reconnu par son nom)' end;
+        detail := case when up.label is null then 'Déposé dans Rivage (catégorie « ' || coalesce(pilotage.categorie_rivage(up.nature), '?') || ' »)' else 'Déposé dans Rivage : « ' || up.label || ' »' end || case when up.par_nature then '' else ' (reconnu par son nom)' end;
         piece := jsonb_build_object('id', up.id, 'libelle', up.label, 'par_nom', not up.par_nature);
       else
         detail := 'Absent dans Rivage.';
