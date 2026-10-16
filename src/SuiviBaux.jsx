@@ -107,6 +107,11 @@ function DossierBail({ b, peut, moi, apres }) {
     const m = preparer(code, { ...ctx, ...extra });
     if (m) setMail({ m, etape });
   };
+  // Journal : étapes de suivi + écarts bail / Rivage justifiés (cause et justificatif).
+  const journal = [...(d.journal || []), ...((d.controle?.items) || [])
+    .filter((i) => i.repondu && i.auto === 'anomalie' && i.statut === 'ok' && i.commentaire)
+    .map((i) => ({ le: i.le, detail: `Écart justifié · ${i.libelle} : ${i.detail} · justification : ${i.commentaire}`, par: i.par }))]
+    .sort((x, y) => new Date(y.le) - new Date(x.le));
   const etapeFaite = (cle, etape, detail) => agir('pilotage_suivi_etape', { p_cle: cle, p_etape: etape, p_detail: detail, p_annuler: false });
 
   // Actions du moment : échéance + obligations
@@ -146,7 +151,7 @@ function DossierBail({ b, peut, moi, apres }) {
     <Suivis d={d} b={b} peut={peut} agir={agir} />
     <Paliers d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
     <Actes d={d} b={b} peut={peut} agir={agir} />
-    {d.journal?.length > 0 && <><h3>Journal</h3><ol className="histo">{d.journal.slice(0, 20).map((j, i) =>
+    {journal.length > 0 && <><h3>Journal</h3><ol className="histo">{journal.slice(0, 30).map((j, i) =>
       <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol></>}
     <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={b.lien} target="_blank" rel="noreferrer">Ouvrir le bail dans Rivage</a></div>
   </>;
@@ -285,6 +290,17 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
   // Écarts détectés (Rivage vide, différence avec le bail lu, incohérence légale) : restent visibles même une fois répondus.
   const ecarts = c.items.filter((i) => i.auto === 'anomalie' && i.bloc !== 'pieces');
   const ficheRivage = 'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id;
+  // Réglé = conforme d'office, non exigé, ou répondu conforme / sans objet (un écart justifié passe au journal).
+  const regle = (i) => i.statut === 'ok' || i.statut === 'sans_objet';
+  const ecartsOuverts = ecarts.filter((i) => !regle(i));
+  const piecesManquantes = c.items.filter((i) => i.bloc === 'pieces' && !regle(i));
+  const piecesFaites = c.items.filter((i) => i.bloc === 'pieces' && regle(i));
+  const rivageOuverts = c.items.filter((i) => i.bloc === 'rivage' && !regle(i));
+  const rivageFaits = c.items.filter((i) => i.bloc === 'rivage' && regle(i));
+  const repondrePiece = async (i, statut) => {
+    if (statut === null && d.controle?.go_le) await agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false });
+    await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: statut, p_suivi: statut ? (i.mode === 'document' || i.bloc === 'rivage' ? 'rivage' : 'backoffice') : null, p_valeur: null, p_commentaire: null });
+  };
   const lire = async (fichier) => {
     setLecture({ charge: true, err: '' });
     let body = { bail_id: b.bail_id };
@@ -314,34 +330,62 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
       </div>}
       {lecture.err && <div className="err">{lecture.err}</div>}
     </div>
-    {ecarts.length > 0 && <div className="mini-alerte critique">
-      <b>⚠ {ecarts.length} écart(s) détecté(s) entre le bail, Rivage et la loi</b>
-      <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{ecarts.map((i) => <li key={i.cle}>
+    {ecartsOuverts.length > 0 && <div className="mini-alerte critique">
+      <b>⚠ {ecartsOuverts.length} écart(s) à traiter entre le bail, Rivage et la loi</b>
+      <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{ecartsOuverts.map((i) => <li key={i.cle}>
         <a href={'#q-' + i.cle} onClick={() => setOuvert(true)} style={{ color: 'inherit' }}>{i.libelle}</a> · {i.detail}
-        {i.repondu ? <b> → {i.statut === 'ok' ? 'validé conforme' : i.statut === 'anomalie' ? 'anomalie confirmée' : 'sans objet'} par {i.par || '—'}{i.commentaire ? ' : ' + i.commentaire : ' sans justification'}</b> : <b> → à traiter</b>}
+        {i.repondu && i.statut === 'anomalie' ? <b> → anomalie signalée par {i.par || '—'} : {i.commentaire}</b> : null}
       </li>)}</ul>
       <div className="row" style={{ marginTop: 6 }}>
-        <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>
+        <a className="btn plein" href={ficheRivage} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>
         <button className="btn gris" onClick={() => recharger()}>Revérifier après correction</button>
       </div>
-      <div style={{ fontSize: 12, marginTop: 4 }}>Une fois Rivage corrigé, le point disparaît ; si l’écart persiste, il reste affiché. Une réponse donnée sur un écart ne vaut que pour cet écart : si Rivage change, le point est recontrôlé.</div>
+      <div style={{ fontSize: 12, marginTop: 4 }}>Corrigé dans Rivage : le point disparaît. Écart voulu (avenant, indexation…) : « Conforme » avec la justification, il passe au journal.</div>
     </div>}
     {d.lecture && <LectureIA l={d.lecture} />}
-    {ouvert && ['pieces', 'rivage', 'clauses'].map((bloc) => <div key={bloc}>
-      <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS[bloc]}</b></div>
-      {c.items.filter((i) => i.bloc === bloc && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche') && !(i.auto === 'sans_objet' && !i.repondu))
-        .sort((x, y) => (y.auto === 'anomalie') - (x.auto === 'anomalie'))
+    {ouvert && <>
+      <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.pieces}</b></div>
+      {piecesManquantes.length === 0
+        ? <div style={{ color: 'var(--teal)', fontSize: 13, padding: '6px 0' }}>✓ Toutes les pièces exigées pour ce bail sont au dossier.</div>
+        : <div className="mini-alerte haute">
+          <b>{piecesManquantes.length} pièce(s) manquante(s)</b>
+          {piecesManquantes.map((i) => <div key={i.cle} className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid rgba(0,0,0,.08)', padding: '5px 0', color: 'var(--ink)' }}>
+            <div style={{ flex: 1, minWidth: 220 }}>{i.libelle}{i.mode !== 'document' && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--blue)', background: 'var(--blue-bg)', borderRadius: 10, padding: '1px 8px' }}>Suivi back-office</span>}
+              {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}</div>
+            {peut && <div className="row">
+              {i.mode === 'document'
+                ? <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Déposer dans Rivage ↗</a>
+                : <button className="btn" onClick={() => repondrePiece(i, 'ok')}>Reçue</button>}
+              <button className="lien" onClick={() => repondrePiece(i, 'sans_objet')}>Sans objet</button>
+            </div>}
+          </div>)}
+          <div style={{ fontSize: 12, marginTop: 4 }}>Une pièce déposée dans Rivage disparaît de cette liste à la prochaine mise à jour.</div>
+        </div>}
+      {piecesFaites.length > 0 && <details style={{ padding: '4px 0' }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 13 }}>{piecesFaites.length} pièce(s) au dossier, sans objet ou non exigée(s)</summary>
+        <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{piecesFaites.map((i) => <li key={i.cle}>{i.libelle} · {
+          i.repondu ? (i.statut === 'ok' ? 'reçue' : 'sans objet') + ` (${i.par || '—'}, ${date(i.le)})` : i.auto === 'ok' ? 'déposée dans Rivage' : i.detail}
+          {peut && i.repondu && <button className="lien" style={{ marginLeft: 8 }} onClick={() => repondrePiece(i, null)}>Revenir</button>}</li>)}</ul></details>}
+
+      <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.rivage}</b></div>
+      {rivageOuverts.length === 0 && <div style={{ color: 'var(--teal)', fontSize: 13, padding: '6px 0' }}>✓ Aucun point à traiter.</div>}
+      {rivageOuverts.sort((x, y) => (y.auto === 'anomalie') - (x.auto === 'anomalie')).map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
+      {rivageFaits.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {rivageFaits.length} point(s) conforme(s)</summary>
+        <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{rivageFaits.map((i) => <li key={i.cle}>{i.libelle} · {i.detail}
+          {i.repondu && <span className="muted"> · {i.statut === 'sans_objet' ? 'sans objet' : i.auto === 'anomalie' ? 'écart justifié : ' + (i.commentaire || '—') : 'validé'} ({i.par || '—'}, {date(i.le)})</span>}
+          {peut && (i.repondu
+            ? <button className="lien" style={{ marginLeft: 8 }} onClick={() => repondrePiece(i, null)}>Revenir</button>
+            : <button className="lien" style={{ marginLeft: 8 }} onClick={() => { const m = window.prompt('Qu’est-ce qui ne va pas ? (obligatoire)'); if (m && m.trim()) agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: 'rivage', p_valeur: null, p_commentaire: m.trim() }).then(() => d.controle?.go_le && agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })); }}>Contester</button>)}</li>)}</ul></details>}
+
+      <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.clauses}</b></div>
+      {c.items.filter((i) => i.bloc === 'clauses' && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche') && !(i.auto === 'sans_objet' && !i.repondu))
         .map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
-      {(() => { const so = c.items.filter((i) => i.bloc === bloc && i.auto === 'sans_objet' && !i.repondu);
+      {(() => { const so = c.items.filter((i) => i.bloc === 'clauses' && i.auto === 'sans_objet' && !i.repondu);
         return so.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 13 }}>– {so.length} point(s) non exigé(s) à la date de ce bail</summary>
           <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{so.map((i) => <li key={i.cle}>{i.libelle} · {i.detail}</li>)}</ul></details>; })()}
-      {(() => { const ok = c.items.filter((i) => i.bloc === bloc && i.auto === 'ok' && !i.repondu && i.mode !== 'fiche');
-        return ok.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
-          <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {ok.length} point(s) conforme(s) automatiquement{bloc === 'rivage' ? ' : identiques dans le bail et dans Rivage' : bloc === 'pieces' ? ' : pièces déposées dans Rivage' : ''}</summary>
-          <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{ok.map((i) => <li key={i.cle}>{i.libelle}{i.detail ? ' · ' + i.detail : ''}
-            {peut && <button className="lien" style={{ marginLeft: 8 }} onClick={() => { const m = window.prompt('Qu’est-ce qui ne va pas ? (obligatoire)'); if (m && m.trim()) agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: null, p_valeur: null, p_commentaire: m.trim() }).then(() => d.controle?.go_le && agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })); }}>Contester</button>}</li>)}</ul></details>; })()}
-    </div>)}
+    </>}
   </>;
 }
 
@@ -416,10 +460,10 @@ function Question({ i, d, b, peut, agir }) {
           ? <><a className="btn" href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">Déposer dans Rivage ↗</a>
               <button className="btn gris" onClick={() => repondre('sans_objet')}>Sans objet</button></>
           : <>
-            {motif && <input autoFocus placeholder={motif === 'ok' ? 'Pourquoi c’est conforme ?' : 'Quelle anomalie ?'} value={com} onChange={(e) => setCom(e.target.value)} style={{ width: 200 }} />}
-            {ecart && !motif && <a className="btn plein" href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>}
+            {motif && <input autoFocus placeholder={motif === 'ok' ? 'Cause de l’écart et justificatif (avenant du…, indexation…)' : 'Quelle anomalie ?'} value={com} onChange={(e) => setCom(e.target.value)} style={{ width: 280 }} />}
+            {i.bloc === 'rivage' && !motif && <a className={'btn' + (ecart ? ' plein' : '')} href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>}
             {(!motif || motif === 'ok') && <button className="btn" onClick={() => repondre('ok')}>{motif === 'ok' ? 'Valider conforme' : 'Conforme'}</button>}
-            {(!motif || motif === 'anomalie') && <button className="btn" onClick={() => repondre('anomalie')}>{motif === 'anomalie' ? 'Valider l’anomalie' : 'Anomalie'}</button>}
+            {i.bloc !== 'rivage' && (!motif || motif === 'anomalie') && <button className="btn" onClick={() => repondre('anomalie')}>{motif === 'anomalie' ? 'Valider l’anomalie' : 'Anomalie'}</button>}
             {motif ? <button className="lien" onClick={() => { setMotif(null); setErrJ(''); }}>Annuler</button>
               : <button className="btn gris" onClick={() => repondre('sans_objet')}>Sans objet</button>}
           </>}
