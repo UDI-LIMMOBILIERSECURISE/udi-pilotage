@@ -64,7 +64,7 @@ function Espace() {
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
   const tabs = [['jour', 'Ma journée', true], ['agence', 'Toute l’agence', voit('agence')], ['sinistres', 'Sinistres', voit('sinistres')],
-    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['baux', 'Baux et obligations', voit('baux')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
+    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['mandats', 'Mandats et commissions', moi.voit_commissions], ['baux', 'Baux et obligations', voit('baux')], ['obligations', 'Obligations suivies', moi.voit_reglages],
     ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
   return (
     <>
