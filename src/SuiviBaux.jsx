@@ -316,7 +316,7 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
       {c.items.filter((i) => i.bloc === bloc && !(i.auto === 'ok' && !i.repondu && i.mode !== 'fiche')).map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
       {(() => { const ok = c.items.filter((i) => i.bloc === bloc && i.auto === 'ok' && !i.repondu && i.mode !== 'fiche');
         return ok.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
-          <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {ok.length} point(s) conforme(s) automatiquement{bloc === 'rivage' ? ' : renseignés dans Rivage, sans divergence avec le bail' : bloc === 'pieces' ? ' : pièces déposées dans Rivage' : ''}</summary>
+          <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {ok.length} point(s) conforme(s) automatiquement{bloc === 'rivage' ? ' : identiques dans le bail et dans Rivage' : bloc === 'pieces' ? ' : pièces déposées dans Rivage' : ''}</summary>
           <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{ok.map((i) => <li key={i.cle}>{i.libelle}{i.detail ? ' · ' + i.detail : ''}</li>)}</ul></details>; })()}
     </div>)}
   </>;

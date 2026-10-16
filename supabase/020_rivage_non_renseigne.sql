@@ -1,12 +1,16 @@
--- 020 : croisement avec Rivage simplifié (décision de Nicolas, 16/10/2026) : un champ Rivage renseigné est conforme d'office.
--- Ne sont signalés que les champs non renseignés dans Rivage, les incohérences légales (indice, plafond du dépôt) et les
--- divergences avec le bail lu par l'IA. Les informations absentes de Rivage restent dans les blocs pièces et clauses.
+-- 020 : croisement avec Rivage (décision de Nicolas, 16/10/2026). Rivage n'est jamais conforme par défaut :
+--   champ non renseigné dans Rivage            -> alerte ;
+--   valeur différente de celle lue dans le bail -> alerte, avec la valeur du bail ;
+--   valeur identique à celle lue dans le bail   -> conforme d'office, replié ;
+--   bail non lu ou information non trouvée      -> à confirmer par la gestionnaire.
+-- Les incohérences légales (indice, plafond du dépôt) restent signalées. Les informations absentes de Rivage restent dans les
+-- blocs pièces et clauses.
 -- Remplace pilotage.controle_bail (019).
 create or replace function pilotage.controle_bail(p_bail text) returns jsonb
 language plpgsql stable security definer set search_path = pilotage, public as $$
 declare
   o jsonb; lot record; f pilotage.baux_fiche; typ text; v_portee text; items jsonb := '[]'::jsonb; q record; rep pilotage.baux_reponses;
-  auto text; detail text; valeur_ia jsonb; lecture jsonb; docs text[]; loyer numeric; dg numeric; idx jsonb; restant integer := 0; anomalies integer := 0; ia_diff text; vide boolean;
+  auto text; detail text; valeur_ia jsonb; lecture jsonb; docs text[]; loyer numeric; dg numeric; idx jsonb; restant integer := 0; anomalies integer := 0; ia_diff text; vide boolean; ia_ok boolean;
 begin
   select data into o from pilotage.objets where type = 'LeasingContract' and id = p_bail;
   if o is null then return null; end if;
@@ -37,7 +41,7 @@ begin
     elsif q.mode = 'rivage' then
       -- Rivage : seuls les champs non renseignés, les incohérences légales et les divergences avec le bail lu sont signalés.
       -- Un champ renseigné et sans divergence est conforme d'office.
-      ia_diff := null; vide := false;
+      ia_diff := null; vide := false; ia_ok := false;
       case q.ref
         when 'parties' then
           detail := 'Preneur : ' || coalesce((select string_agg(coalesce(nullif(t->>'company_name',''), concat_ws(' ', t->>'last_name', t->>'first_name')), ', ') from jsonb_array_elements(o->'tenants') t), '—')
@@ -50,6 +54,7 @@ begin
             ia_diff := 'date d''effet du ' || to_char((valeur_ia->>'debut')::date, 'DD/MM/YYYY'); end if;
           if valeur_ia is not null and nullif(valeur_ia->>'duree_mois','') is not null and valeur_ia->>'duree_mois' <> coalesce(o->>'duration_in_months','') then
             ia_diff := concat_ws(', ', ia_diff, 'durée de ' || (valeur_ia->>'duree_mois') || ' mois'); end if;
+          ia_ok := valeur_ia->>'debut' = o->>'start_date' and valeur_ia->>'duree_mois' = o->>'duration_in_months';
         when 'loyer' then
           detail := 'Loyer ' || coalesce(replace(to_char(loyer, 'FM999G999G990D00'), ',', ' '), '—') || ' € HC, appelé tous les ' || coalesce(o->>'frequency_in_months', '1') || ' mois'
                  || case when (o->>'rent_supplement_in_cents') is not null then ', complément ' || round((o->>'rent_supplement_in_cents')::numeric / 100, 2) || ' €' else '' end;
@@ -58,12 +63,14 @@ begin
              and abs((valeur_ia->>'montant_mensuel')::numeric - loyer) >= 0.5
              and abs((valeur_ia->>'montant_mensuel')::numeric * coalesce(nullif(o->>'frequency_in_months','')::numeric, 1) - loyer) >= 0.5 then
             ia_diff := 'loyer mensuel de ' || replace(to_char((valeur_ia->>'montant_mensuel')::numeric, 'FM999G999G990D00'), ',', ' ') || ' €'; end if;
+          ia_ok := nullif(valeur_ia->>'montant_mensuel', '') is not null and ia_diff is null and loyer > 0;
         when 'tva' then
           detail := case when (o->>'vat_applicable')::boolean then 'TVA oui, taux ' || coalesce(o->>'vat_rate', '?') else 'Pas de TVA' end;
           vide := o->>'vat_applicable' is null;
           if valeur_ia is not null and nullif(valeur_ia->>'taux', '') is not null
              and (valeur_ia->>'taux')::numeric <> (case when (o->>'vat_applicable')::boolean then coalesce(nullif(o->>'vat_rate','')::numeric, -1) else 0 end) then
             ia_diff := case when (valeur_ia->>'taux')::numeric = 0 then 'pas de TVA' else 'TVA à ' || (valeur_ia->>'taux') || ' %' end; end if;
+          ia_ok := nullif(valeur_ia->>'taux', '') is not null and ia_diff is null;
         when 'indice' then
           detail := coalesce(upper(idx->>'nature'), 'aucun') || coalesce(' ' || upper(idx->>'quarter') || ' ' || (idx->>'year') || ' = ' || (idx->>'value'), '')
                  || case when (o->>'indexation_enabled')::boolean then '' else ' (indexation désactivée)' end
@@ -74,17 +81,20 @@ begin
           if v_portee = 'habitation' and coalesce(idx->>'nature', '') not in ('irl','irl_outre_mer') and (o->>'indexation_enabled')::boolean then auto := 'anomalie'; detail := detail || ' : l''IRL est attendu en habitation'; end if;
           if valeur_ia is not null and nullif(valeur_ia->>'code','') is not null and lower(valeur_ia->>'code') <> lower(coalesce(idx->>'nature','')) then
             ia_diff := 'indice ' || upper(valeur_ia->>'code'); end if;
+          ia_ok := nullif(valeur_ia->>'code','') is not null and ia_diff is null;
         when 'revision' then
           detail := 'Tous les ' || coalesce(o->>'revision_frequency_in_years', '?') || ' an(s), prochaine le ' || coalesce(to_char((o->>'next_revision_date')::date, 'DD/MM/YYYY'), '—');
           vide := (o->>'indexation_enabled')::boolean and (o->>'revision_frequency_in_years' is null or o->>'next_revision_date' is null);
           if valeur_ia is not null and nullif(valeur_ia->>'annees', '') is not null and (valeur_ia->>'annees')::text <> coalesce(o->>'revision_frequency_in_years','') then
             ia_diff := 'révision tous les ' || (valeur_ia->>'annees') || ' an(s)'; end if;
+          ia_ok := nullif(valeur_ia->>'annees', '') is not null and ia_diff is null;
         when 'dg' then
           detail := coalesce(dg::text || ' €', 'Dépôt de garantie') || case when loyer > 0 and dg is not null then ' (' || round(dg / loyer, 1) || ' fois le loyer appelé)' else '' end;
           vide := dg is null;
           if v_portee = 'habitation' and loyer > 0 and dg > loyer * (case when typ = 'meuble' then 2 else 1 end) then auto := 'anomalie'; detail := detail || ' : au-delà du plafond légal'; end if;
           if valeur_ia is not null and nullif(valeur_ia->>'montant','') is not null and (valeur_ia->>'montant')::numeric <> coalesce(dg, -1) then
             ia_diff := 'dépôt de ' || (valeur_ia->>'montant') || ' €'; end if;
+          ia_ok := nullif(valeur_ia->>'montant','') is not null and ia_diff is null;
         when 'charges' then
           detail := coalesce(round((o->>'charges_in_cents')::numeric / 100, 2)::text || ' € par appel', 'Provisions');
           vide := o->>'charges_in_cents' is null;
@@ -92,11 +102,13 @@ begin
              and abs((valeur_ia->>'montant_mensuel')::numeric - coalesce((o->>'charges_in_cents')::numeric / 100, 0)) >= 0.5
              and abs((valeur_ia->>'montant_mensuel')::numeric * coalesce(nullif(o->>'frequency_in_months','')::numeric, 1) - coalesce((o->>'charges_in_cents')::numeric / 100, 0)) >= 0.5 then
             ia_diff := 'provisions de ' || (valeur_ia->>'montant_mensuel') || ' € par mois'; end if;
+          ia_ok := nullif(valeur_ia->>'montant_mensuel', '') is not null and ia_diff is null;
         else null;
       end case;
       if vide then auto := 'anomalie'; detail := detail || ' : non renseigné dans Rivage';
       elsif ia_diff is not null then auto := 'anomalie'; detail := detail || ' · le bail indique : ' || ia_diff;
-      elsif auto is null then auto := 'ok'; end if;
+      elsif auto is null and ia_ok then auto := 'ok';
+      elsif auto is null then detail := detail || ' · à confirmer : non vérifié dans le bail'; end if;
     end if;
     if rep.statut is null then
       if coalesce(auto, '') <> 'ok' then restant := restant + 1; end if;
