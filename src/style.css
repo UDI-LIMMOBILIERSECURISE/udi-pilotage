@@ -170,3 +170,4 @@ tr.sel td { background: #EEF4FA; }
 .versement:last-child { border-bottom: 0; }
 
 .grille-baux { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.btn:disabled, .btn[disabled] { opacity: .45; cursor: not-allowed; }
