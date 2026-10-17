@@ -96,6 +96,10 @@ Deno.serve(async (req) => {
     f.append('upload[nature]', c.nature!)
     f.append('upload[title]', titre)
     f.append('upload[label]', titre)
+    // Rattachement : la documentation parle de « paramètres » resourceable_type / resourceable_id, hors de l'objet upload.
+    // Le 1er dépôt (17/10, dans l'objet upload seulement) a créé la pièce sans la rattacher : envoi aux deux endroits.
+    f.append('resourceable_type', c.cible_type!)
+    f.append('resourceable_id', c.cible_id!)
     f.append('upload[resourceable_type]', c.cible_type!)
     f.append('upload[resourceable_id]', c.cible_id!)
     f.append(fichierDansUpload ? 'upload[file]' : 'file', new Blob([bin], { type }), c.nom!)
