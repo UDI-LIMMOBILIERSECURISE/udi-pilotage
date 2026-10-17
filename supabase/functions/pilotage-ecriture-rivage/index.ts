@@ -89,21 +89,30 @@ Deno.serve(async (req) => {
   const cle = brute.trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '')
   const titre = (c.titre || c.nom!.replace(/\.[a-z0-9]+$/i, '')).slice(0, 150)
 
-  // Rivage (Rails) exige les métadonnées dans un objet « upload » (refus 400 « param is missing: upload » sinon, essai du 17/10).
-  // Le fichier est attendu dans « file » selon la documentation ; repli sur « upload[file] » si Rivage refuse encore.
+  // Rattachement (essais du 17/10) : un rattachement à un mandat (ManagementContract) est ignoré par Rivage.
+  // Mandat : la pièce est rattachée au lot du mandat (Asset), que le contrôle du mandat reconnaît. Bail : adresse dédiée de l'API.
+  let rattacheA = c.cible_id!, typeRattache = c.cible_type!
+  if (c.cible_type === 'ManagementContract') {
+    const { data: lots } = await service.rpc('pilotage_lots_mandat', { p_mandat: c.cible_id })
+    if (!Array.isArray(lots) || !lots.length) return rep(400, { error: 'Aucun lot rattaché à ce mandat dans Rivage : impossible d’y rattacher la pièce.' })
+    rattacheA = lots[0]; typeRattache = 'Asset'
+  }
+  const adresse = c.cible_type === 'LeasingContract' ? `${RIVAGE}/api/v1/leasing_contracts/${encodeURIComponent(c.cible_id!)}/uploads` : `${RIVAGE}/api/v1/uploads`
+  // Rivage (Rails) exige les métadonnées dans un objet « upload » (refus 400 « param is missing: upload » sinon).
+  // Le fichier est attendu dans « file » selon la documentation ; repli sur « upload[file] » si Rivage refuse.
   const envoyer = async (fichierDansUpload: boolean) => {
     const f = new FormData()
     f.append('upload[nature]', c.nature!)
     f.append('upload[title]', titre)
     f.append('upload[label]', titre)
-    // Rattachement : la documentation parle de « paramètres » resourceable_type / resourceable_id, hors de l'objet upload.
-    // Le 1er dépôt (17/10, dans l'objet upload seulement) a créé la pièce sans la rattacher : envoi aux deux endroits.
-    f.append('resourceable_type', c.cible_type!)
-    f.append('resourceable_id', c.cible_id!)
-    f.append('upload[resourceable_type]', c.cible_type!)
-    f.append('upload[resourceable_id]', c.cible_id!)
+    if (c.cible_type !== 'LeasingContract') {
+      f.append('resourceable_type', typeRattache)
+      f.append('resourceable_id', rattacheA)
+      f.append('upload[resourceable_type]', typeRattache)
+      f.append('upload[resourceable_id]', rattacheA)
+    }
     f.append(fichierDansUpload ? 'upload[file]' : 'file', new Blob([bin], { type }), c.nom!)
-    const r = await fetch(`${RIVAGE}/api/v1/uploads`, { method: 'POST', headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' }, body: f })
+    const r = await fetch(adresse, { method: 'POST', headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' }, body: f })
     const t = await r.text()
     let corps: Record<string, unknown> = {}
     try { corps = JSON.parse(t) } catch { corps = { message: t.slice(0, 300) } }
@@ -116,12 +125,12 @@ Deno.serve(async (req) => {
     if (!r.ok) corps = { ...corps, premier_essai: premier }
   }
 
-  const rattache = Array.isArray(corps.resourceables) && (corps.resourceables as { id?: string }[]).some((x) => x.id === c.cible_id)
+  const rattache = Array.isArray(corps.resourceables) && (corps.resourceables as { id?: string }[]).some((x) => x.id === rattacheA)
   const ok = r.ok
   // Journal : résumé de la réponse, sans le lien de téléchargement (valable 7 jours, sans authentification)
   const resume = { id: corps.id ?? null, nature: corps.nature ?? null, label: corps.label ?? null,
     resourceables: Array.isArray(corps.resourceables) ? (corps.resourceables as { id?: string; type?: string }[]).map((x) => ({ id: x.id, type: x.type })) : null,
-    document_weroof: c.document_weroof || null, premier_essai: corps.premier_essai ?? null, error: corps.error ?? null, message: typeof corps.message === 'string' ? (corps.message as string).slice(0, 500) : null }
+    document_weroof: c.document_weroof || null, rattache_a: rattacheA, premier_essai: corps.premier_essai ?? null, error: corps.error ?? null, message: typeof corps.message === 'string' ? (corps.message as string).slice(0, 500) : null }
   const { error: ej } = await service.rpc('pilotage_ecriture_rivage_noter', { p_par: u.user.id, p_action: 'upload', p_cible_type: c.cible_type, p_cible_id: c.cible_id,
     p_nature: c.nature, p_libelle: c.nom, p_statut: r.status, p_ok: ok, p_rivage_id: (corps.id as string) || null, p_reponse: resume })
   if (ej) console.error('[pilotage-ecriture-rivage] journal', ej.message)
@@ -131,5 +140,6 @@ Deno.serve(async (req) => {
     return rep(502, { error: msg })
   }
   return rep(200, { ok: true, upload_id: corps.id, rattache, nature: corps.nature,
+    rattache_a: typeRattache === 'Asset' ? 'lot' : 'bail',
     avertissement: rattache ? null : 'Pièce créée dans Rivage mais pas rattachée au dossier : la rattacher dans la GED Rivage.' })
 })
