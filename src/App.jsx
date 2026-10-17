@@ -6,6 +6,7 @@ import DossierMandat from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
 import MesDossiers from './Circuit.jsx';
 import ALouer from './ALouer.jsx';
+import Reprise from './Reprise.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
@@ -68,7 +69,7 @@ function Espace() {
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
   const tabs = [['jour', 'Ma journée', true], ['agence', 'Toute l’agence', voit('agence')], ['sinistres', 'Sinistres', voit('sinistres')],
-    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['alouer', 'À louer', true], ['mandats', 'Mandats', moi.voit_commissions], ['baux', 'Baux et obligations', voit('baux')], ['commissions', 'Commissions', moi.voit_commissions], ['obligations', 'Obligations suivies', moi.voit_reglages],
+    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['alouer', 'À louer', true], ['mandats', 'Mandats', moi.voit_commissions], ['baux', 'Baux et obligations', voit('baux')], ['commissions', 'Commissions', moi.voit_commissions], ['reprise', 'Reprise', moi.voit_equipe], ['obligations', 'Obligations suivies', moi.voit_reglages],
     ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
   return (
     <>
@@ -86,6 +87,7 @@ function Espace() {
         {onglet === 'compta' && voit('compta') && <Compta />}
         {onglet === 'impayes' && voit('impayes') && <Impayes />}
         {onglet === 'alouer' && <ALouer />}
+        {onglet === 'reprise' && moi.voit_equipe && <Reprise moi={moi} />}
         {onglet === 'baux' && voit('baux') && <SuiviBaux moi={moi} />}
         {onglet === 'mandats' && moi.voit_commissions && <Mandats />}
         {onglet === 'commissions' && moi.voit_commissions && <Commissions />}

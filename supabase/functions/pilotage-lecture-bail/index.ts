@@ -307,8 +307,15 @@ Deno.serve(async (req) => {
   if (enteteCron) {
     const ok = (await service.rpc('pilotage_cron_valide', { p_secret: enteteCron })).data === true
     if (!ok) return rep(401, { error: 'Non autorisé' })
-    let c: { justificatifs?: boolean; mandats?: boolean; edl?: boolean; communes?: boolean } = {}
+    let c: { justificatifs?: boolean; mandats?: boolean; edl?: boolean; communes?: boolean; audit?: boolean } = {}
     try { c = await req.json() } catch { /* corps vide : lecture des baux */ }
+    // Audit du stock (040) : tous les baux en cours et mandats actifs pas encore lus, 3 + 3 par passage (toutes les 10 minutes)
+    if (c.audit) {
+      const { data: liste } = await service.rpc('pilotage_audit_a_lire', { p_max: 3 })
+      const faits: unknown[] = []
+      for (const x of (liste || []) as { type: string; id: string }[]) faits.push({ ...x, ...(await lire(service, x.id, null, null, null, x.type === 'mandat')).body })
+      return rep(200, { ok: true, faits })
+    }
     // Communes des logements gérés absentes de la table du permis de louer (038) : chaque heure, 2 au plus
     if (c.communes) {
       const { data: liste } = await service.rpc('pilotage_communes_a_rechercher', { p_max: 2 })
