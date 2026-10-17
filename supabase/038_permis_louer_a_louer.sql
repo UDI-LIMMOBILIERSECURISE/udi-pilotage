@@ -482,6 +482,7 @@ begin
          case when pilotage.permis_lot(a.id)->>'regime' = 'declaration' then coalesce(b.signe_le, b.debut) + 15 else current_date end, true
   from pilotage.v_baux b join pilotage.objets a on a.type = 'Asset' and a.id = b.lot_id
   where b.statut in ('created', 'move_in', 'in_progress') and coalesce(b.signe_le, b.debut) >= date '2026-10-17'
+    and a.data->>'management_contract_id' is not null
     and pilotage.permis_lot(a.id)->>'regime' in ('autorisation', 'declaration')
     and not exists (select 1 from pilotage.mandats_obligations o where o.asset_id = a.id and o.nature in ('permis_declaration', 'permis_absent') and o.libelle like '%' || coalesce(b.reference, b.id) || '%')
     and (pilotage.permis_lot(a.id)->>'regime' = 'declaration'

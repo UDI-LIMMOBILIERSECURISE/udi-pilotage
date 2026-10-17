@@ -7,7 +7,7 @@
 --   3. Pièces manquantes comptées par nature, pour décider de la campagne de rattrapage.
 --   4. Pièce introuvable : statut « introuvable », justifié, posé uniquement par Nicolas ou Romain (sinon le dossier resterait rouge à vie).
 
-insert into pilotage.parametres (cle, valeur) values ('audit_stock', null) on conflict (cle) do nothing;
+insert into pilotage.parametres (cle, valeur) values ('audit_stock', 'inactif') on conflict (cle) do nothing;
 
 create or replace function pilotage.audit_actif() returns boolean
 language sql stable security definer set search_path = pilotage, public as $$
@@ -18,10 +18,12 @@ create or replace function public.pilotage_audit_lancer(p_actif boolean) returns
 language plpgsql security definer set search_path = pilotage, public as $$
 begin
   if pilotage.mon_role() <> 'direction' then raise exception 'Réservé à Nicolas'; end if;
-  insert into pilotage.parametres (cle, valeur) values ('audit_stock', case when p_actif then 'actif' end)
+  insert into pilotage.parametres (cle, valeur) values ('audit_stock', case when p_actif then 'actif' else 'inactif' end)
   on conflict (cle) do update set valeur = excluded.valeur;
-  insert into pilotage.parametres (cle, valeur) values ('audit_stock_lance_le', case when p_actif then now()::text end)
-  on conflict (cle) do update set valeur = coalesce(excluded.valeur, pilotage.parametres.valeur);
+  if p_actif then
+    insert into pilotage.parametres (cle, valeur) values ('audit_stock_lance_le', now()::text)
+    on conflict (cle) do update set valeur = excluded.valeur;
+  end if;
 end $$;
 
 -- Cache des mandats (pièces manquantes, écarts) : l'audit lit ce cache plutôt que de recalculer chaque mandat à l'ouverture de l'écran
