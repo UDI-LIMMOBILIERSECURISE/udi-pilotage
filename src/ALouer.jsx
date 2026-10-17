@@ -34,7 +34,7 @@ export default function ALouer() {
     </details>}
     {!d.lots.length ? <div className="card">Aucun lot en recherche de locataire.</div>
       : <div className="stack" style={{ gap: 8 }}>{d.lots.map((l) => <LotALouer key={l.asset_id} l={l} peut={d.peut} agir={agir} />)}</div>}
-    <Communes />
+    <Communes peut={d.peut} />
   </>;
 }
 
@@ -93,7 +93,9 @@ function LotALouer({ l, peut, agir }) {
 }
 
 // ----- Table des communes du permis de louer -----
-function Communes() {
+const perimetre = (x) => (x.perimetre !== 'rues' ? 'toute la commune' : x.rues ? `${x.rues} voie(s) concernée(s)` : 'certaines voies (liste à fournir)');
+
+function Communes({ peut }) {
   const [c, setC] = useState(null);
   const [err, setErr] = useState('');
   const [sel, setSel] = useState(null);
@@ -105,19 +107,23 @@ function Communes() {
     <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Permis de louer : communes ({c.length}){aConfirmer.length ? ` · ${aConfirmer.length} à confirmer` : ''}</summary>
     <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Les communes des logements gérés absentes de la table sont recherchées automatiquement sur le web ; le résultat reste « à confirmer » jusqu’à validation par la gestion. Un arrêté peut évoluer : revérifier régulièrement.</div>
     {err && <div className="banner">{err}</div>}
-    <div className="table-wrap"><table className="table-imp"><thead><tr><th>Commune</th><th>Régime</th><th>Périmètre</th><th>Source</th><th>Vérifiée</th><th /></tr></thead>
-      <tbody>{c.map((x) => <React.Fragment key={x.commune}>
-        <tr style={{ background: x.statut === 'a_confirmer' ? 'var(--amber-bg, #fff6e5)' : undefined }}>
-          <td><b>{x.libelle}</b>{x.statut === 'a_confirmer' && <div className="etq rose">à confirmer</div>}</td>
-          <td>{REGIME[x.regime]}{x.regime_hors_perimetre ? ` (ailleurs : ${REGIME[x.regime_hors_perimetre].toLowerCase()})` : ''}</td>
-          <td>{x.perimetre === 'rues' ? `${x.rues} voie(s)` : 'Toute la commune'}</td>
-          <td style={{ maxWidth: 280, fontSize: 12 }}>{x.notes ? x.notes + ' · ' : ''}{x.source && /^https?:/.test(x.source) ? <a href={x.source} target="_blank" rel="noreferrer">source</a> : x.source}</td>
-          <td style={{ fontSize: 12 }}>{x.verifie_le ? date(x.verifie_le) + (x.verifie_par ? ' · ' + x.verifie_par : '') : x.recherche_le ? 'recherche IA du ' + date(x.recherche_le) : '—'}</td>
-          <td><button className="lien" onClick={() => setSel(sel === x.commune ? null : x.commune)}>{x.statut === 'a_confirmer' ? 'Confirmer' : 'Modifier'}</button></td>
-        </tr>
-        {sel === x.commune && <tr><td colSpan={6}><EditCommune x={x} fini={async () => { setSel(null); await charger(); }} onErreur={setErr} /></td></tr>}
-      </React.Fragment>)}</tbody></table></div>
-    {sel === '__nouvelle' ? <EditCommune x={{ libelle: '', regime: 'autorisation', perimetre: 'commune' }} fini={async () => { setSel(null); await charger(); }} onErreur={setErr} />
+    <div className="stack" style={{ gap: 6 }}>{c.map((x) => <div key={x.commune} className="card" style={{ padding: '10px 12px', background: x.statut === 'a_confirmer' ? 'var(--amber-bg)' : undefined }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+          <div><b>{x.libelle}</b>{x.statut === 'a_confirmer' && <span className="etq rose" style={{ marginLeft: 6 }}>à confirmer</span>}</div>
+          <div style={{ fontSize: 13, marginTop: 2 }}>{REGIME[x.regime]}
+            {x.regime === 'aucun' ? '' : <span className="muted"> · {perimetre(x)}{x.perimetre === 'rues' && x.regime_hors_perimetre && x.regime_hors_perimetre !== 'aucun' ? ` ; ailleurs : ${REGIME[x.regime_hors_perimetre].toLowerCase()}` : ''}</span>}</div>
+          {(x.notes || x.source) && <div className="muted" style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>{x.notes}{x.notes && x.source ? ' · ' : ''}
+            {x.source && /^https?:/.test(x.source) ? <a href={x.source} target="_blank" rel="noreferrer">source</a> : x.source}</div>}
+        </div>
+        <div className="row" style={{ gap: 8, flex: '0 0 auto' }}>
+          <span className="muted" style={{ fontSize: 12 }}>{x.verifie_le ? 'Vérifiée le ' + date(x.verifie_le) + (x.verifie_par ? ' · ' + x.verifie_par : '') : x.recherche_le ? 'Recherche IA du ' + date(x.recherche_le) : ''}</span>
+          {peut && <button className="btn" onClick={() => setSel(sel === x.commune ? null : x.commune)}>{sel === x.commune ? 'Fermer' : x.statut === 'a_confirmer' ? 'Confirmer' : 'Modifier'}</button>}
+        </div>
+      </div>
+      {sel === x.commune && <div style={{ marginTop: 8 }}><EditCommune x={x} fini={async () => { setSel(null); await charger(); }} onErreur={setErr} /></div>}
+    </div>)}</div>
+    {!peut ? null : sel === '__nouvelle' ? <EditCommune x={{ libelle: '', regime: 'autorisation', perimetre: 'commune' }} fini={async () => { setSel(null); await charger(); }} onErreur={setErr} />
       : <button className="lien" onClick={() => setSel('__nouvelle')}>+ Ajouter une commune</button>}
   </details>;
 }
