@@ -4,6 +4,7 @@
 --    Avant ce script, un document illisible était relu (et payé) à chaque passage, sans fin.
 -- 2. Audit du stock : 2 dossiers au plus par passage (1 bail + 1 mandat), un passage toutes les 5 minutes, et un plafond
 --    quotidien de lectures (150 par défaut, réglable) pour que la dépense de chaque jour soit connue d'avance.
+-- 3. Les champs Rivage vides sont nommés précisément (ex. « manque : date de signature »).
 -- À passer après le 040. La fonction serveur pilotage-lecture-bail est redéployée ensuite par Claude (elle appelle la nouvelle fonction d'échec).
 
 -- ========== 1. Échecs de lecture ==========
@@ -172,6 +173,26 @@ begin
   end if;
 end $$;
 
+-- ========== 4. Champs Rivage vides : nommer exactement ce qui manque ==========
+-- Avant : « Date de signature, début et fin du mandat » alors que seule la signature manquait (mandat DREZET, 17/10).
+-- Après : « Date de signature, début et fin du mandat (manque : date de signature) ».
+create or replace function pilotage.manque_rivage(p_detail text) returns text
+language sql immutable as $$
+  select string_agg(case trim(regexp_replace(x, '\s*—\s*$', ''))
+                      when 'Signé le' then 'date de signature' when 'début' then 'date de début' when 'fin' then 'date de fin'
+                      when 'prochaine le' then 'date de la prochaine échéance'
+                      else lower(trim(regexp_replace(x, '\s*—\s*$', ''))) end, ', ')
+  from regexp_split_to_table(split_part(p_detail, ' : non renseigné dans Rivage', 1), ',\s*') x
+  where x like '%—%'
+$$;
+
+create or replace function pilotage.champs_vides(p_controle jsonb) returns jsonb
+language sql immutable as $$
+  select coalesce(jsonb_agg(i->>'libelle' || coalesce(' (manque : ' || pilotage.manque_rivage(i->>'detail') || ')', '') order by i->>'libelle'), '[]'::jsonb)
+  from jsonb_array_elements(coalesce(p_controle->'items', '[]'::jsonb)) i
+  where i->>'detail' like '% : non renseigné dans Rivage%'
+$$;
+
 -- Passage toutes les 5 minutes pendant l'audit (2 dossiers au plus par passage : la fonction serveur demande 1 bail + 1 mandat)
 select cron.unschedule('pilotage-audit-lectures') where exists (select 1 from cron.job where jobname = 'pilotage-audit-lectures');
 select cron.schedule('pilotage-audit-lectures', '*/5 * * * *', $$ select net.http_post(
@@ -191,9 +212,10 @@ grant execute on function public.pilotage_baux_a_lire(integer), public.pilotage_
 revoke all on function public.pilotage_lecture_relancer(text), public.pilotage_audit_plafond(integer) from public, anon;
 grant execute on function public.pilotage_lecture_relancer(text), public.pilotage_audit_plafond(integer) to authenticated;
 
--- Contrôle : doit renvoyer 5 lignes à true
+-- Contrôle : doit renvoyer 6 lignes à true
 select 'table' t, to_regclass('pilotage.lectures_echecs') is not null ok
 union all select 'edl', position('lecture_bloquee' in pg_get_functiondef('public.pilotage_edl_a_lire(integer)'::regprocedure)) > 0
 union all select 'communes', position('lecture_bloquee' in pg_get_functiondef('public.pilotage_communes_a_rechercher(integer)'::regprocedure)) > 0
 union all select 'audit', position('lectures_jour' in pg_get_functiondef('public.pilotage_audit()'::regprocedure)) > 0
-union all select 'cron', exists (select 1 from cron.job where jobname = 'pilotage-audit-lectures' and schedule = '*/5 * * * *');
+union all select 'cron', exists (select 1 from cron.job where jobname = 'pilotage-audit-lectures' and schedule = '*/5 * * * *')
+union all select 'libelle', pilotage.manque_rivage('Signé le —, début 08/10/2026, fin 08/10/2027 : non renseigné dans Rivage') = 'date de signature';
