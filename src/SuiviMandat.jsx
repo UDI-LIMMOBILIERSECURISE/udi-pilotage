@@ -63,6 +63,7 @@ export default function DossierMandat({ m, apres }) {
     </div>
     {err && <div className="banner">{err}</div>}
     {c.soumis && <Circuit objet="mandat" id={m.id} apres={async () => { await charger(); apres && apres(); }} />}
+    <DeposerRivage cible_type="ManagementContract" cible_id={m.id} apres={async () => { await charger(); apres && apres(); }} />
     {synthese ? <Synthese {...ctx} parametrer={() => setParametrer(true)} /> : <>
       <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
         {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}</> : <>{c.restant} point(s) à traiter avant la validation{c.lecture_le ? ` · mandat lu par l’IA le ${date(c.lecture_le)}` : lecture.charge ? ' · lecture du mandat par l’IA en cours…' : ''}</>}
@@ -489,4 +490,42 @@ function Compteur({ c, asset, bail, typeDefaut, appel }) {
       {r.index !== '' && rel.length > 0 && <span className="muted">Consommation depuis le {date(rel[rel.length - 1].le)} : {nb(Number(String(r.index).replace(',', '.')) - rel[rel.length - 1].index)} {c.unite}</span>}
     </div>
   </div>;
+}
+
+// Dépôt d'une pièce dans Rivage depuis le pilotage (042, direction seulement pour l'instant)
+const NATURES_DEPOT = [['management_mandate', 'Mandat de gestion signé'], ['landlord_identity_and_residence_proof', 'Identité du bailleur (Kbis, statuts, pièce d’identité)'],
+  ['property_title', 'Titre de propriété'], ['landlord_bank_details', 'RIB du bailleur'], ['property_insurance_contracts', 'Assurance (PNO)'],
+  ['technical_diagnostic_reports', 'Diagnostics (DPE, ERP, amiante, plomb)']];
+export function DeposerRivage({ cible_type, cible_id, apres }) {
+  const [peut, setPeut] = useState(false);
+  const [f, setF] = useState({ nature: 'management_mandate', fichier: null });
+  const [etat, setEtat] = useState({ charge: false, err: '', ok: '' });
+  const [journal, setJournal] = useState([]);
+  const charger = () => rpc('pilotage_ecritures_rivage', { p_cible: cible_id }).then(setJournal).catch(() => {});
+  useEffect(() => { rpc('pilotage_peut_ecrire_rivage').then((x) => { setPeut(x === true); if (x === true) charger(); }).catch(() => setPeut(false)); }, [cible_id]);
+  if (!peut) return null;
+  const envoyer = async () => {
+    const fichier = f.fichier; if (!fichier) return;
+    setEtat({ charge: true, err: '', ok: '' });
+    const buf = await fichier.arrayBuffer(); let bin = ''; const u = new Uint8Array(buf);
+    for (let k = 0; k < u.length; k += 0x8000) bin += String.fromCharCode.apply(null, u.subarray(k, k + 0x8000));
+    const { data, error } = await supabase.functions.invoke('pilotage-ecriture-rivage', { body: { action: 'upload', cible_type, cible_id, nature: f.nature,
+      nom: fichier.name, titre: fichier.name.replace(/\.[a-z0-9]+$/i, ''), type_mime: fichier.type, fichier: btoa(bin) } });
+    let msg = data?.error;
+    if (error && !msg) { try { msg = (await error.context?.json())?.error; } catch { /* corps illisible */ } }
+    if (error || data?.error) setEtat({ charge: false, err: msg || 'Dépôt impossible pour le moment.', ok: '' });
+    else { setEtat({ charge: false, err: '', ok: data.avertissement || 'Pièce déposée dans Rivage. Elle apparaîtra ici dès que Rivage l’aura transmise (webhook).' }); setF({ ...f, fichier: null }); charger(); apres && apres(); }
+  };
+  return <details className="replie" style={{ margin: '8px 0' }}>
+    <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Déposer une pièce dans Rivage{journal.length ? ` (${journal.length} dépôt(s))` : ''}</summary>
+    <div className="row" style={{ marginTop: 6 }}>
+      <select value={f.nature} onChange={(e) => setF({ ...f, nature: e.target.value })}>{NATURES_DEPOT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+      <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setF({ ...f, fichier: e.target.files[0] || null })} />
+      <button className="btn plein" disabled={!f.fichier || etat.charge} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer dans Rivage'}</button>
+    </div>
+    <div className="muted" style={{ fontSize: 12 }}>La pièce est créée dans la GED Rivage et rattachée à ce dossier. Chaque dépôt est tracé.</div>
+    {etat.err && <div className="err">{etat.err}</div>}
+    {etat.ok && <div style={{ fontSize: 13, color: 'var(--teal)' }}>{etat.ok}</div>}
+    {journal.map((j, i) => <div key={i} className="muted" style={{ fontSize: 12 }}>{new Date(j.le).toLocaleString('fr-FR')} · {j.par || '—'} · {j.libelle} · {j.ok ? 'déposé' : `refusé (${j.statut}) ${j.message || ''}`}</div>)}
+  </details>;
 }
