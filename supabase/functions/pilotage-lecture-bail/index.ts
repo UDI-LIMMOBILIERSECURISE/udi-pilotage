@@ -221,8 +221,15 @@ Deno.serve(async (req) => {
   if (enteteCron) {
     const ok = (await service.rpc('pilotage_cron_valide', { p_secret: enteteCron })).data === true
     if (!ok) return rep(401, { error: 'Non autorisé' })
-    let c: { justificatifs?: boolean } = {}
+    let c: { justificatifs?: boolean; mandats?: boolean } = {}
     try { c = await req.json() } catch { /* corps vide : lecture des baux */ }
+    // Mandats soumis au contrôle d'entrée et pas encore lus (036) : chaque heure
+    if (c.mandats) {
+      const { data: liste } = await service.rpc('pilotage_mandats_a_lire', { p_max: 3 })
+      const faits: unknown[] = []
+      for (const id of (liste || []) as string[]) faits.push({ mandat: id, ...(await lire(service, id, null, null, null, true)).body })
+      return rep(200, { ok: true, faits })
+    }
     if (c.justificatifs) {
       const { data: liste } = await service.rpc('pilotage_justificatifs_a_lire', { p_max: 5 })
       const faits: unknown[] = []
@@ -241,13 +248,18 @@ Deno.serve(async (req) => {
   const { data: u } = await utilisateur.auth.getUser()
   if (!u?.user) return rep(401, { error: 'Non connecté' })
   const { data: moi } = await utilisateur.rpc('pilotage_moi')
-  if (!moi || !['direction', 'superviseur', 'gestionnaire'].includes(moi.role)) return rep(403, { error: 'Réservé à la direction, au superviseur et aux gestionnaires' })
+  if (!moi) return rep(403, { error: 'Accès refusé' })
 
   let corps: { bail_id?: string; mandat_id?: string; pdf?: string; nom?: string; upload_id?: string; piece?: string }
   try { corps = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   const mandat = !!corps.mandat_id
   const id = corps.mandat_id || corps.bail_id
   if (!id) return rep(400, { error: 'Bail ou mandat manquant' })
+  // La gestion lit tous les dossiers ; le commercial, seulement les siens (négociateur du mandat, « loué par » du bail) (036)
+  if (!['direction', 'superviseur', 'gestionnaire'].includes(moi.role)) {
+    const { data: permis } = await utilisateur.rpc('pilotage_peut_lire', { p_objet: mandat ? 'mandat' : 'bail', p_id: id })
+    if (permis !== true) return rep(403, { error: 'Ce dossier ne vous est pas attribué' })
+  }
   if (corps.upload_id) {
     const v = await verifierPiece(service, id, corps.upload_id, corps.piece || 'pièce du dossier', mandat)
     return rep(v.status, v.body)

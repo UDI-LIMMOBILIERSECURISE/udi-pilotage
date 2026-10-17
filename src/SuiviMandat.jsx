@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { preparer } from './mails.js';
 import { EditeurMail } from './SuiviBaux.jsx';
+import { Circuit } from './Circuit.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const court = (t) => (t || '').split(' · ')[0];
@@ -18,8 +19,20 @@ export default function DossierMandat({ m, apres }) {
   const [err, setErr] = useState('');
   const [parametrer, setParametrer] = useState(false);
   const [lecture, setLecture] = useState({ charge: false, err: '' });
+  const [auto, setAuto] = useState(null); // lecture IA lancée d'office à l'ouverture d'un mandat soumis encore jamais lu (036)
   const charger = () => rpc('pilotage_mandat_dossier', { p_mandat: m.id }).then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { setD(null); setParametrer(false); charger(); }, [m.id]);
+  useEffect(() => { setD(null); setParametrer(false); setAuto(null); charger(); }, [m.id]);
+  useEffect(() => {
+    const c0 = d?.controle;
+    if (!c0 || !c0.soumis || c0.lecture_le || auto === m.id) return;
+    setAuto(m.id);
+    setLecture({ charge: true, err: '' });
+    supabase.functions.invoke('pilotage-lecture-bail', { body: { mandat_id: m.id } }).then(({ data, error }) => {
+      // Pas de mandat dans Rivage : pas d'erreur affichée, la pièce manquante est déjà signalée
+      setLecture({ charge: false, err: '' });
+      if (!error && !data?.error) charger();
+    });
+  }, [d]);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement du contrôle…</p>;
   const c = d.controle || { items: [] };
@@ -46,15 +59,16 @@ export default function DossierMandat({ m, apres }) {
         : (c.go_le || !c.soumis) && <button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse</button>}
     </div>
     {err && <div className="banner">{err}</div>}
+    {c.soumis && <Circuit objet="mandat" id={m.id} apres={async () => { await charger(); apres && apres(); }} />}
     {synthese ? <Synthese {...ctx} parametrer={() => setParametrer(true)} /> : <>
       <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
-        {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}</> : <>{c.restant} point(s) à traiter avant le GO{c.lecture_le ? ` · mandat lu par l’IA le ${date(c.lecture_le)}` : ''}</>}
+        {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}</> : <>{c.restant} point(s) à traiter avant la validation{c.lecture_le ? ` · mandat lu par l’IA le ${date(c.lecture_le)}` : lecture.charge ? ' · lecture du mandat par l’IA en cours…' : ''}</>}
         <div className="row" style={{ marginTop: 6 }}>
           <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le mandat déposé dans Rivage (IA)'}</button>
           <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>
         </div>
         {lecture.err && <div className="err">{lecture.err}</div>}
-        {!c.go_le && !c.restant && <div style={{ marginTop: 4 }}>Contrôle bouclé : le GO « dossier complet » peut être donné.</div>}
+        {!c.go_le && !c.restant && <div style={{ marginTop: 4 }}>Questionnaire bouclé.</div>}
       </div>
       {(d.lecture?.resultat?.anomalies || []).length > 0 && <div className="resume-ia" style={{ marginTop: 8 }}>
         <span className="resume-ia-titre">✦ Lecture du mandat</span> <span className="muted">({d.lecture.source}, le {date(d.lecture.le)})</span>

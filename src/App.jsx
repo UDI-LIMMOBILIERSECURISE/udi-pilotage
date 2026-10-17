@@ -4,6 +4,7 @@ import { lireExportMonday } from './importMonday.js';
 import SuiviBaux from './SuiviBaux.jsx';
 import DossierMandat from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
+import MesDossiers from './Circuit.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
@@ -136,6 +137,7 @@ function Journee({ moi }) {
         )}
       </div>
       {err && <div className="banner">{err}</div>}
+      {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
       {moi.role === 'direction' && cible === moi.user_id && <div className="info">Vous voyez ici les alertes des mandats attribués à vous et celles des mandats qui ne sont encore attribués à personne.</div>}
       <div className="row" style={{ marginBottom: 14 }}>
         {[['toutes', 'Toutes']].concat(Object.entries(CAT)).map(([k, l]) => (

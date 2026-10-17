@@ -31,7 +31,8 @@ const garder = (o: Record<string, unknown>, cles: string[]) => Object.fromEntrie
 function nettoyer(modele: string, o: Record<string, unknown>) {
   if (modele === 'Profile') return garder(o, PERSONNE)
   if (modele === 'LeasingContract') {
-    o.tenants = ((o.tenants as Record<string, unknown>[]) || []).map((t) => garder(t, PERSONNE))
+    // La date de naissance des locataires est gardée : contrôle des plus de 65 ans avant un congé (036)
+    o.tenants = ((o.tenants as Record<string, unknown>[]) || []).map((t) => garder(t, [...PERSONNE, 'birth_date']))
     o.guarantors = ((o.guarantors as Record<string, unknown>[]) || []).map((g) => ({ id: g.id }))
   }
   return o

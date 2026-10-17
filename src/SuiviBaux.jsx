@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { ResumeIA, Tuiles, Filtres } from './App.jsx';
 import { Compteurs } from './SuiviMandat.jsx';
+import { Circuit } from './Circuit.jsx';
 import { preparer, SMS, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
@@ -94,7 +95,7 @@ export default function SuiviBaux({ moi }) {
 
 // ===== Détail d'un bail =====
 
-function DossierBail({ b, peut, moi, apres }) {
+export function DossierBail({ b, peut, moi, apres }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [mail, setMail] = useState(null); // { m, etape: { cle, etape, detail } }
@@ -135,6 +136,7 @@ function DossierBail({ b, peut, moi, apres }) {
     <div className="muted">{b.adresse} · {b.mandat} · Bailleur : {b.bailleur || '—'}</div>
     {err && <div className="banner">{err}</div>}
     <ResumeIA type="bail" id={b.bail_id} />
+    {soumis && <Circuit objet="bail" id={b.bail_id} apres={async () => { await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await charger(); apres && apres(); }} />}
     {ech.alerte_derogatoire && <div className="mini-alerte critique">{ech.alerte_derogatoire}</div>}
 
     <h3>À faire maintenant</h3>
