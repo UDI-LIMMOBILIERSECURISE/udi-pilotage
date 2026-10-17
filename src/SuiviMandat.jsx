@@ -6,6 +6,7 @@ import { supabase, rpc } from './supabase.js';
 import { preparer } from './mails.js';
 import { EditeurMail } from './SuiviBaux.jsx';
 import { Circuit } from './Circuit.jsx';
+import PermisMandat from './Permis.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const court = (t) => (t || '').split(' · ')[0];
@@ -80,6 +81,7 @@ export default function DossierMandat({ m, apres }) {
       <Clauses {...ctx} />
     </>}
     <Immeubles m={m} onErreur={setErr} apres={async () => { await charger(); apres && apres(); }} />
+    <PermisMandat m={m} onErreur={setErr} />
     <SuivisMandat m={m} d={d} agir={agir} />
   </>;
 }
@@ -303,7 +305,9 @@ function ClauseSimple({ i, repondre }) {
 // Échéance et entretien des lots vacants sont créés automatiquement (034) ; PNO et DPE se saisissent ici.
 // Un justificatif PNO ou DPE déposé dans Rivage fait passer le suivi à l'échéance suivante.
 const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE',
-  entretien_immeuble: 'Entretien (immeuble)', ascenseur_ct: 'Contrôle technique de l’ascenseur', assurance_immeuble: 'Assurance de l’immeuble' };
+  entretien_immeuble: 'Entretien (immeuble)', ascenseur_ct: 'Contrôle technique de l’ascenseur', assurance_immeuble: 'Assurance de l’immeuble',
+  permis_a_demander: 'Permis de louer à demander', permis_demande: 'Permis de louer : réponse de la mairie', permis_attestation: 'Attestation d’accord tacite',
+  permis_refus: 'Permis de louer refusé', permis_caducite: 'Validité du permis de louer', permis_declaration: 'Déclaration de mise en location', permis_absent: 'Bail signé sans permis de louer' };
 const CANAL_M = { mail_bailleur: 'Mail au bailleur', tache: 'Tâche', lrar: 'Recommandé', mail_locataire: 'Mail au locataire', sms_rivage: 'SMS (Rivage)' };
 const plusMois = (iso, n) => { const x = new Date(iso); x.setMonth(x.getMonth() + n); return x.toISOString().slice(0, 10); };
 

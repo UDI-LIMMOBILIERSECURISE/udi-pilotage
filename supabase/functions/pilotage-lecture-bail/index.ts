@@ -256,6 +256,43 @@ async function lireEdl(service: ReturnType<typeof createClient>, j: { upload_id:
   return { upload: j.upload_id, erreur: 'IA indisponible' }
 }
 
+// Recherche du permis de louer d'une commune (038) : recherche web, résultat enregistré « à confirmer » par la gestion.
+async function rechercherCommune(service: ReturnType<typeof createClient>, c: { commune: string; code_postal: string | null }) {
+  const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!cleApi) return { commune: c.commune, erreur: 'IA non configurée' }
+  const consigne = `Commune : ${c.commune}${c.code_postal ? ' (' + c.code_postal + ')' : ''}, France.
+Cherche sur le web si cette commune applique le « permis de louer » (loi ALUR, articles L634-1 et L635-1 du code de la construction et de l'habitation) :
+autorisation préalable de mise en location, ou déclaration de mise en location, sur toute la commune ou sur un périmètre (quartiers, rues).
+Privilégie le site officiel de la commune ou de l'intercommunalité, et les délibérations ou arrêtés. N'invente rien.
+Réponds uniquement par un objet JSON :
+{"resultat": "detecte" ou "aucun", "regime": "autorisation" ou "declaration" ou null, "perimetre": "commune" ou "partiel" ou null,
+ "detail": "une ou deux phrases : ce qui s'applique, depuis quand, quel périmètre", "source": "adresse de la page officielle la plus fiable, ou null"}`
+  for (const m of MODELES_SIMPLES) {
+    const rep = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: m, max_tokens: 2000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5, user_location: { type: 'approximate', country: 'FR', timezone: 'Europe/Paris' } }],
+        messages: [{ role: 'user', content: consigne }] }),
+    })
+    if (rep.ok) {
+      const j = await rep.json()
+      const blocs = (j.content || []).filter((b: { type: string }) => b.type === 'text') as { text: string; citations?: { url: string; title: string }[] }[]
+      const t = blocs.map((b) => b.text).join('\n')
+      const sources = [...new Set(blocs.flatMap((b) => (b.citations || []).map((x) => x.url)))].slice(0, 5)
+      let res: Record<string, unknown>
+      try { res = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)) } catch { return { commune: c.commune, erreur: 'réponse illisible' } }
+      res = { ...res, sources, modele: m, recherche_le: new Date().toISOString() }
+      if (!res.source && sources.length) res.source = sources[0]
+      await service.rpc('pilotage_permis_recherche_ecrire', { p_commune: c.commune, p_resultat: res })
+      return { commune: c.commune, resultat: res.resultat, regime: res.regime }
+    }
+    console.error('[pilotage-lecture-bail] commune', m, rep.status, (await rep.text()).slice(0, 300))
+    if (rep.status === 401) break
+  }
+  return { commune: c.commune, erreur: 'IA indisponible' }
+}
+
 Deno.serve(async (req) => {
   const h = { ...cors(req), 'Content-Type': 'application/json' }
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: h })
@@ -270,8 +307,15 @@ Deno.serve(async (req) => {
   if (enteteCron) {
     const ok = (await service.rpc('pilotage_cron_valide', { p_secret: enteteCron })).data === true
     if (!ok) return rep(401, { error: 'Non autorisé' })
-    let c: { justificatifs?: boolean; mandats?: boolean; edl?: boolean } = {}
+    let c: { justificatifs?: boolean; mandats?: boolean; edl?: boolean; communes?: boolean } = {}
     try { c = await req.json() } catch { /* corps vide : lecture des baux */ }
+    // Communes des logements gérés absentes de la table du permis de louer (038) : chaque heure, 2 au plus
+    if (c.communes) {
+      const { data: liste } = await service.rpc('pilotage_communes_a_rechercher', { p_max: 2 })
+      const faits: unknown[] = []
+      for (const x of (liste || [])) faits.push(await rechercherCommune(service, x))
+      return rep(200, { ok: true, faits })
+    }
     // États des lieux d'entrée pas encore lus (037) : chaque heure, 3 au plus
     if (c.edl) {
       const { data: liste } = await service.rpc('pilotage_edl_a_lire', { p_max: 3 })
