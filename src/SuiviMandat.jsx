@@ -20,7 +20,9 @@ export default function DossierMandat({ m, apres }) {
   const [parametrer, setParametrer] = useState(false);
   const [lecture, setLecture] = useState({ charge: false, err: '' });
   const [auto, setAuto] = useState(null); // lecture IA lancée d'office à l'ouverture d'un mandat soumis encore jamais lu (036)
-  const charger = () => rpc('pilotage_mandat_dossier', { p_mandat: m.id }).then(setD).catch((e) => setErr(e.message));
+  // Propositions de l'IA tirées des états des lieux (037), rangées dans le dossier sous d.propositions
+  const charger = () => Promise.all([rpc('pilotage_mandat_dossier', { p_mandat: m.id }), rpc('pilotage_mandat_propositions', { p_mandat: m.id }).catch(() => [])])
+    .then(([x, p]) => setD({ ...x, propositions: p || [] })).catch((e) => setErr(e.message));
   useEffect(() => { setD(null); setParametrer(false); setAuto(null); charger(); }, [m.id]);
   useEffect(() => {
     const c0 = d?.controle;
@@ -77,8 +79,38 @@ export default function DossierMandat({ m, apres }) {
       <Croisement {...ctx} />
       <Clauses {...ctx} />
     </>}
+    <Immeubles m={m} onErreur={setErr} apres={async () => { await charger(); apres && apres(); }} />
     <SuivisMandat m={m} d={d} agir={agir} />
   </>;
+}
+
+// ----- Immeubles du mandat (groupe « immeuble » dans Rivage, monopropriété gérée en entier) : contrats communs et assurance (037) -----
+const EQUIPEMENTS_IMMEUBLE = ['Chaudière collective', 'Ascenseur', 'VMC', 'Extincteurs', 'Porte de garage motorisée', 'Portail motorisé', 'Nettoyage des parties communes', 'Désenfumage', 'Interphone ou digicode'];
+function Immeubles({ m, onErreur, apres }) {
+  const [liste, setListe] = useState(null);
+  const charger = () => rpc('pilotage_mandat_immeubles', { p_mandat: m.id }).then(setListe).catch(() => setListe([]));
+  useEffect(() => { charger(); }, [m.id]);
+  if (!liste?.length) return null;
+  const agir = async (fn, args) => { try { await rpc(fn, args); await charger(); apres && apres(); } catch (e) { onErreur(e.message); } };
+  return <>
+    <div className="groupe-tete" style={{ marginTop: 14 }}><b>Immeuble{liste.length > 1 ? 's' : ''} géré{liste.length > 1 ? 's' : ''} en entier</b></div>
+    {liste.map((g) => <div key={g.id} style={{ borderTop: '1px solid var(--line)', padding: '8px 0' }}>
+      <b>{g.nom || 'Immeuble'}</b><span className="muted" style={{ fontSize: 13 }}> · {g.lots.length ? 'lots ' + g.lots.join(', ') : 'aucun lot rattaché dans Rivage'}</span>
+      <AssuranceImmeuble m={m} g={g} agir={agir} />
+      <Lot l={{ id: g.id, reference: g.nom, adresse: 'équipements et contrats communs', equipements: g.equipements }} nature="equipement" agir={agir} choix={EQUIPEMENTS_IMMEUBLE} titre="Contrats d’entretien de l’immeuble" />
+      <div className="muted" style={{ fontSize: 12, marginLeft: 18 }}>Chaque équipement crée son suivi d’entretien annuel ; un ascenseur ajoute son contrôle technique tous les 5 ans.</div>
+    </div>)}
+  </>;
+}
+
+function AssuranceImmeuble({ m, g, agir }) {
+  const [v, setV] = useState('');
+  return <div className="row" style={{ margin: '4px 0 4px 18px', fontSize: 13 }}>
+    {g.assurance ? <span>Assurance de l’immeuble : échéance le {date(g.assurance.prochaine)} (suivi annuel)</span>
+      : <span style={{ color: 'var(--amber)' }}>Assurance de l’immeuble : échéance à saisir</span>}
+    <label className="muted">{g.assurance ? 'Modifier' : 'Échéance'} <input type="date" value={v} onChange={(e) => setV(e.target.value)} /></label>
+    {v && <button className="btn" onClick={async () => { await agir('pilotage_immeuble_assurance', { p_mandat: m.id, p_immeuble: g.id, p_echeance: v }); setV(''); }}>Enregistrer</button>}
+  </div>;
 }
 
 // ----- Pièces : toutes dans Rivage -----
@@ -193,12 +225,27 @@ function Equipements({ i, d, agir, repondre, recharger, onErreur }) {
     </div>
     {i.statut !== 'sans_objet' && d.lots.map((l) => compteur
       ? <div key={l.id} style={{ margin: '6px 0 6px 18px' }}><b style={{ fontSize: 13 }}>Lot {l.reference || l.id}</b><span className="muted" style={{ fontSize: 13 }}> · {l.adresse}</span>
+          <Propositions props={(d.propositions || []).filter((p) => p.asset_id === l.id && p.nature === 'compteur')} agir={agir} />
           <Compteurs asset={l.id} compteurs={l.compteurs || []} typeDefaut="mandat" recharger={recharger} onErreur={onErreur} /></div>
-      : <Lot key={l.id} l={l} nature={nature} agir={agir} />)}
+      : <Lot key={l.id} l={l} nature={nature} agir={agir} props={(d.propositions || []).filter((p) => p.asset_id === l.id)} />)}
   </div>;
 }
 
-function Lot({ l, nature, agir }) {
+// Proposition de l'IA (état des lieux) : à confirmer ou ignorer, rien n'est créé sans clic
+function Propositions({ props, agir }) {
+  if (!props?.length) return null;
+  return <div style={{ background: 'var(--blue-bg)', borderRadius: 6, padding: '4px 8px', margin: '4px 0', fontSize: 13 }}>
+    <div style={{ fontWeight: 700 }}>✦ Trouvé dans l’état des lieux{props[0].document ? ` « ${props[0].document} »` : ''}</div>
+    {props.map((p) => <div key={p.id} className="row" style={{ gap: 8 }}>
+      <span>{p.libelle}{p.nature === 'compteur' ? `${p.situation ? ' · ' + p.situation : ''}${p.numero ? ' · n° ' + p.numero : ''}${p.index != null ? ' · index ' + p.index : ''}${p.date ? ' au ' + date(p.date) : ''}` : ''}
+        {p.page ? <span className="muted"> (page {p.page})</span> : null}</span>
+      <button className="btn" onClick={() => agir('pilotage_lot_proposition', { p_id: p.id, p_accepter: true })}>Confirmer</button>
+      <button className="lien" onClick={() => agir('pilotage_lot_proposition', { p_id: p.id, p_accepter: false })}>Ignorer</button>
+    </div>)}
+  </div>;
+}
+
+function Lot({ l, nature, agir, choix, titre, props }) {
   const liste = l.equipements.filter((e) => e.nature === nature);
   // Suggestion d'après le mode de chauffage saisi dans Rivage (valeurs Rivage observées : electric ; les autres sont reconnues par mot-clé)
   const suggere = nature === 'equipement' && /gas|gaz/i.test(l.chauffage || '') && !liste.some((e) => /gaz/i.test(e.libelle)) ? 'Chaudière gaz'
@@ -213,7 +260,8 @@ function Lot({ l, nature, agir }) {
     setF({ ...vide, libelle: '' });
   };
   return <div style={{ margin: '6px 0 6px 18px', fontSize: 13 }}>
-    <div><b>Lot {l.reference || l.id}</b><span className="muted"> · {l.adresse}{l.construction ? ` · construit en ${l.construction}` : ''}{nature === 'equipement' && l.chauffage ? ` · chauffage Rivage : ${({ electric: 'électrique', gas: 'gaz', fuel: 'fioul', heat_pump: 'pompe à chaleur', wood: 'bois' })[l.chauffage] || l.chauffage}${l.chauffage_type ? ({ individual: ', individuel', collective: ', collectif' })[l.chauffage_type] || ', ' + l.chauffage_type : ''}` : ''}</span></div>
+    <div><b>{titre || 'Lot ' + (l.reference || l.id)}</b><span className="muted"> · {l.adresse}{l.construction ? ` · construit en ${l.construction}` : ''}{nature === 'equipement' && l.chauffage ? ` · chauffage Rivage : ${({ electric: 'électrique', gas: 'gaz', fuel: 'fioul', heat_pump: 'pompe à chaleur', wood: 'bois' })[l.chauffage] || l.chauffage}${l.chauffage_type ? ({ individual: ', individuel', collective: ', collectif' })[l.chauffage_type] || ', ' + l.chauffage_type : ''}` : ''}</span></div>
+    <Propositions props={(props || []).filter((p) => p.nature === nature)} agir={agir} />
     {liste.map((e) => <div key={e.id} className="row" style={{ gap: 8 }}>
       <span>• {e.libelle}</span>
       {nature === 'equipement' && <span className="muted">{e.contrat_entretien === true ? `contrat d’entretien${e.prestataire ? ' : ' + e.prestataire : ''}` : e.contrat_entretien === false ? 'pas de contrat d’entretien' : ''}{e.dernier_entretien ? ` · dernier entretien ${date(e.dernier_entretien)}` : ''}</span>}
@@ -222,7 +270,7 @@ function Lot({ l, nature, agir }) {
     <div className="row" style={{ gap: 6, marginTop: 4 }}>
       <select value={f.libelle} onChange={(e) => setF({ ...f, libelle: e.target.value })} aria-label="Équipement">
         <option value="">{nature === 'equipement' ? 'Ajouter un équipement…' : 'Ajouter un compteur…'}</option>
-        {(nature === 'equipement' ? EQUIPEMENTS : COMPTEURS).map((x) => <option key={x} value={x}>{x}</option>)}<option value="autre">Autre…</option></select>
+        {(choix || (nature === 'equipement' ? EQUIPEMENTS : COMPTEURS)).map((x) => <option key={x} value={x}>{x}</option>)}<option value="autre">Autre…</option></select>
       {f.libelle === 'autre' && <input placeholder="Lequel ?" value={f.autre} onChange={(e) => setF({ ...f, autre: e.target.value })} style={{ width: 140 }} />}
       {nature === 'equipement' && f.libelle && <>
         <select value={f.contrat} onChange={(e) => setF({ ...f, contrat: e.target.value })} aria-label="Contrat d’entretien"><option value="">Contrat d’entretien ?</option><option value="oui">Contrat d’entretien : oui</option><option value="non">Pas de contrat</option></select>
@@ -254,7 +302,8 @@ function ClauseSimple({ i, repondre }) {
 // ----- Suivis du mandat : PNO, échéance du mandat, entretien d'un lot vacant, DPE d'un lot -----
 // Échéance et entretien des lots vacants sont créés automatiquement (034) ; PNO et DPE se saisissent ici.
 // Un justificatif PNO ou DPE déposé dans Rivage fait passer le suivi à l'échéance suivante.
-const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE' };
+const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE',
+  entretien_immeuble: 'Entretien (immeuble)', ascenseur_ct: 'Contrôle technique de l’ascenseur', assurance_immeuble: 'Assurance de l’immeuble' };
 const CANAL_M = { mail_bailleur: 'Mail au bailleur', tache: 'Tâche', lrar: 'Recommandé', mail_locataire: 'Mail au locataire', sms_rivage: 'SMS (Rivage)' };
 const plusMois = (iso, n) => { const x = new Date(iso); x.setMonth(x.getMonth() + n); return x.toISOString().slice(0, 10); };
 
@@ -304,7 +353,8 @@ function RealiseMandat({ ob, agir }) {
   const [ouvert, setOuvert] = useState(false);
   const [le, setLe] = useState(new Date().toISOString().slice(0, 10));
   const [proch, setProch] = useState('');
-  const lib = ob.nature === 'mandat_echeance' ? 'Reconduction vérifiée' : ob.nature === 'entretien_lot' ? 'Entretien réalisé' : 'Justificatif reçu';
+  const lib = ob.nature === 'mandat_echeance' ? 'Reconduction vérifiée' : ['entretien_lot', 'entretien_immeuble'].includes(ob.nature) ? 'Entretien réalisé'
+    : ob.nature === 'ascenseur_ct' ? 'Contrôle réalisé' : 'Justificatif reçu';
   if (!ouvert) return <button className="btn" onClick={() => setOuvert(true)}>{lib}</button>;
   return <span className="row">
     {ob.nature !== 'mandat_echeance' && <label className="muted">Le <input type="date" value={le} onChange={(e) => setLe(e.target.value)} /></label>}

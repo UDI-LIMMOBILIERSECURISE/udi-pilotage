@@ -207,6 +207,55 @@ N'invente rien. Réponds uniquement par un objet JSON :
   return { upload: j.upload_id, erreur: 'IA indisponible' }
 }
 
+// Lecture d'un état des lieux d'entrée (037) : l'IA propose les équipements à entretenir et les compteurs du lot.
+// Rien n'est créé : chaque proposition est confirmée ou ignorée d'un clic dans le pilotage.
+const CONSIGNE_EDL = `Tu lis un état des lieux d'entrée d'un logement ou d'un local, pour une agence de gestion locative française.
+Relève uniquement ce qui est écrit dans le document. N'invente rien.
+1. "equipements" : les équipements qui demandent un entretien périodique, choisis UNIQUEMENT dans cette liste (libellé exact) :
+   Chaudière gaz, Chaudière fioul, Chaudière bois ou granulés, Pompe à chaleur, Climatisation, Ballon thermodynamique, Cheminée ou insert,
+   Poêle à bois ou à granulés, VMC, Fosse septique, Citerne gaz, Adoucisseur, Portail ou porte de garage motorisés.
+   Un simple radiateur électrique ou un chauffe-eau électrique classique n'est pas un équipement à entretenir : ne le cite pas.
+   Pour chacun : {"libelle": "...", "extrait": "citation courte (150 caractères au plus)", "page": n}.
+2. "compteurs" : les compteurs relevés (eau froide, eau chaude, chauffage, électricité, gaz), chacun :
+   {"libelle": "Eau froide|Eau chaude|Chauffage|Électricité|Gaz", "situation": "individuel" ou "divisionnaire" ou null (si l'état des lieux le précise),
+    "numero": "numéro du compteur ou null", "index": "index relevé (nombre) ou null", "date": "AAAA-MM-JJ (date de l'état des lieux) ou null",
+    "extrait": "citation courte", "page": n}.
+Réponds uniquement par un objet JSON {"equipements": [...], "compteurs": [...]}, sans texte autour.`
+
+async function lireEdl(service: ReturnType<typeof createClient>, j: { upload_id: string; asset_id: string; url: string; libelle: string | null }) {
+  const r = await fetch(j.url)
+  if (!r.ok) return { upload: j.upload_id, erreur: 'lien expiré' }
+  const buf = await r.arrayBuffer()
+  if (buf.byteLength > MAX_OCTETS) {
+    await service.rpc('pilotage_edl_ecrire', { p_upload: j.upload_id, p_asset: j.asset_id, p_modele: null, p_resultat: { erreur: 'document trop volumineux' } })
+    return { upload: j.upload_id, erreur: 'trop volumineux' }
+  }
+  const type = (r.headers.get('content-type') || '').split(';')[0].trim()
+  const bloc = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(type)
+    ? { type: 'image', source: { type: 'base64', media_type: type, data: b64(buf) } }
+    : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64(buf) } }
+  const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!cleApi) return { upload: j.upload_id, erreur: 'IA non configurée' }
+  for (const m of MODELES_SIMPLES) {
+    const rep = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: m, max_tokens: 3000, ...(m.includes('haiku') ? { temperature: 0 } : {}),
+        messages: [{ role: 'user', content: [bloc, { type: 'text', text: CONSIGNE_EDL }] }] }),
+    })
+    if (rep.ok) {
+      const t = ((await rep.json()).content || []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('\n')
+      let res: Record<string, unknown>
+      try { res = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)) } catch { return { upload: j.upload_id, erreur: 'réponse illisible' } }
+      const { data: n } = await service.rpc('pilotage_edl_ecrire', { p_upload: j.upload_id, p_asset: j.asset_id, p_modele: m, p_resultat: res })
+      return { upload: j.upload_id, propositions: n }
+    }
+    console.error('[pilotage-lecture-bail] edl', m, rep.status, (await rep.text()).slice(0, 300))
+    if (rep.status === 401) break
+  }
+  return { upload: j.upload_id, erreur: 'IA indisponible' }
+}
+
 Deno.serve(async (req) => {
   const h = { ...cors(req), 'Content-Type': 'application/json' }
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: h })
@@ -221,8 +270,15 @@ Deno.serve(async (req) => {
   if (enteteCron) {
     const ok = (await service.rpc('pilotage_cron_valide', { p_secret: enteteCron })).data === true
     if (!ok) return rep(401, { error: 'Non autorisé' })
-    let c: { justificatifs?: boolean; mandats?: boolean } = {}
+    let c: { justificatifs?: boolean; mandats?: boolean; edl?: boolean } = {}
     try { c = await req.json() } catch { /* corps vide : lecture des baux */ }
+    // États des lieux d'entrée pas encore lus (037) : chaque heure, 3 au plus
+    if (c.edl) {
+      const { data: liste } = await service.rpc('pilotage_edl_a_lire', { p_max: 3 })
+      const faits: unknown[] = []
+      for (const j of (liste || [])) faits.push(await lireEdl(service, j))
+      return rep(200, { ok: true, faits })
+    }
     // Mandats soumis au contrôle d'entrée et pas encore lus (036) : chaque heure
     if (c.mandats) {
       const { data: liste } = await service.rpc('pilotage_mandats_a_lire', { p_max: 3 })
