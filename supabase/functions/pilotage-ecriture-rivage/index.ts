@@ -10,8 +10,31 @@ const CIBLES = ['ManagementContract', 'LeasingContract']
 // Natures Rivage autorisées pour un dépôt depuis le pilotage (sous-ensemble de l'énumération de l'API)
 const NATURES = ['management_mandate', 'landlord_identity_and_residence_proof', 'identity_document', 'property_title', 'property_ownership_certificate',
   'landlord_bank_details', 'property_insurance_contracts', 'technical_diagnostic_reports', 'lease_contract', 'move_in_inventory',
-  'home_insurance_certificate', 'guarantor_documents', 'security_deposit_proof', 'maintenance_contracts']
+  'home_insurance_certificate', 'guarantor_documents', 'security_deposit_proof', 'maintenance_contracts', 'property_tax_declaration']
 const TYPES = ['application/pdf', 'image/jpeg', 'image/png']
+
+// Lecture d'une pièce de la GED WeRoof (UDIGESTION), stockée sur Cloudflare R2 : URL présignée (AWS SigV4) avec les secrets R2 du projet
+async function lireR2(cle: string): Promise<Uint8Array | null> {
+  const compte = Deno.env.get('R2_ACCOUNT_ID'), acces = Deno.env.get('R2_ACCESS_KEY_ID'), secret = Deno.env.get('R2_SECRET_ACCESS_KEY')
+  const seau = Deno.env.get('R2_BUCKET_NAME') || 'udigestion-documents'
+  if (!compte || !acces || !secret) return null
+  const enc = new TextEncoder()
+  const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, '0')).join('')
+  const hmac = async (k: ArrayBuffer | Uint8Array, d: string) => crypto.subtle.sign('HMAC', await crypto.subtle.importKey('raw', k, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']), enc.encode(d))
+  const hote = `${compte}.r2.cloudflarestorage.com`
+  const date = new Date().toISOString().replace(/[:-]|\.\d{3}/g, ''), jour = date.slice(0, 8)
+  const portee = `${jour}/auto/s3/aws4_request`
+  const chemin = `/${seau}/${cle.split('/').map(encodeURIComponent).join('/')}`
+  const q = new URLSearchParams({ 'X-Amz-Algorithm': 'AWS4-HMAC-SHA256', 'X-Amz-Credential': `${acces}/${portee}`, 'X-Amz-Date': date, 'X-Amz-Expires': '300', 'X-Amz-SignedHeaders': 'host' })
+  const qs = q.toString().replace(/\+/g, '%20')
+  const canon = ['GET', chemin, qs, `host:${hote}\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\n')
+  const aSigner = ['AWS4-HMAC-SHA256', date, portee, hex(await crypto.subtle.digest('SHA-256', enc.encode(canon)))].join('\n')
+  let k = await hmac(enc.encode(`AWS4${secret}`), jour)
+  for (const x of ['auto', 's3', 'aws4_request']) k = await hmac(k, x)
+  const r = await fetch(`https://${hote}${chemin}?${qs}&X-Amz-Signature=${hex(await hmac(k, aSigner))}`)
+  if (!r.ok) { console.error('[pilotage-ecriture-rivage] R2', r.status); return null }
+  return new Uint8Array(await r.arrayBuffer())
+}
 
 function cors(req: Request) {
   const o = req.headers.get('origin') || ''
@@ -40,20 +63,31 @@ Deno.serve(async (req) => {
   if (ep) return rep(500, { error: 'Script 042 non passé : journal des écritures absent.' })
   if (peut !== true) return rep(403, { error: 'Écriture dans Rivage réservée à la direction.' })
 
-  let c: { action?: string; cible_type?: string; cible_id?: string; nature?: string; titre?: string; nom?: string; type_mime?: string; fichier?: string }
+  let c: { action?: string; cible_type?: string; cible_id?: string; nature?: string; titre?: string; nom?: string; type_mime?: string; fichier?: string; document_weroof?: string }
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   if (c.action !== 'upload') return rep(400, { error: 'Action non prévue' })
   if (!c.cible_type || !CIBLES.includes(c.cible_type) || !c.cible_id || !/^(mc|lc)_[A-Za-z0-9]+$/.test(c.cible_id)) return rep(400, { error: 'Mandat ou bail Rivage invalide' })
+  let bin: Uint8Array
+  if (c.document_weroof) {
+    // Pièce de la GED WeRoof : elle doit faire partie des pièces rapprochées de ce mandat (même adresse et même propriétaire)
+    if (c.cible_type !== 'ManagementContract' || !/^[0-9a-f-]{36}$/.test(c.document_weroof)) return rep(400, { error: 'Pièce WeRoof invalide' })
+    const { data: src } = await service.rpc('pilotage_document_weroof_source', { p_mandat: c.cible_id, p_document: c.document_weroof })
+    if (!src?.storage_path) return rep(404, { error: 'Pièce WeRoof introuvable ou non rattachée à ce mandat.' })
+    const lu = await lireR2(src.storage_path)
+    if (!lu) return rep(502, { error: 'Pièce WeRoof illisible dans le stockage (R2).' })
+    bin = lu; c.nom = src.nom || 'piece.pdf'; c.type_mime = src.type_mime || 'application/pdf'; c.nature = c.nature || src.nature
+  } else {
+    if (!c.fichier || !c.nom) return rep(400, { error: 'Fichier manquant' })
+    bin = Uint8Array.from(atob(c.fichier), (x) => x.charCodeAt(0))
+  }
   if (!c.nature || !NATURES.includes(c.nature)) return rep(400, { error: 'Nature de document non prévue' })
-  if (!c.fichier || !c.nom) return rep(400, { error: 'Fichier manquant' })
   const type = TYPES.includes(c.type_mime || '') ? c.type_mime! : 'application/pdf'
-  const bin = Uint8Array.from(atob(c.fichier), (x) => x.charCodeAt(0))
   if (bin.byteLength > MAX_OCTETS) return rep(413, { error: 'Fichier trop volumineux (20 Mo au plus)' })
 
   const brute = Deno.env.get('RIVAGE_API_KEY')
   if (!brute) return rep(500, { error: 'Clé API Rivage non configurée (secret RIVAGE_API_KEY)' })
   const cle = brute.trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '')
-  const titre = (c.titre || c.nom).slice(0, 150)
+  const titre = (c.titre || c.nom!.replace(/\.[a-z0-9]+$/i, '')).slice(0, 150)
 
   // La documentation Rivage décrit les champs à plat mais mentionne aussi un objet « upload » : on essaie à plat, puis imbriqué si refus 422.
   const envoyer = async (imbrique: boolean) => {
@@ -78,7 +112,7 @@ Deno.serve(async (req) => {
   // Journal : résumé de la réponse, sans le lien de téléchargement (valable 7 jours, sans authentification)
   const resume = { id: corps.id ?? null, nature: corps.nature ?? null, label: corps.label ?? null,
     resourceables: Array.isArray(corps.resourceables) ? (corps.resourceables as { id?: string; type?: string }[]).map((x) => ({ id: x.id, type: x.type })) : null,
-    error: corps.error ?? null, message: typeof corps.message === 'string' ? (corps.message as string).slice(0, 500) : null }
+    document_weroof: c.document_weroof || null, error: corps.error ?? null, message: typeof corps.message === 'string' ? (corps.message as string).slice(0, 500) : null }
   const { error: ej } = await service.rpc('pilotage_ecriture_rivage_noter', { p_par: u.user.id, p_action: 'upload', p_cible_type: c.cible_type, p_cible_id: c.cible_id,
     p_nature: c.nature, p_libelle: c.nom, p_statut: r.status, p_ok: ok, p_rivage_id: (corps.id as string) || null, p_reponse: resume })
   if (ej) console.error('[pilotage-ecriture-rivage] journal', ej.message)

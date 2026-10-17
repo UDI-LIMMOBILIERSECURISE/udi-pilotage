@@ -495,15 +495,33 @@ function Compteur({ c, asset, bail, typeDefaut, appel }) {
 // Dépôt d'une pièce dans Rivage depuis le pilotage (042, direction seulement pour l'instant)
 const NATURES_DEPOT = [['management_mandate', 'Mandat de gestion signé'], ['landlord_identity_and_residence_proof', 'Identité du bailleur (Kbis, statuts, pièce d’identité)'],
   ['property_title', 'Titre de propriété'], ['landlord_bank_details', 'RIB du bailleur'], ['property_insurance_contracts', 'Assurance (PNO)'],
-  ['technical_diagnostic_reports', 'Diagnostics (DPE, ERP, amiante, plomb)']];
+  ['technical_diagnostic_reports', 'Diagnostics (DPE, ERP, amiante, plomb)'], ['property_tax_declaration', 'Taxe foncière']];
 export function DeposerRivage({ cible_type, cible_id, apres }) {
   const [peut, setPeut] = useState(false);
   const [f, setF] = useState({ nature: 'management_mandate', fichier: null });
   const [etat, setEtat] = useState({ charge: false, err: '', ok: '' });
   const [journal, setJournal] = useState([]);
-  const charger = () => rpc('pilotage_ecritures_rivage', { p_cible: cible_id }).then(setJournal).catch(() => {});
+  const [weroof, setWeroof] = useState([]);
+  const [envoi, setEnvoi] = useState(null);
+  const charger = () => {
+    rpc('pilotage_ecritures_rivage', { p_cible: cible_id }).then(setJournal).catch(() => {});
+    if (cible_type === 'ManagementContract') rpc('pilotage_documents_weroof', { p_mandat: cible_id }).then(setWeroof).catch(() => setWeroof([]));
+  };
   useEffect(() => { rpc('pilotage_peut_ecrire_rivage').then((x) => { setPeut(x === true); if (x === true) charger(); }).catch(() => setPeut(false)); }, [cible_id]);
   if (!peut) return null;
+  const appeler = async (body) => {
+    const { data, error } = await supabase.functions.invoke('pilotage-ecriture-rivage', { body });
+    let msg = data?.error;
+    if (error && !msg) { try { msg = (await error.context?.json())?.error; } catch { /* corps illisible */ } }
+    return { ok: !error && !data?.error, msg: msg || 'Dépôt impossible pour le moment.', data };
+  };
+  const envoyerWeroof = async (doc) => {
+    setEnvoi(doc.id); setEtat({ charge: true, err: '', ok: '' });
+    const r = await appeler({ action: 'upload', cible_type, cible_id, document_weroof: doc.id });
+    setEnvoi(null);
+    if (!r.ok) setEtat({ charge: false, err: `${doc.nom} : ${r.msg}`, ok: '' });
+    else { setEtat({ charge: false, err: '', ok: r.data.avertissement || `${doc.nom} déposé dans Rivage. Il apparaîtra dans le dossier dès que Rivage l’aura transmis (webhook).` }); charger(); apres && apres(); }
+  };
   const envoyer = async () => {
     const fichier = f.fichier; if (!fichier) return;
     setEtat({ charge: true, err: '', ok: '' });
@@ -524,6 +542,16 @@ export function DeposerRivage({ cible_type, cible_id, apres }) {
       <button className="btn plein" disabled={!f.fichier || etat.charge} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer dans Rivage'}</button>
     </div>
     <div className="muted" style={{ fontSize: 12 }}>La pièce est créée dans la GED Rivage et rattachée à ce dossier. Chaque dépôt est tracé.</div>
+    {cible_type === 'ManagementContract' && <div style={{ marginTop: 8 }}>
+      <b style={{ fontSize: 13 }}>Pièces trouvées dans WeRoof ({weroof.length})</b>
+      <div className="muted" style={{ fontSize: 12 }}>Rapprochées par l’adresse du lot et le nom du propriétaire. Vérifier chaque pièce avant l’envoi (date, bon propriétaire).</div>
+      {!weroof.length && <div className="muted" style={{ fontSize: 12 }}>Aucune pièce WeRoof rapprochée de ce mandat.</div>}
+      {weroof.map((w) => <div key={w.id} className="row" style={{ justifyContent: 'space-between', fontSize: 13, borderTop: '1px solid var(--line)', padding: '4px 0' }}>
+        <span>{w.nom} <span className="muted">· {(NATURES_DEPOT.find(([v]) => v === w.nature) || [null, w.nature])[1]}{w.taille ? ` · ${Math.round(w.taille / 1024)} Ko` : ''}</span></span>
+        {w.envoye ? <span className="etq ok">envoyé</span>
+          : <button className="btn" disabled={etat.charge} onClick={() => envoyerWeroof(w)}>{envoi === w.id ? 'Envoi…' : 'Envoyer dans Rivage'}</button>}
+      </div>)}
+    </div>}
     {etat.err && <div className="err">{etat.err}</div>}
     {etat.ok && <div style={{ fontSize: 13, color: 'var(--teal)' }}>{etat.ok}</div>}
     {journal.map((j, i) => <div key={i} className="muted" style={{ fontSize: 12 }}>{new Date(j.le).toLocaleString('fr-FR')} · {j.par || '—'} · {j.libelle} · {j.ok ? 'déposé' : `refusé (${j.statut}) ${j.message || ''}`}</div>)}
