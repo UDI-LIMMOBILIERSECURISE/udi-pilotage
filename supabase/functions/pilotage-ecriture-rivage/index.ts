@@ -67,6 +67,10 @@ Deno.serve(async (req) => {
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   if (c.action !== 'upload') return rep(400, { error: 'Action non prévue' })
   if (!c.cible_type || !CIBLES.includes(c.cible_type) || !c.cible_id || !/^(mc|lc)_[A-Za-z0-9]+$/.test(c.cible_id)) return rep(400, { error: 'Mandat ou bail Rivage invalide' })
+  // Essais du 17/10 : la pièce est créée dans Rivage mais aucun rattachement n'est pris en compte (mandat, puis lot), quel que soit
+  // l'emplacement des paramètres resourceable_*. Chaque essai laissait une pièce orpheline dans la GED : dépôt sur un mandat suspendu
+  // tant que Rivage n'a pas indiqué comment rattacher une pièce par l'API.
+  if (c.cible_type === 'ManagementContract') return rep(409, { error: 'Dépôt dans un mandat suspendu : l’API Rivage crée la pièce sans la rattacher au dossier (essais du 17/10). En attente de la réponse de Rivage.' })
   let bin: Uint8Array
   if (c.document_weroof) {
     // Pièce de la GED WeRoof : elle doit faire partie des pièces rapprochées de ce mandat (même adresse et même propriétaire)
