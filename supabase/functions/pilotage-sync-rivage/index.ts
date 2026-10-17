@@ -56,6 +56,9 @@ Deno.serve(async (req) => {
 
   const url = Deno.env.get('SUPABASE_URL')!
   const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  // Corps : {} ou {"mode": "mensuel" | "impayes"} pour la tâche planifiée ; {"extrait": "lc_…"} pour un extrait de compte (039)
+  let corps: { mode?: string; extrait?: string } = {}
+  try { corps = await req.json() } catch { /* corps vide */ }
 
   // Qui appelle : la tâche planifiée (secret partagé) ou un membre de la direction
   let declencheur = 'cron'
@@ -67,8 +70,12 @@ Deno.serve(async (req) => {
     if (!auth) return rep(401, { error: 'Non autorisé' })
     const utilisateur = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } })
     const { data: moi } = await utilisateur.rpc('pilotage_moi')
-    if (!moi || moi.role !== 'direction') return rep(403, { error: 'Réservé à la direction' })
-    declencheur = moi.prenom
+    if (corps.extrait) {
+      // Extrait de compte : gestion et comptabilité
+      const { data: ok } = await utilisateur.rpc('pilotage_peut_extrait')
+      if (ok !== true) return rep(403, { error: 'Accès refusé' })
+    } else if (!moi || moi.role !== 'direction') return rep(403, { error: 'Réservé à la direction' })
+    declencheur = moi?.prenom || 'utilisateur'
   }
 
   const brute = Deno.env.get('RIVAGE_API_KEY')
@@ -81,9 +88,55 @@ Deno.serve(async (req) => {
     return rep(500, { error: 'Clé Rivage mal formée : ' + diag })
   }
 
+  const lireTout = async (chemin: string) => {
+    const lignes: Record<string, unknown>[] = []
+    let page = 1, total = 1
+    while (page <= total && page <= 50) {
+      const r = await fetch(`${RIVAGE}${chemin}${chemin.includes('?') ? '&' : '?'}page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
+      if (!r.ok) throw new Error(`${chemin} page ${page} : HTTP ${r.status}`)
+      const j = await r.json()
+      total = j.pagination?.total_pages || j.pagination?.pages || 1
+      lignes.push(...(j.data || []))
+      page++
+    }
+    return lignes
+  }
+
+  // Extrait de compte d'un bail (039) : écritures du compte du locataire et du compte des dépôts de garantie du lot, lues dans Rivage
+  if (corps.extrait) {
+    const { data: comptes } = await service.rpc('pilotage_comptes_bail', { p_bail: corps.extrait })
+    if (!comptes?.locataire) return rep(404, { error: 'Compte du locataire introuvable dans le reflet Rivage (synchronisation des comptes à faire).' })
+    try {
+      const ecr = (l: Record<string, unknown>) => ({ date: l.accounting_transaction_effective_date || l.accounting_transaction_operation_date, libelle: l.accounting_transaction_description || l.description || '',
+        debit: Number(l.debit_in_cents || 0) / 100, credit: Number(l.credit_in_cents || 0) / 100 })
+      const lignes = (await lireTout(`/api/v1/accounting_entries?accounting_account_id=${encodeURIComponent(comptes.locataire)}`)).map(ecr)
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      const depot = comptes.depot ? (await lireTout(`/api/v1/accounting_entries?accounting_account_id=${encodeURIComponent(comptes.depot)}`)).map(ecr)
+        .filter((l) => l.credit > 0).sort((a, b) => String(a.date).localeCompare(String(b.date))) : []
+      return rep(200, { ok: true, edite_le: new Date().toISOString(), ...comptes, lignes, depot })
+    } catch (e) {
+      return rep(502, { error: 'Rivage ne répond pas : ' + (e instanceof Error ? e.message : String(e)) })
+    }
+  }
+
+  // Statut d'impayé de chaque bail en dette (039) : un appel par bail (limite Rivage : 100 par minute)
+  if (cronValide && corps.mode === 'impayes') {
+    const { data: ids } = await service.rpc('pilotage_cycles_a_lire')
+    const objets: Record<string, unknown>[] = []
+    for (const id of (ids || []) as string[]) {
+      const r = await fetch(`${RIVAGE}/api/v1/leasing_contracts/${encodeURIComponent(id)}/rent_arrear`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
+      if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 60000)); continue }
+      if (!r.ok) continue
+      objets.push({ ...(await r.json()), id, updated_at: new Date().toISOString() })
+      await new Promise((ok) => setTimeout(ok, 700))
+    }
+    if (objets.length) await service.rpc('pilotage_sync_appliquer', { p_modele: 'RentArrear', p_objets: objets })
+    return rep(200, { ok: true, lus: objets.length })
+  }
+
   // Tâche planifiée : relecture hebdomadaire (corps vide) ou mensuelle ({"mode":"mensuel"}) ; à la demande : tout
   let mode = 'complet'
-  if (cronValide) { try { mode = (await req.json())?.mode === 'mensuel' ? 'mensuel' : 'hebdo' } catch { mode = 'hebdo' } }
+  if (cronValide) mode = corps.mode === 'mensuel' ? 'mensuel' : 'hebdo'
   const aLire = MODELES.filter(([, , f]) => mode !== 'hebdo' || f === 'hebdo')
 
   const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur + (mode === 'complet' ? '' : ' (' + mode + ')') })

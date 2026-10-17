@@ -6,6 +6,7 @@ import DossierMandat from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
 import MesDossiers from './Circuit.jsx';
 import ALouer from './ALouer.jsx';
+import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
@@ -833,6 +834,7 @@ function Impayes() {
       [actifs.filter((x) => !x.declaration_le).length, 'Sans date de déclaration', true],
       [actifs.filter((x) => x.audience_le && x.audience_le >= auj()).length, 'Audiences à venir'],
       [euro(somme('solde_a_rembourser_assureur')), 'Solde à rembourser à l’assureur']]} />
+    <ImpayesMois peut={d.peut_saisir} apres={charger} />
     <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
       <div className="bascule">{[['cartes', 'Cartes'], ['tableau', 'Tableau']].map(([k, l]) => <button key={k} className={vue === k ? 'on' : ''} onClick={() => changerVue(k)}>{l}</button>)}</div>
       {moi?.role === 'direction' && <ImportMonday membres={d.membres} apres={charger} />}
@@ -947,6 +949,7 @@ function Commentaires({ id, peut, recharger }) {
 
 function DossierImpaye({ d, membres, peut, recharger }) {
   const [err, setErr] = useState('');
+  const [extrait, setExtrait] = useState(false);
   const [action, setAction] = useState('');
   const [actionLe, setActionLe] = useState('');
   const r = d.rivage || null;
@@ -972,6 +975,15 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     {err && <div className="err">{err}</div>}
     <ResumeIA type="impaye" id={d.id} />
     <SuggestionsBail d={d} peut={peut} recharger={recharger} />
+    <div className="row" style={{ margin: '6px 0' }}>
+      <label className="champ-imp" style={{ minWidth: 200 }}><span>Organisme (garantie ou avocat)</span>
+        {peut ? <select value={d.organisme || ''} onChange={async (e) => { try { await rpc('pilotage_impaye_organisme', { p_dossier: d.id, p_organisme: e.target.value }); recharger(); } catch (x) { setErr(x.message); } }}>
+          <option value="">À renseigner</option>{Object.entries(ORGANISMES).filter(([k]) => k !== 'avocats').map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+          : <span>{ORGANISMES[d.organisme] || '—'}</span>}</label>
+      {d.cycle?.libelle && <span className="etq" title={d.cycle.jours != null ? `Ouvert depuis ${d.cycle.jours} jour(s)` : ''}>Rivage : {d.cycle.libelle}</span>}
+      {d.bail_id && <button className="btn" onClick={() => setExtrait(!extrait)}>Extrait de compte</button>}
+    </div>
+    {extrait && d.bail_id && <Extrait bail={d.bail_id} fermer={() => setExtrait(false)} />}
     {r && <div className="echeance"><div><b>Impayé selon Rivage</b><div className="muted">loyer {euro((r.loyer_hc || 0) + (r.charges || 0))} CC · dernier encaissement {euro(r.dernier_encaissement_montant)} le {date(r.dernier_encaissement)}</div></div>
       <div className="echeance-n" style={{ color: r.impaye > 0 ? 'var(--red)' : 'var(--teal)' }}>{euro(r.impaye)}</div></div>}
     <h3>Contacts {r ? '(Rivage)' : ''}</h3>
