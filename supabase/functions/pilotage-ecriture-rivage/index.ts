@@ -89,30 +89,35 @@ Deno.serve(async (req) => {
   const cle = brute.trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '')
   const titre = (c.titre || c.nom!.replace(/\.[a-z0-9]+$/i, '')).slice(0, 150)
 
-  // La documentation Rivage décrit les champs à plat mais mentionne aussi un objet « upload » : on essaie à plat, puis imbriqué si refus 422.
-  const envoyer = async (imbrique: boolean) => {
+  // Rivage (Rails) exige les métadonnées dans un objet « upload » (refus 400 « param is missing: upload » sinon, essai du 17/10).
+  // Le fichier est attendu dans « file » selon la documentation ; repli sur « upload[file] » si Rivage refuse encore.
+  const envoyer = async (fichierDansUpload: boolean) => {
     const f = new FormData()
-    const k = (n: string) => (imbrique ? `upload[${n}]` : n)
-    f.append(k('nature'), c.nature!)
-    f.append(k('title'), titre)
-    f.append(k('label'), titre)
-    f.append(k('resourceable_type'), c.cible_type!)
-    f.append(k('resourceable_id'), c.cible_id!)
-    f.append(imbrique ? 'upload[file]' : 'file', new Blob([bin], { type }), c.nom!)
+    f.append('upload[nature]', c.nature!)
+    f.append('upload[title]', titre)
+    f.append('upload[label]', titre)
+    f.append('upload[resourceable_type]', c.cible_type!)
+    f.append('upload[resourceable_id]', c.cible_id!)
+    f.append(fichierDansUpload ? 'upload[file]' : 'file', new Blob([bin], { type }), c.nom!)
     const r = await fetch(`${RIVAGE}/api/v1/uploads`, { method: 'POST', headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' }, body: f })
+    const t = await r.text()
     let corps: Record<string, unknown> = {}
-    try { corps = await r.json() } catch { corps = { message: (await r.text().catch(() => '')).slice(0, 300) } }
+    try { corps = JSON.parse(t) } catch { corps = { message: t.slice(0, 300) } }
     return { r, corps }
   }
   let { r, corps } = await envoyer(false)
-  if (r.status === 422) ({ r, corps } = await envoyer(true))
+  if (r.status === 400 || r.status === 422) {
+    const premier = { statut: r.status, message: corps.message }
+    ;({ r, corps } = await envoyer(true))
+    if (!r.ok) corps = { ...corps, premier_essai: premier }
+  }
 
   const rattache = Array.isArray(corps.resourceables) && (corps.resourceables as { id?: string }[]).some((x) => x.id === c.cible_id)
   const ok = r.ok
   // Journal : résumé de la réponse, sans le lien de téléchargement (valable 7 jours, sans authentification)
   const resume = { id: corps.id ?? null, nature: corps.nature ?? null, label: corps.label ?? null,
     resourceables: Array.isArray(corps.resourceables) ? (corps.resourceables as { id?: string; type?: string }[]).map((x) => ({ id: x.id, type: x.type })) : null,
-    document_weroof: c.document_weroof || null, error: corps.error ?? null, message: typeof corps.message === 'string' ? (corps.message as string).slice(0, 500) : null }
+    document_weroof: c.document_weroof || null, premier_essai: corps.premier_essai ?? null, error: corps.error ?? null, message: typeof corps.message === 'string' ? (corps.message as string).slice(0, 500) : null }
   const { error: ej } = await service.rpc('pilotage_ecriture_rivage_noter', { p_par: u.user.id, p_action: 'upload', p_cible_type: c.cible_type, p_cible_id: c.cible_id,
     p_nature: c.nature, p_libelle: c.nom, p_statut: r.status, p_ok: ok, p_rivage_id: (corps.id as string) || null, p_reponse: resume })
   if (ej) console.error('[pilotage-ecriture-rivage] journal', ej.message)
