@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { rpc } from './supabase.js';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
+const NATURE_ECHEC = { bail: 'Bail', mandat: 'Mandat', edl: 'État des lieux', justificatif: 'Justificatif', commune: 'Commune' };
 const TYPES = { commercial: 'Commercial', derogatoire: 'Dérogatoire', professionnel: 'Professionnel', vide: 'Habitation vide', meuble: 'Meublé', mobilite: 'Mobilité', etudiant: 'Étudiant' };
 
 export default function Reprise({ moi }) {
@@ -23,7 +24,8 @@ export default function Reprise({ moi }) {
     </div>
     {err && <div className="banner">{err}</div>}
     {!d.actif && <div className="info">À lancer une fois la reprise Rivage terminée (données Wipimo et GED). Les lectures IA tournent ensuite toutes les 10 minutes (environ 20 actes par heure).</div>}
-    {d.actif && <div className="info">Audit en cours depuis le {date(d.lance_le)}.</div>}
+    {d.actif && <div className="info">Audit en cours depuis le {date(d.lance_le)} · {d.lectures_jour ?? 0} lecture(s) aujourd’hui sur un plafond de {d.plafond ?? 150} par jour (2 dossiers toutes les 5 minutes, reprise automatique le lendemain).</div>}
+    {moi.role === 'direction' && d.plafond != null && <Plafond valeur={d.plafond} agir={agir} />}
     <div className="tuiles">
       <div className="tuile"><div className="muted">Baux lus par l’IA</div><div className="tuile-n">{d.baux.lus}/{d.baux.total}</div><div className="jauge"><div style={{ width: pc(d.baux.lus, d.baux.total) + '%' }} /></div></div>
       <div className="tuile"><div className="muted">Mandats lus par l’IA</div><div className="tuile-n">{d.mandats.lus}/{d.mandats.total}</div><div className="jauge"><div style={{ width: pc(d.mandats.lus, d.mandats.total) + '%' }} /></div></div>
@@ -38,6 +40,15 @@ export default function Reprise({ moi }) {
       ligne={(x) => <><b>{x.locataires || '—'}</b> · {x.adresse} · {TYPES[x.type] || 'type à préciser'}<span className="muted"> · bailleur : {x.bailleur || '—'}</span></>} agir={agir} />
     <Aveugles titre={`Mandats actifs sans mandat signé (${d.mandats.aveugles.length})`} items={d.mandats.aveugles} cle={() => 'm_doc_mandat'}
       ligne={(x) => <><b>{x.bailleur || '—'}</b> · mandat n° {x.reference}{x.nom ? ' · ' + x.nom : ''}</>} agir={agir} />
+
+    {d.echecs?.length > 0 && <>
+      <h3>Lectures impossibles ({d.echecs.length})</h3>
+      <p className="muted" style={{ fontSize: 13 }}>Documents en échec deux fois de suite (scan illisible, lien Rivage expiré…) : ils ne sont plus retentés automatiquement pour ne pas payer la lecture en boucle. Vérifier le document dans Rivage, le remplacer si besoin, puis relancer.</p>
+      <div className="stack" style={{ gap: 4, marginBottom: 12 }}>{d.echecs.map((e) => <div key={e.cle} className="row" style={{ justifyContent: 'space-between', fontSize: 13, borderTop: '1px solid var(--line)', padding: '4px 0' }}>
+        <span><b>{NATURE_ECHEC[e.nature] || e.nature}</b> · {e.libelle || e.cle}<span className="muted"> · {e.erreur} · {e.nb} essai(s), dernier le {date(e.le)}</span></span>
+        <button className="lien" onClick={() => agir('pilotage_lecture_relancer', { p_cle: e.cle })}>Relancer</button>
+      </div>)}</div>
+    </>}
 
     <h3>2. Pièces manquantes par nature</h3>
     <p className="muted" style={{ fontSize: 13 }}>Compte des pièces exigées absentes de Rivage, sur les baux en cours et les mandats actifs (date d’exigibilité légale prise en compte).{d.mandats_calcule_le ? ` Mandats recalculés le ${new Date(d.mandats_calcule_le).toLocaleString('fr-FR')}.` : ''}</p>
@@ -66,4 +77,13 @@ function Aveugles({ titre, items, ligne, cle, agir }) {
       </span>
     </div>)}</div>
   </details>;
+}
+
+function Plafond({ valeur, agir }) {
+  const [v, setV] = useState(String(valeur));
+  return <div className="row" style={{ fontSize: 13, margin: '6px 0' }}>
+    <span className="muted">Plafond de lectures IA par jour pendant l’audit</span>
+    <input type="number" min={0} max={1000} value={v} onChange={(e) => setV(e.target.value)} style={{ width: 80 }} />
+    <button className="btn" disabled={v === String(valeur) || v === ''} onClick={() => agir('pilotage_audit_plafond', { p_max: Number(v) })}>Enregistrer</button>
+  </div>;
 }

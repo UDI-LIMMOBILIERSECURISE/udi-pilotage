@@ -293,6 +293,12 @@ Réponds uniquement par un objet JSON :
   return { commune: c.commune, erreur: 'IA indisponible' }
 }
 
+// Échec d'une lecture automatique (041) : au 2e échec, le document n'est plus retenté par les tâches planifiées.
+async function echec(service: ReturnType<typeof createClient>, cle: string, nature: string, corps: unknown) {
+  const c = corps as { error?: string; erreur?: string }
+  await service.rpc('pilotage_lecture_echec', { p_cle: cle, p_nature: nature, p_erreur: c?.error || c?.erreur || 'échec' })
+}
+
 Deno.serve(async (req) => {
   const h = { ...cors(req), 'Content-Type': 'application/json' }
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: h })
@@ -311,41 +317,65 @@ Deno.serve(async (req) => {
     try { c = await req.json() } catch { /* corps vide : lecture des baux */ }
     // Audit du stock (040) : tous les baux en cours et mandats actifs pas encore lus, 3 + 3 par passage (toutes les 10 minutes)
     if (c.audit) {
-      const { data: liste } = await service.rpc('pilotage_audit_a_lire', { p_max: 3 })
+      const { data: liste } = await service.rpc('pilotage_audit_a_lire', { p_max: 1 })
       const faits: unknown[] = []
-      for (const x of (liste || []) as { type: string; id: string }[]) faits.push({ ...x, ...(await lire(service, x.id, null, null, null, x.type === 'mandat')).body })
+      for (const x of (liste || []) as { type: string; id: string }[]) {
+        const r = await lire(service, x.id, null, null, null, x.type === 'mandat')
+        if (r.status !== 200) await echec(service, x.id, x.type, r.body)
+        faits.push({ ...x, ...r.body })
+      }
       return rep(200, { ok: true, faits })
     }
     // Communes des logements gérés absentes de la table du permis de louer (038) : chaque heure, 2 au plus
     if (c.communes) {
       const { data: liste } = await service.rpc('pilotage_communes_a_rechercher', { p_max: 2 })
       const faits: unknown[] = []
-      for (const x of (liste || [])) faits.push(await rechercherCommune(service, x))
+      for (const x of (liste || [])) {
+        const r = await rechercherCommune(service, x)
+        if ('erreur' in r) await echec(service, x.commune, 'commune', r)
+        faits.push(r)
+      }
       return rep(200, { ok: true, faits })
     }
     // États des lieux d'entrée pas encore lus (037) : chaque heure, 3 au plus
     if (c.edl) {
       const { data: liste } = await service.rpc('pilotage_edl_a_lire', { p_max: 3 })
       const faits: unknown[] = []
-      for (const j of (liste || [])) faits.push(await lireEdl(service, j))
+      for (const j of (liste || [])) {
+        const r = await lireEdl(service, j)
+        if ('erreur' in r && r.erreur !== 'trop volumineux') await echec(service, j.upload_id, 'edl', r)
+        faits.push(r)
+      }
       return rep(200, { ok: true, faits })
     }
     // Mandats soumis au contrôle d'entrée et pas encore lus (036) : chaque heure
     if (c.mandats) {
       const { data: liste } = await service.rpc('pilotage_mandats_a_lire', { p_max: 3 })
       const faits: unknown[] = []
-      for (const id of (liste || []) as string[]) faits.push({ mandat: id, ...(await lire(service, id, null, null, null, true)).body })
+      for (const id of (liste || []) as string[]) {
+        const r = await lire(service, id, null, null, null, true)
+        if (r.status !== 200) await echec(service, id, 'mandat', r.body)
+        faits.push({ mandat: id, ...r.body })
+      }
       return rep(200, { ok: true, faits })
     }
     if (c.justificatifs) {
       const { data: liste } = await service.rpc('pilotage_justificatifs_a_lire', { p_max: 5 })
       const faits: unknown[] = []
-      for (const j of (liste || [])) faits.push(await lireJustificatif(service, j))
+      for (const j of (liste || [])) {
+        const r = await lireJustificatif(service, j)
+        if ('erreur' in r) await echec(service, j.upload_id, 'justificatif', r)
+        faits.push(r)
+      }
       return rep(200, { ok: true, faits })
     }
     const { data: aLire } = await service.rpc('pilotage_baux_a_lire', { p_max: 3 })
     const faits: unknown[] = []
-    for (const id of (aLire || []) as string[]) faits.push({ bail: id, ...(await lire(service, id, null, null, null)).body })
+    for (const id of (aLire || []) as string[]) {
+      const r = await lire(service, id, null, null, null)
+      if (r.status !== 200) await echec(service, id, 'bail', r.body)
+      faits.push({ bail: id, ...r.body })
+    }
     return rep(200, { ok: true, faits })
   }
 
