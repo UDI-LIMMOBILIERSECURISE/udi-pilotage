@@ -509,6 +509,8 @@ export function DeposerRivage({ cible_type, cible_id, apres }) {
   };
   useEffect(() => { rpc('pilotage_peut_ecrire_rivage').then((x) => { setPeut(x === true); if (x === true) charger(); }).catch(() => setPeut(false)); }, [cible_id]);
   if (!peut) return null;
+  // Dépôt dans un mandat suspendu le 17/10 : l'API Rivage crée la pièce sans la rattacher (question posée à Rivage)
+  if (cible_type === 'ManagementContract') return <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>Dépôt de pièces dans Rivage depuis le pilotage : en pause, en attente de Rivage (l’API crée la pièce sans la rattacher au mandat).{weroof.length ? ` ${weroof.length} pièce(s) WeRoof rapprochée(s) de ce mandat, prêtes à envoyer dès la reprise.` : ''}</div>;
   const appeler = async (body) => {
     const { data, error } = await supabase.functions.invoke('pilotage-ecriture-rivage', { body });
     let msg = data?.error;

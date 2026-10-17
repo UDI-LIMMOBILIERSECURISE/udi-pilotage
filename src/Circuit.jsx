@@ -93,7 +93,7 @@ export function Circuit({ objet, id, apres }) {
     </div>
     {err && <div className="err">{err}</div>}
     {e.etat === 'a_finaliser' && <div style={{ fontSize: 13, marginTop: 4 }}>
-      {e.restant > 0 && <div>{e.restant} point(s) à traiter dans le questionnaire.</div>}
+      {e.restant > 0 && <Restants e={e} />}
       {vides.length > 0 && <div style={{ color: 'var(--red)' }}><b>Champ(s) non rempli(s) dans Rivage :</b> {vides.join(', ')}. À corriger dans Rivage : une réponse dans le pilotage ne suffit pas.</div>}
       {!e.restant && !vides.length && <div>Tout est complet.</div>}
     </div>}
@@ -155,4 +155,19 @@ function Fil({ objet, id, questions, apres }) {
       </div>
     </div>
   </details>;
+}
+
+// Détail des points restants (044) : pièces à déposer dans Rivage, champs Rivage à corriger, questions du questionnaire
+function Restants({ e }) {
+  const r = e.restants;
+  if (!Array.isArray(r) || !r.length) return <div>{e.restant} point(s) à traiter.</div>;
+  const pieces = r.filter((x) => x.bloc === 'pieces' || x.mode === 'document');
+  const rivage = r.filter((x) => !pieces.includes(x) && x.bloc === 'rivage');
+  const autres = r.filter((x) => !pieces.includes(x) && !rivage.includes(x));
+  const ligne = (t, l) => l.length > 0 && <div>{l.length} {t} : {l.map((x) => x.libelle).join(', ')}.</div>;
+  return <div>
+    {ligne('pièce(s) à déposer dans Rivage', pieces)}
+    {ligne('donnée(s) Rivage à vérifier', rivage)}
+    {ligne('question(s) du questionnaire', autres)}
+  </div>;
 }
