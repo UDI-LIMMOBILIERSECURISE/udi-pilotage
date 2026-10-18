@@ -202,9 +202,10 @@ function PointRivage({ i, repondre, lien }) {
 // ----- Clauses : équipements et compteurs par lot, puis questions simples -----
 function Clauses({ m, d, c, agir, repondre, recharger, onErreur }) {
   const it = (cle) => c.items.find((i) => i.cle === cle);
-  const autres = c.items.filter((i) => i.bloc === 'clauses' && !['m_cl_equipements', 'm_cl_compteurs'].includes(i.cle));
+  const autres = c.items.filter((i) => i.bloc === 'clauses' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack'].includes(i.cle));
   return <>
     <div className="groupe-tete" style={{ marginTop: 10 }}><b>Équipements du bien et clauses</b></div>
+    {it('m_cl_pack') && <ClauseSimple i={it('m_cl_pack')} repondre={repondre} />}
     {['m_cl_equipements', 'm_cl_compteurs'].map((cle) => it(cle) && <Equipements key={cle} i={it(cle)} d={d} agir={agir} repondre={repondre} recharger={recharger} onErreur={onErreur} />)}
     {autres.map((i) => <ClauseSimple key={i.cle} i={i} repondre={repondre} />)}
   </>;
@@ -286,6 +287,14 @@ function Lot({ l, nature, agir, choix, titre, props }) {
 
 function ClauseSimple({ i, repondre }) {
   const [v, setV] = useState('');
+  // Pack de gestion (045) : un clic, le taux Rivage est ensuite contrôlé contre le barème
+  if (i.cle === 'm_cl_pack') return <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', padding: '8px 0' }}>
+    <div style={{ flex: 1, minWidth: 220 }}><span style={{ color: i.repondu ? 'var(--teal)' : 'var(--amber)', fontWeight: 700 }}>{i.repondu ? '✓' : '○'}</span> {i.libelle}
+      {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
+      {i.repondu && <div style={{ fontSize: 13 }}>Pack {i.commentaire} <span className="muted">({i.par}, {date(i.le)})</span></div>}</div>
+    <div className="row">{i.repondu ? <button className="lien" onClick={() => repondre(i, null)}>Revenir</button>
+      : ['Essentiel', 'Confort', 'Pro'].map((p) => <button key={p} className="btn" onClick={() => repondre(i, 'ok', p)}>{p}</button>)}</div>
+  </div>;
   // Garantie des loyers impayés (045) : option du barème, souscrite ou non, en un clic
   if (i.cle === 'm_cl_gli') return <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', padding: '8px 0' }}>
     <div style={{ flex: 1, minWidth: 220 }}><span style={{ color: i.repondu ? 'var(--teal)' : 'var(--amber)', fontWeight: 700 }}>{i.repondu ? '✓' : '○'}</span> {i.libelle}
@@ -402,7 +411,7 @@ function Synthese({ d, c, lien, parametrer }) {
   const aRevoir = c.items.filter((i) => i.bloc === 'rivage' && !regle(i) && i.auto === 'anomalie');
   const pieces = c.items.filter((i) => i.bloc === 'pieces' && !regle(i));
   const conditions = c.items.filter((i) => i.bloc === 'rivage' && i.statut !== 'sans_objet' && i.detail);
-  const clauses = c.items.filter((i) => i.bloc === 'clauses' && i.repondu && i.statut !== 'sans_objet' && !['m_cl_equipements', 'm_cl_compteurs'].includes(i.cle));
+  const clauses = c.items.filter((i) => i.bloc === 'clauses' && i.repondu && i.statut !== 'sans_objet' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack'].includes(i.cle));
   return <>
     <div className="muted" style={{ fontSize: 12 }}>{c.go_le ? `Dossier complet validé (GO) le ${date(c.go_le)} par ${c.go_par || '—'}.` : 'Mandat antérieur à 2026 : contrôle d’entrée non requis. « Modifier le paramétrage » permet de le compléter.'}</div>
     {(aRevoir.length > 0 || pieces.length > 0) && <div className="mini-alerte haute">
