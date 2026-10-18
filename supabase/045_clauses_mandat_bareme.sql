@@ -6,9 +6,8 @@
 --   - Anomalies de rédaction : relevées par la lecture IA du mandat signé (côté gestion), plus de question au commercial.
 -- La garantie des loyers impayés devient une option du barème (2,8 % des sommes quittancées) : souscrite ou non, en un clic.
 -- Pack de gestion du mandat (Essentiel, Confort, Pro) : nouvelle question en un clic ; le taux de gestion saisi dans Rivage
--- est contrôlé contre le barème du pack (Essentiel 5,5 % TTC, Confort 7,5 % TTC, Pro 7 % TTC à partir de 2 lots, dégressif dès
--- le 3e lot du même mandant, minimum 6 % TTC). Pour le Pro à 3 lots et plus, le barème ne précise pas le calcul exact de la
--- réduction de 2 % : le contrôle accepte un taux entre 6 % et 7 % et le signale « à vérifier » s'il en sort.
+-- est contrôlé contre le barème du pack (Essentiel 5,5 % TTC, Confort 7,5 % TTC, Pro 7 % TTC à partir de 2 lots du même mandant,
+-- puis remise de 2 % sur ce taux par lot supplémentaire, minimum 6 % TTC).
 -- Les questions retirées sont gardées avec la portée « retire » (réponses déjà saisies conservées, retour en arrière possible).
 
 alter table pilotage.controle_questions drop constraint if exists controle_questions_portee_check;
@@ -31,7 +30,7 @@ where cle = 'm_cl_gli';
 -- ========== Pack de gestion ==========
 insert into pilotage.controle_questions (cle, portee, bloc, ordre, libelle, aide, mode)
 values ('m_cl_pack', 'mandat', 'clauses', 5, 'Pack de gestion souscrit (barème du 01/09/2026)',
-        'Essentiel 5,5 % TTC · Confort 7,5 % TTC · Pro 7 % TTC (à partir de 2 lots, dégressif dès le 3e lot, minimum 6 %).', 'question')
+        'Essentiel 5,5 % TTC · Confort 7,5 % TTC · Pro 7 % TTC à partir de 2 lots, remise de 2 % par lot supplémentaire, minimum 6 %.', 'question')
 on conflict (cle) do update set portee = excluded.portee, bloc = excluded.bloc, ordre = excluded.ordre, libelle = excluded.libelle, aide = excluded.aide, mode = excluded.mode;
 
 create or replace function pilotage.pack_mandat(p_mandat text) returns text
@@ -53,7 +52,7 @@ $$;
 -- Écart entre le taux de gestion Rivage et le barème du pack (null si conforme ou pack non renseigné)
 create or replace function pilotage.ecart_bareme(p_mandat text, p_taux numeric) returns text
 language plpgsql stable security definer set search_path = pilotage, public as $$
-declare pk text := pilotage.pack_mandat(p_mandat); n integer;
+declare pk text := pilotage.pack_mandat(p_mandat); n integer; attendu numeric;
 begin
   if pk is null or p_taux is null or p_taux = 0 then return null; end if;
   if pk = 'essentiel' and abs(p_taux - 5.5) > 0.01 then return 'barème pack Essentiel : 5,5 % TTC attendu'; end if;
@@ -61,8 +60,11 @@ begin
   if pk = 'pro' then
     n := pilotage.lots_mandant(p_mandat);
     if n < 2 then return 'pack Pro réservé aux mandants d''au moins 2 lots (' || n || ' lot confié)'; end if;
-    if n = 2 and abs(p_taux - 7) > 0.01 then return 'barème pack Pro, 2 lots : 7 % TTC attendu'; end if;
-    if n >= 3 and (p_taux < 5.99 or p_taux > 7.01) then return 'barème pack Pro, ' || n || ' lots : taux entre 6 % et 7 % TTC attendu (à vérifier)'; end if;
+    -- Remise de 2 % sur le taux de 7 % par lot au-delà du 2e (précision de Nicolas du 18/10), plancher 6 % :
+    -- 2 lots 7 %, 3 lots 6,86 %, 4 lots 6,72 %… ; tolérance de 0,05 point pour un taux arrondi à une décimale dans Rivage.
+    attendu := greatest(6, round(7 * (1 - 0.02 * (n - 2)), 2));
+    if abs(p_taux - attendu) > 0.05 then
+      return 'barème pack Pro, ' || n || ' lots : ' || replace(to_char(attendu, 'FM990.00'), '.', ',') || ' % TTC attendu'; end if;
   end if;
   return null;
 end $$;
