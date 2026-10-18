@@ -286,6 +286,14 @@ function Lot({ l, nature, agir, choix, titre, props }) {
 
 function ClauseSimple({ i, repondre }) {
   const [v, setV] = useState('');
+  // Garantie des loyers impayés (045) : option du barème, souscrite ou non, en un clic
+  if (i.cle === 'm_cl_gli') return <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', padding: '8px 0' }}>
+    <div style={{ flex: 1, minWidth: 220 }}><span style={{ color: i.repondu ? 'var(--teal)' : 'var(--amber)', fontWeight: 700 }}>{i.repondu ? '✓' : '○'}</span> {i.libelle}
+      {i.repondu && <div style={{ fontSize: 13 }}>{i.commentaire || 'Oui'} <span className="muted">({i.par}, {date(i.le)})</span></div>}</div>
+    <div className="row">{i.repondu ? <button className="lien" onClick={() => repondre(i, null)}>Revenir</button> : <>
+      <button className="btn" onClick={() => repondre(i, 'ok', 'Souscrite')}>Souscrite</button>
+      <button className="btn" onClick={() => repondre(i, 'ok', 'Non souscrite')}>Non souscrite</button></>}</div>
+  </div>;
   const anomalies = i.cle === 'm_cl_anomalies';
   return <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', padding: '8px 0' }}>
     <div style={{ flex: 1, minWidth: 220 }}><span style={{ color: regle(i) ? 'var(--teal)' : i.statut === 'anomalie' ? 'var(--red)' : 'var(--amber)', fontWeight: 700 }}>{i.statut === 'ok' ? '✓' : i.statut === 'anomalie' ? '!' : i.statut === 'sans_objet' ? '–' : '○'}</span> {i.libelle}
