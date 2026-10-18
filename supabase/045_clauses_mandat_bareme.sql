@@ -8,7 +8,48 @@
 -- Pack de gestion du mandat (Essentiel, Confort, Pro) : nouvelle question en un clic ; le taux de gestion saisi dans Rivage
 -- est contrôlé contre le barème du pack (Essentiel 5,5 % TTC, Confort 7,5 % TTC, Pro 7 % TTC à partir de 2 lots du même mandant,
 -- puis remise de 2 % sur ce taux par lot supplémentaire, minimum 6 % TTC).
+-- Corrige aussi permis_lot (038), qui faisait échouer le contrôle de certains mandats (voir ci-dessous).
 -- Les questions retirées sont gardées avec la portée « retire » (réponses déjà saisies conservées, retour en arrière possible).
+
+-- ========== Correctif du 038 : permis_lot ==========
+-- Erreur constatée au premier passage du 045 (18/10) : « column reference "voie" is ambiguous » dans permis_lot. La variable
+-- « voie » portait le même nom que la colonne permis_rues.voie : tout lot d'habitation situé dans une commune à périmètre
+-- (Corbeil-Essonnes) faisait échouer le contrôle du mandat. Variable renommée, rien d'autre ne change.
+create or replace function pilotage.permis_lot(p_asset text) returns jsonb
+language plpgsql stable security definer set search_path = pilotage, public as $$
+declare a jsonb; c pilotage.permis_communes; num integer; v_voie text; rue record; dans boolean; regime text; detail text;
+begin
+  select data into a from pilotage.objets where type = 'Asset' and id = p_asset;
+  if a is null then return null; end if;
+  if coalesce(a->>'nature', '') not in ('flat', 'room', 'house') then
+    return jsonb_build_object('regime', 'non_concerne', 'commune', a->'address'->>'city', 'detail', 'Pas un logement : permis de louer non applicable.');
+  end if;
+  select * into c from pilotage.permis_communes where commune = pilotage.norm_commune(a->'address'->>'city');
+  if c.commune is null then
+    return jsonb_build_object('regime', 'inconnu', 'commune', a->'address'->>'city', 'detail', 'Commune jamais vérifiée : recherche à faire.');
+  end if;
+  if c.perimetre = 'commune' then
+    regime := c.regime; detail := 'Toute la commune.';
+  else
+    v_voie := pilotage.norm_voie(a->'address'->>'street');
+    num := nullif(substring(coalesce(a->'address'->>'number', '') from '^\s*(\d+)'), '')::integer;
+    dans := false;
+    for rue in select * from pilotage.permis_rues r where r.commune = c.commune and r.voie = v_voie loop
+      if rue.num_min is null then dans := true; detail := 'Voie du périmètre : ' || rue.libelle; exit; end if;
+      if num is null then dans := null; detail := 'Voie partiellement dans le périmètre (' || rue.condition || ') : numéro absent dans Rivage, à vérifier.'; continue; end if;
+      if num between rue.num_min and rue.num_max and (rue.parite is null or (rue.parite = 'pair') = (num % 2 = 0)) then
+        dans := true; detail := 'Dans le périmètre : ' || rue.libelle || ' (' || rue.condition || ')'; exit;
+      end if;
+    end loop;
+    if dans is null then regime := 'a_verifier';
+    elsif dans then regime := c.regime;
+    else regime := coalesce(c.regime_hors_perimetre, 'aucun');
+      detail := 'Hors du périmètre (adresse : ' || coalesce(a->'address'->>'number', '') || ' ' || coalesce(a->'address'->>'street', '') || ').';
+    end if;
+  end if;
+  return jsonb_build_object('regime', regime, 'commune', c.libelle, 'a_confirmer', c.statut = 'a_confirmer', 'detail', detail,
+    'email_depot', c.email_depot, 'adresse_depot', c.adresse_depot, 'source', c.source, 'verifie_le', c.verifie_le);
+end $$;
 
 alter table pilotage.controle_questions drop constraint if exists controle_questions_portee_check;
 alter table pilotage.controle_questions add constraint controle_questions_portee_check

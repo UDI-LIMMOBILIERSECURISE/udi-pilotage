@@ -232,7 +232,7 @@ revoke all on sequence pilotage.permis_rues_id_seq from public, anon, authentica
 -- Régime d'un lot : autorisation, declaration, aucun, non_concerne (pas un logement), inconnu (commune jamais vérifiée), a_verifier
 create or replace function pilotage.permis_lot(p_asset text) returns jsonb
 language plpgsql stable security definer set search_path = pilotage, public as $$
-declare a jsonb; c pilotage.permis_communes; num integer; voie text; rue record; dans boolean; regime text; detail text;
+declare a jsonb; c pilotage.permis_communes; num integer; v_voie text; rue record; dans boolean; regime text; detail text;
 begin
   select data into a from pilotage.objets where type = 'Asset' and id = p_asset;
   if a is null then return null; end if;
@@ -246,10 +246,10 @@ begin
   if c.perimetre = 'commune' then
     regime := c.regime; detail := 'Toute la commune.';
   else
-    voie := pilotage.norm_voie(a->'address'->>'street');
+    v_voie := pilotage.norm_voie(a->'address'->>'street');
     num := nullif(substring(coalesce(a->'address'->>'number', '') from '^\s*(\d+)'), '')::integer;
     dans := false;
-    for rue in select * from pilotage.permis_rues r where r.commune = c.commune and r.voie = voie loop
+    for rue in select * from pilotage.permis_rues r where r.commune = c.commune and r.voie = v_voie loop
       if rue.num_min is null then dans := true; detail := 'Voie du périmètre : ' || rue.libelle; exit; end if;
       if num is null then dans := null; detail := 'Voie partiellement dans le périmètre (' || rue.condition || ') : numéro absent dans Rivage, à vérifier.'; continue; end if;
       if num between rue.num_min and rue.num_max and (rue.parite is null or (rue.parite = 'pair') = (num % 2 = 0)) then
