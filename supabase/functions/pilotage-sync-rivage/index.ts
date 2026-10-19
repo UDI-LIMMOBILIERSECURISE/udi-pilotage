@@ -32,8 +32,9 @@ function nettoyer(modele: string, o: Record<string, unknown>) {
   if (modele === 'Profile') return garder(o, PERSONNE)
   if (modele === 'LeasingContract') {
     // La date de naissance des locataires est gardée : contrôle des plus de 65 ans avant un congé (036)
-    o.tenants = ((o.tenants as Record<string, unknown>[]) || []).map((t) => garder(t, [...PERSONNE, 'birth_date']))
-    o.guarantors = ((o.guarantors as Record<string, unknown>[]) || []).map((g) => ({ id: g.id }))
+    // Dates d'entrée et de sortie de chaque locataire et garant (ajoutées par Rivage le 19/10) : colocations, sorties, fin de caution
+    o.tenants = ((o.tenants as Record<string, unknown>[]) || []).map((t) => garder(t, [...PERSONNE, 'birth_date', 'entry_date', 'exit_date']))
+    o.guarantors = ((o.guarantors as Record<string, unknown>[]) || []).map((g) => garder(g, ['id', 'entry_date', 'exit_date']))
   }
   return o
 }
