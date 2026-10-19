@@ -527,8 +527,7 @@ export function DeposerRivage({ cible_type, cible_id, apres }) {
   useEffect(() => { rpc('pilotage_peut_ecrire_rivage').then((x) => { setPeut(x === true); if (x === true) charger(); }).catch(() => setPeut(false)); }, [cible_id]);
   if (!peut) return null;
   // Dépôt dans un mandat suspendu le 17/10 : l'API Rivage crée la pièce sans la rattacher (question posée à Rivage)
-  if (cible_type === 'ManagementContract') return <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>Dépôt de pièces dans Rivage depuis le pilotage : en pause, en attente de Rivage (l’API crée la pièce sans la rattacher au mandat).{weroof.length ? ` ${weroof.length} pièce(s) WeRoof rapprochée(s) de ce mandat, prêtes à envoyer dès la reprise.` : ''}
-    {weroof.length > 0 && <TestProfil weroof={weroof} cible_id={cible_id} recharger={charger} />}</div>;
+  if (cible_type === 'ManagementContract') return <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>Dépôt de pièces dans Rivage depuis le pilotage : en pause, en attente de Rivage (l’API crée la pièce sans la rattacher au mandat).{weroof.length ? ` ${weroof.length} pièce(s) WeRoof rapprochée(s) de ce mandat, prêtes à envoyer dès la reprise.` : ''}</div>;
   const appeler = async (body) => {
     const { data, error } = await supabase.functions.invoke('pilotage-ecriture-rivage', { body });
     let msg = data?.error;
@@ -576,26 +575,4 @@ export function DeposerRivage({ cible_type, cible_id, apres }) {
     {etat.ok && <div style={{ fontSize: 13, color: 'var(--teal)' }}>{etat.ok}</div>}
     {journal.map((j, i) => <div key={i} className="muted" style={{ fontSize: 12 }}>{new Date(j.le).toLocaleString('fr-FR')} · {j.par || '—'} · {j.libelle} · {j.ok ? 'déposé' : `refusé (${j.statut}) ${j.message || ''}`}</div>)}
   </details>;
-}
-
-// Test du 19/10 (direction) : dépôt d'une pièce WeRoof sur la fiche propriétaire Rivage avec son numéro interne
-function TestProfil({ weroof, cible_id, recharger }) {
-  const [num, setNum] = useState('');
-  const [doc, setDoc] = useState(weroof[0]?.id || '');
-  const [etat, setEtat] = useState('');
-  const lancer = async () => {
-    setEtat('Envoi…');
-    const { data, error } = await supabase.functions.invoke('pilotage-ecriture-rivage', { body: { action: 'upload', cible_type: 'ManagementContract', cible_id, document_weroof: doc, test_profil_interne: num } });
-    let msg = data?.error;
-    if (error && !msg) { try { msg = (await error.context?.json())?.error; } catch { /* corps illisible */ } }
-    setEtat(error || data?.error ? 'Refusé : ' + (msg || 'erreur') : data.rattache ? 'Pièce créée ET rattachée à la fiche propriétaire.' : 'Pièce créée mais pas rattachée.');
-    recharger && recharger();
-  };
-  return <div className="row" style={{ marginTop: 6, color: 'var(--ink)' }}>
-    <span>Test fiche propriétaire :</span>
-    <select value={doc} onChange={(e) => setDoc(e.target.value)}>{weroof.map((w) => <option key={w.id} value={w.id}>{w.nom}</option>)}</select>
-    <input placeholder="N° interne Rivage" value={num} onChange={(e) => setNum(e.target.value.replace(/\D/g, ''))} style={{ width: 130 }} />
-    <button className="btn" disabled={!num || !doc || etat === 'Envoi…'} onClick={lancer}>Tester</button>
-    {etat && <span>{etat}</span>}
-  </div>;
 }
