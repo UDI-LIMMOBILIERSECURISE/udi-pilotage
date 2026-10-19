@@ -63,14 +63,17 @@ Deno.serve(async (req) => {
   if (ep) return rep(500, { error: 'Script 042 non passé : journal des écritures absent.' })
   if (peut !== true) return rep(403, { error: 'Écriture dans Rivage réservée à la direction.' })
 
-  let c: { action?: string; cible_type?: string; cible_id?: string; nature?: string; titre?: string; nom?: string; type_mime?: string; fichier?: string; document_weroof?: string }
+  let c: { action?: string; cible_type?: string; cible_id?: string; nature?: string; titre?: string; nom?: string; type_mime?: string; fichier?: string; document_weroof?: string; test_profil_interne?: string }
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   if (c.action !== 'upload') return rep(400, { error: 'Action non prévue' })
   if (!c.cible_type || !CIBLES.includes(c.cible_type) || !c.cible_id || !/^(mc|lc)_[A-Za-z0-9]+$/.test(c.cible_id)) return rep(400, { error: 'Mandat ou bail Rivage invalide' })
   // Essais du 17/10 : la pièce est créée dans Rivage mais aucun rattachement n'est pris en compte (mandat, puis lot), quel que soit
   // l'emplacement des paramètres resourceable_*. Chaque essai laissait une pièce orpheline dans la GED : dépôt sur un mandat suspendu
   // tant que Rivage n'a pas indiqué comment rattacher une pièce par l'API.
-  if (c.cible_type === 'ManagementContract') return rep(409, { error: 'Dépôt dans un mandat suspendu : l’API Rivage crée la pièce sans la rattacher au dossier (essais du 17/10). En attente de la réponse de Rivage.' })
+  // Test du 19/10 : la GED Rivage rattache une pièce au propriétaire avec son numéro interne (formulaire Rivage : resourceable_type=Profile,
+  // resourceable_id=62522) et non avec l'identifiant public de l'API. Ce test seul lève la pause, pour la direction.
+  const testProfil = c.test_profil_interne && /^\d{1,10}$/.test(c.test_profil_interne) ? c.test_profil_interne : null
+  if (c.cible_type === 'ManagementContract' && !testProfil) return rep(409, { error: 'Dépôt dans un mandat suspendu : l’API Rivage crée la pièce sans la rattacher au dossier (essais du 17/10). En attente de la réponse de Rivage.' })
   let bin: Uint8Array
   if (c.document_weroof) {
     // Pièce de la GED WeRoof : elle doit faire partie des pièces rapprochées de ce mandat (même adresse et même propriétaire)
@@ -96,7 +99,8 @@ Deno.serve(async (req) => {
   // Rattachement (essais du 17/10) : un rattachement à un mandat (ManagementContract) est ignoré par Rivage.
   // Mandat : la pièce est rattachée au lot du mandat (Asset), que le contrôle du mandat reconnaît. Bail : adresse dédiée de l'API.
   let rattacheA = c.cible_id!, typeRattache = c.cible_type!
-  if (c.cible_type === 'ManagementContract') {
+  if (testProfil) { rattacheA = testProfil; typeRattache = 'Profile' }
+  else if (c.cible_type === 'ManagementContract') {
     const { data: lots } = await service.rpc('pilotage_lots_mandat', { p_mandat: c.cible_id })
     if (!Array.isArray(lots) || !lots.length) return rep(400, { error: 'Aucun lot rattaché à ce mandat dans Rivage : impossible d’y rattacher la pièce.' })
     rattacheA = lots[0]; typeRattache = 'Asset'
@@ -129,7 +133,7 @@ Deno.serve(async (req) => {
     if (!r.ok) corps = { ...corps, premier_essai: premier }
   }
 
-  const rattache = Array.isArray(corps.resourceables) && (corps.resourceables as { id?: string }[]).some((x) => x.id === rattacheA)
+  const rattache = Array.isArray(corps.resourceables) && (testProfil ? (corps.resourceables as unknown[]).length > 0 : (corps.resourceables as { id?: string }[]).some((x) => x.id === rattacheA))
   const ok = r.ok
   // Journal : résumé de la réponse, sans le lien de téléchargement (valable 7 jours, sans authentification)
   const resume = { id: corps.id ?? null, nature: corps.nature ?? null, label: corps.label ?? null,
@@ -144,6 +148,6 @@ Deno.serve(async (req) => {
     return rep(502, { error: msg })
   }
   return rep(200, { ok: true, upload_id: corps.id, rattache, nature: corps.nature,
-    rattache_a: typeRattache === 'Asset' ? 'lot' : 'bail',
+    rattache_a: typeRattache === 'Asset' ? 'lot' : typeRattache === 'Profile' ? 'propriétaire' : 'bail',
     avertissement: rattache ? null : 'Pièce créée dans Rivage mais pas rattachée au dossier : la rattacher dans la GED Rivage.' })
 })
