@@ -595,7 +595,7 @@ function etatDG(x) {
 }
 
 function SortiesDG() {
-  const [d, err] = useCharge('pilotage_dg');
+  const [d, err] = useCharge('pilotage_dg', ['LeasingContract', 'BailSituation', 'AccountingEventGroup', 'Incident']);
   const [filtre, setFiltre] = useState('tous');
   const [sel, setSel] = useState(null);
   if (err) return <div className="banner">{err}</div>;
@@ -624,6 +624,12 @@ function SortiesDG() {
         <div className="echeance"><div><b>{s.parti ? 'Restitution au plus tard' : 'Départ prévu'}</b>
           <div className="muted">{s.parti ? 'le ' + date(s.limite_1_mois) + ' si EDL conforme, le ' + date(s.limite_2_mois) + ' sinon' : 'fin du bail'}</div></div>
           <div className="echeance-n">{s.parti ? (jours(s) >= 0 ? 'J-' + jours(s) : 'J+' + -jours(s)) : date(s.fin)}</div></div>
+        {s.situation && <div className="mini-alerte normale"><b>Situation lue dans Rivage</b> <span className="muted">(le {dateHeure(s.situation.lu_le)})</span>
+          <div>{s.situation.edl_sortie ? 'État des lieux de sortie le ' + date(s.situation.edl_sortie) + ' : les délais de restitution partent de cette date.' : 'Pas d’état des lieux de sortie enregistré dans Rivage : délais calculés depuis la fin du bail.'}</div>
+          {s.situation.trop_percu > 0 && <div><b>Trop-perçu du locataire : {euro(s.situation.trop_percu)}</b>, à lui rendre avec le dépôt.</div>}
+          {s.situation.impaye > 0 && <div><b>Impayé du locataire : {euro(s.situation.impaye)}</b>, à retenir sur le dépôt avec justificatif.</div>}
+          {s.situation.arriere_statut === 'open' && <div>Arriéré ouvert depuis le {date(s.situation.arriere_depuis)} ({s.situation.arriere_jours} jours).</div>}
+          {s.situation.restitution_presente === false && <div>Aucune restitution du dépôt préparée dans Rivage.</div>}</div>}
         <AlertesLiees items={s.alertes} />
         {aCharge.length > 0 && <div className="mini-alerte haute"><b>À regarder avant restitution</b> · {aCharge.length} incident(s) à la charge du locataire :
           {aCharge.map((i) => <div key={i.numero}><a href={i.lien} target="_blank" rel="noreferrer">n°{i.numero} {i.titre}</a> · {ST_INC[i.statut] || i.statut} · estimé {euro(i.montant_estime)}</div>)}</div>}

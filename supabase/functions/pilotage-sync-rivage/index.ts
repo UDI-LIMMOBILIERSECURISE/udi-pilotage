@@ -135,6 +135,48 @@ Deno.serve(async (req) => {
     return rep(200, { ok: true, lus: objets.length })
   }
 
+  // Situation des baux (051) : outil lire_situation_bail du MCP Rivage, même clé que l'API, sans IA.
+  // File remplie par les webhooks de bail et chaque matin ; 40 baux au plus par passage, un appel toutes les 0,65 s.
+  if (cronValide && corps.mode === 'situations') {
+    const { data: ids } = await service.rpc('pilotage_situations_a_lire', { p_max: 40 })
+    if (!Array.isArray(ids) || !ids.length) return rep(200, { ok: true, lus: 0 })
+    let session: string | null = null
+    const mcp = async (method: string, params: unknown, id: number | null) => {
+      const hm: Record<string, string> = { Authorization: `Bearer ${cle}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
+      if (session) hm['Mcp-Session-Id'] = session
+      const r = await fetch(`${RIVAGE}/mcp`, { method: 'POST', headers: hm,
+        body: JSON.stringify(id === null ? { jsonrpc: '2.0', method, params } : { jsonrpc: '2.0', id, method, params }) })
+      session = r.headers.get('mcp-session-id') || session
+      const t = await r.text()
+      let j: Record<string, unknown> | null = null
+      try { j = JSON.parse(t) } catch {
+        // réponse en flux (lignes « data: »)
+        for (const l of t.split('\n').reverse()) if (l.startsWith('data:')) { try { j = JSON.parse(l.slice(5).trim()); break } catch { /* ligne suivante */ } }
+      }
+      return { statut: r.status, j }
+    }
+    const init = await mcp('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'udi-pilotage', version: '1' } }, 1)
+    if (init.statut !== 200) return rep(502, { error: `MCP Rivage indisponible (HTTP ${init.statut})` })
+    await mcp('notifications/initialized', {}, null)
+    let lus = 0, echecs = 0, n = 2
+    for (const id of ids as string[]) {
+      let erreur: string | null = null, data: unknown = null
+      try {
+        const r = await mcp('tools/call', { name: 'lire_situation_bail', arguments: { leasing_contract_id: id } }, n++)
+        if (r.statut === 429) { await new Promise((ok) => setTimeout(ok, 60000)); continue }
+        const res = r.j?.result as { content?: { text?: string }[]; isError?: boolean } | undefined
+        const texte = res?.content?.[0]?.text
+        if (r.statut !== 200 || !texte || res?.isError) erreur = `HTTP ${r.statut} : ${texte || JSON.stringify(r.j?.error || '').slice(0, 200)}`
+        else data = JSON.parse(texte)
+      } catch (e) { erreur = e instanceof Error ? e.message : String(e) }
+      await service.rpc('pilotage_situation_noter', { p_bail: id, p_data: data, p_erreur: erreur })
+      if (erreur) echecs++; else lus++
+      await new Promise((ok) => setTimeout(ok, 650))
+    }
+    await service.rpc('pilotage_situations_signal')
+    return rep(200, { ok: true, lus, echecs })
+  }
+
   // Tâche planifiée : relecture hebdomadaire (corps vide) ou mensuelle ({"mode":"mensuel"}) ; à la demande : tout
   let mode = 'complet'
   if (cronValide) mode = corps.mode === 'mensuel' ? 'mensuel' : 'hebdo'
