@@ -403,10 +403,20 @@ function Equipe({ moi }) {
 
 // ===== Tableaux de suivi =====
 
-function useCharge(fn) {
+// periode (ms) : relecture automatique tant que l'onglet est visible, et au retour sur l'onglet
+// (les webhooks Rivage arrivent en une seconde environ : plus besoin de recharger la page)
+function useCharge(fn, periode) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
-  useEffect(() => { rpc(fn).then(setD).catch((e) => setErr(e.message)); }, []);
+  useEffect(() => {
+    const lire = () => rpc(fn).then((x) => { setD(x); setErr(''); }).catch((e) => setErr(e.message));
+    lire();
+    if (!periode) return undefined;
+    const t = setInterval(() => { if (document.visibilityState === 'visible') lire(); }, periode);
+    const vu = () => { if (document.visibilityState === 'visible') lire(); };
+    document.addEventListener('visibilitychange', vu);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vu); };
+  }, []);
   return [d, err];
 }
 
@@ -467,10 +477,17 @@ function Champs({ items }) {
   return <dl className="champs">{items.filter((x) => x).map(([k, v]) => <React.Fragment key={k}><dt>{k}</dt><dd>{v ?? '—'}</dd></React.Fragment>)}</dl>;
 }
 
+// Champs Rivage modifiés d'un envoi à l'autre (049)
+const CHAMPS_RIVAGE = { status: 'statut', contractor_ids: 'prestataires', urgency: 'urgence', estimated_amount_in_cents: 'montant estimé',
+  charged_to: 'prise en charge', title: 'titre', description: 'description', assignee_id: 'personne assignée', resolved_at: 'date de résolution',
+  archived_at: 'archivage', incident_type: 'type', declared_at: 'date de déclaration', tenant_id: 'locataire', leasing_contract_id: 'bail',
+  asset_id: 'lot', landlord_id: 'bailleur', asset_group_id: 'immeuble' };
 function Historique({ items, libStatut }) {
   if (!items?.length) return null;
   return <><h3>Reçu de Rivage</h3><ol className="histo">{items.map((e, i) =>
-    <li key={i}><span className="muted">{dateHeure(e.le)}</span><span>{EVT[e.evenement] || e.evenement}{e.statut ? ' · ' + (libStatut?.[e.statut] || e.statut) : ''}</span></li>)}</ol></>;
+    <li key={i}><span className="muted">{dateHeure(e.le)}</span><span>{EVT[e.evenement] || e.evenement}{e.statut ? ' · ' + (libStatut?.[e.statut] || e.statut) : ''}
+      {Array.isArray(e.champs) && <span className="muted">{e.champs.length ? ' · ' + e.champs.map((c) => CHAMPS_RIVAGE[c] || c).join(', ')
+        : ' · changement non transmis par Rivage (ex. statut d’un artisan)'}</span>}</span></li>)}</ol></>;
 }
 
 function AlertesLiees({ items }) {
@@ -487,7 +504,7 @@ const ST_INC = { open: 'Ouvert', in_progress: 'En cours', closed: 'Clos', resolv
 const CHARGE = { tenant: 'Locataire', landlord: 'Propriétaire', agency: 'Agence' };
 
 function Sinistres() {
-  const [d, err] = useCharge('pilotage_sinistres');
+  const [d, err] = useCharge('pilotage_sinistres', 20000);
   const [filtre, setFiltre] = useState('tous');
   const [sel, setSel] = useState(null);
   if (err) return <div className="banner">{err}</div>;
@@ -526,7 +543,7 @@ function Sinistres() {
       <Champs items={[['Type', TYPE_INC[s.type] || s.type], ['Urgence', (URG[s.urgence] || [s.urgence])[0]], ['Lot', s.adresse ? `${s.adresse} (${s.lot})` : 'Immeuble, pas de lot précis'],
         ['Bailleur', s.bailleur], ['Locataire', s.locataires], ['Bail', s.bail], ['Mandat', s.mandat], ['Déclaré le', date(s.declare_le)],
         ['Ancienneté', s.jours + ' jours'], ['Résolu le', s.resolu_le ? date(s.resolu_le) : null], ['À la charge de', CHARGE[s.a_charge] || s.a_charge],
-        ['Montant estimé', euro(s.montant_estime)], ['Prestataires', s.prestataires ? String(s.prestataires) : 'Aucun désigné']]} />
+        ['Montant estimé', euro(s.montant_estime)], ['Prestataires', s.prestataires ? ((s.prestataires_noms || []).join(', ') || String(s.prestataires)) : 'Aucun désigné']]} />
       {!s.clos && !s.prestataires && <div className="mini-alerte haute">Aucun prestataire désigné dans Rivage.</div>}
       {!s.clos && s.jours > 15 && <div className="mini-alerte critique">Ouvert depuis plus de 15 jours.</div>}
       <Historique items={s.historique} libStatut={ST_INC} />
