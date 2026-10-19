@@ -387,10 +387,10 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
             <div style={{ flex: 1, minWidth: 220 }}>{i.libelle}
               {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
               {i.statut === 'anomalie' && i.commentaire && <div style={{ fontSize: 12, color: 'var(--red)' }}>{i.commentaire}</div>}</div>
-            {peut && <div className="row">
+            <div className="row">
               <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Déposer dans Rivage ↗</a>
-              <button className="lien" onClick={() => repondrePiece(i, 'sans_objet')}>Sans objet</button>
-            </div>}
+              {peut && <button className="lien" onClick={() => repondrePiece(i, 'sans_objet')}>Sans objet</button>}
+            </div>
           </div>)}
           <div style={{ fontSize: 12, marginTop: 4 }}>Une pièce déposée dans Rivage disparaît de cette liste à la prochaine mise à jour : elle est reconnue par sa catégorie Rivage ou par son nom (même approximatif).</div>
         </div>}
@@ -456,9 +456,9 @@ function Synthese({ d, b, peut, soumis, parametrer }) {
     {(aRevoir.length > 0 || pieces.length > 0) && <div className="mini-alerte haute">
       {aRevoir.length > 0 && <div><b>À revoir depuis le dernier contrôle :</b> {aRevoir.map((i) => `${i.libelle} (${i.detail})`).join(' ; ')}</div>}
       {pieces.length > 0 && <div><b>Pièces manquantes :</b> {pieces.map((i) => i.libelle).join(', ')}</div>}
-      {peut && <div className="row" style={{ marginTop: 6 }}>
+      <div className="row" style={{ marginTop: 6 }}>
         <a className="btn" href={ficheRivage} target="_blank" rel="noreferrer">Corriger dans Rivage ↗</a>
-        <button className="btn gris" onClick={parametrer}>Traiter</button></div>}
+        {peut && <button className="btn gris" onClick={parametrer}>Traiter</button>}</div>
     </div>}
     <div style={{ marginTop: 8 }}>
       <div style={ligne}><b>Type de bail</b><span>{TYPES_BAIL[ech.type] || '—'}</span></div>
@@ -565,6 +565,8 @@ function Question({ i, d, b, peut, agir }) {
         {errJ && <div className="err">{errJ}</div>}
       </div>
       {peut && i.repondu && <div className="row" style={{ justifyContent: 'flex-end' }}><button className="btn gris" onClick={() => revenir()}>Revenir sur ma réponse</button></div>}
+      {!peut && !i.repondu && (i.mode === 'document' || i.bloc === 'rivage') && <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <a className="btn" href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">{i.mode === 'document' ? 'Déposer dans Rivage ↗' : 'Corriger dans Rivage ↗'}</a></div>}
       {peut && !i.repondu && !(i.genere && i.genere !== 'garantie') && <div className="row" style={{ justifyContent: 'flex-end' }}>
         {i.mode === 'document'
           ? <><a className="btn" href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">Déposer dans Rivage ↗</a>
