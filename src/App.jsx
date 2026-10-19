@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { supabase, rpc } from './supabase.js';
+import { supabase, rpc, ecouterRivage } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
 import SuiviBaux from './SuiviBaux.jsx';
 import DossierMandat from './SuiviMandat.jsx';
@@ -403,19 +403,22 @@ function Equipe({ moi }) {
 
 // ===== Tableaux de suivi =====
 
-// periode (ms) : relecture automatique tant que l'onglet est visible, et au retour sur l'onglet
-// (les webhooks Rivage arrivent en une seconde environ : plus besoin de recharger la page)
-function useCharge(fn, periode) {
+// types : types d'objets Rivage dont la modification déclenche une relecture (signal envoyé à chaque webhook, 050).
+// Relecture aussi au retour sur l'onglet. Aucune lecture périodique, et la page ne lit que la base du pilotage, jamais l'API Rivage.
+function useCharge(fn, types) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   useEffect(() => {
+    let t = null;
     const lire = () => rpc(fn).then((x) => { setD(x); setErr(''); }).catch((e) => setErr(e.message));
     lire();
-    if (!periode) return undefined;
-    const t = setInterval(() => { if (document.visibilityState === 'visible') lire(); }, periode);
+    if (!types) return undefined;
+    // plusieurs webhooks arrivent souvent à la suite : une seule relecture 1,5 s après le dernier
+    const plusTard = () => { clearTimeout(t); t = setTimeout(() => { if (document.visibilityState === 'visible') lire(); }, 1500); };
+    const fin = ecouterRivage((type) => { if (types.includes(type)) plusTard(); });
     const vu = () => { if (document.visibilityState === 'visible') lire(); };
     document.addEventListener('visibilitychange', vu);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vu); };
+    return () => { clearTimeout(t); fin(); document.removeEventListener('visibilitychange', vu); };
   }, []);
   return [d, err];
 }
@@ -504,7 +507,7 @@ const ST_INC = { open: 'Ouvert', in_progress: 'En cours', closed: 'Clos', resolv
 const CHARGE = { tenant: 'Locataire', landlord: 'Propriétaire', agency: 'Agence' };
 
 function Sinistres() {
-  const [d, err] = useCharge('pilotage_sinistres', 20000);
+  const [d, err] = useCharge('pilotage_sinistres', ['Incident', 'Profile', 'LeasingContract', 'Asset']);
   const [filtre, setFiltre] = useState('tous');
   const [sel, setSel] = useState(null);
   if (err) return <div className="banner">{err}</div>;

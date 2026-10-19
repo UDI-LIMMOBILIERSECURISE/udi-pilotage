@@ -5,3 +5,20 @@ export async function rpc(name, args) {
   if (error) throw new Error(error.message);
   return data;
 }
+
+// Signal « Rivage a envoyé un webhook » (050) : canal Realtime privé « pilotage », réservé aux membres actifs.
+// Le message ne contient que le type d'objet Rivage modifié (Incident, LeasingContract…), aucune donnée.
+const ecouteurs = new Set();
+let canal = null;
+async function ouvrirCanal() {
+  if (canal) return;
+  canal = supabase.channel('pilotage', { config: { private: true } });
+  await supabase.realtime.setAuth();
+  canal.on('broadcast', { event: 'rivage' }, ({ payload }) => ecouteurs.forEach((f) => f(payload?.type)))
+    .subscribe();
+}
+export function ecouterRivage(f) {
+  ecouteurs.add(f);
+  ouvrirCanal().catch(() => {});
+  return () => ecouteurs.delete(f);
+}
