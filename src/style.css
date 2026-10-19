@@ -80,7 +80,7 @@ h3 { font-size: 14px; margin: 16px 0 6px; color: var(--ink2); }
 .panneau.vide { color: var(--muted); border-style: dashed; text-align: center; padding: 40px 18px; }
 .panneau p { margin: 8px 0; }
 .fermer { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font-size: 20px; cursor: pointer; line-height: 1; }
-.kanban { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 12px; overflow-x: auto; }
+.kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .kcol { background: #E8ECF0; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
 .kcol-tete { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px 4px; }
 .pastille { font-family: 'IBM Plex Mono', monospace; font-size: 12px; background: #fff; border-radius: 999px; padding: 1px 9px; }

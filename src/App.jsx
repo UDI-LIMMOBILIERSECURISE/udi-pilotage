@@ -503,7 +503,8 @@ function AlertesLiees({ items }) {
 
 const TYPE_INC = { plumbing: 'Plomberie', roofing: 'Toiture', painting: 'Peinture', electricity: 'Électricité', electrical: 'Électricité', heating: 'Chauffage', locksmith: 'Serrurerie', other: 'Autre' };
 const URG = { urgent: ['Urgent', 'critique'], high: ['Haute', 'haute'], normal: ['Normale', 'normale'], low: ['Basse', 'normale'] };
-const ST_INC = { open: 'Ouvert', in_progress: 'En cours', closed: 'Clos', resolved: 'Résolu', cancelled: 'Annulé' };
+// Libellés de Rivage (liste des incidents : Nouveau, En cours, En attente)
+const ST_INC = { open: 'Nouveau', in_progress: 'En cours', on_hold: 'En attente', closed: 'Clos', resolved: 'Résolu', cancelled: 'Annulé' };
 const CHARGE = { tenant: 'Locataire', landlord: 'Propriétaire', agency: 'Agence' };
 
 function Sinistres() {
@@ -521,8 +522,8 @@ function Sinistres() {
     sans: (x) => !x.clos && !x.prestataires,
   };
   const vus = d.filter(tests[filtre]);
-  const colonnes = [['open', 'Ouvert'], ['in_progress', 'En cours'], ['clos', 'Clos']].map(([k, l]) =>
-    [k, l, vus.filter((x) => (k === 'clos' ? x.clos : !x.clos && (x.statut === k || (k === 'open' && !['in_progress'].includes(x.statut)))))]);
+  const colonnes = [['open', 'Nouveau'], ['in_progress', 'En cours'], ['on_hold', 'En attente'], ['clos', 'Clos']].map(([k, l]) =>
+    [k, l, vus.filter((x) => (k === 'clos' ? x.clos : !x.clos && (x.statut === k || (k === 'open' && !['in_progress', 'on_hold'].includes(x.statut)))))]);
   const s = d.find((x) => x.id === sel);
   return <>
     <div className="entete">
