@@ -510,10 +510,14 @@ const CHARGE = { tenant: 'Locataire', landlord: 'Propriétaire', agency: 'Agence
 function Sinistres() {
   const [d, err] = useCharge('pilotage_sinistres', ['Incident', 'Profile', 'LeasingContract', 'Asset']);
   const [filtre, setFiltre] = useState('tous');
+  const [statut, setStatut] = useState('tous');
   const [sel, setSel] = useState(null);
   if (err) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
   const ouverts = d.filter((x) => !x.clos);
+  // Colonne (et filtre) de statut d'un incident, avec les libellés de Rivage
+  const colonneDe = (x) => (x.clos ? 'clos' : ['in_progress', 'on_hold'].includes(x.statut) ? x.statut : 'open');
+  const STATUTS = [['open', 'Nouveau'], ['in_progress', 'En cours'], ['on_hold', 'En attente'], ['clos', 'Clos']];
   const aJour = ouverts.filter((x) => x.jours <= 15).length;
   const tests = {
     tous: () => true,
@@ -521,9 +525,8 @@ function Sinistres() {
     vieux: (x) => !x.clos && x.jours > 15,
     sans: (x) => !x.clos && !x.prestataires,
   };
-  const vus = d.filter(tests[filtre]);
-  const colonnes = [['open', 'Nouveau'], ['in_progress', 'En cours'], ['on_hold', 'En attente'], ['clos', 'Clos']].map(([k, l]) =>
-    [k, l, vus.filter((x) => (k === 'clos' ? x.clos : !x.clos && (x.statut === k || (k === 'open' && !['in_progress', 'on_hold'].includes(x.statut)))))]);
+  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut);
+  const colonnes = STATUTS.filter(([k]) => statut === 'tous' || k === statut).map(([k, l]) => [k, l, vus.filter((x) => colonneDe(x) === k)]);
   const s = d.find((x) => x.id === sel);
   return <>
     <div className="entete">
@@ -536,6 +539,8 @@ function Sinistres() {
       [d.filter((x) => x.clos).length, 'Clos']]} />
     <Filtres val={filtre} set={setFiltre} items={[['tous', 'Tous', d.length], ['urgents', 'Urgents', d.filter(tests.urgents).length],
       ['vieux', '+ de 15 jours', d.filter(tests.vieux).length], ['sans', 'Sans prestataire', d.filter(tests.sans).length]]} />
+    <Filtres val={statut} set={setStatut} items={[['tous', 'Tous les statuts', d.filter(tests[filtre]).length],
+      ...STATUTS.map(([k, l]) => [k, l, d.filter(tests[filtre]).filter((x) => colonneDe(x) === k).length])]} />
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un incident pour voir le détail." detail={s && <>
       <div className="muted">Incident n°{s.numero} · {ST_INC[s.statut] || s.statut}</div>
       <h2>{s.titre}</h2>
@@ -558,14 +563,15 @@ function Sinistres() {
         {!items.length && <div className="muted" style={{ padding: '8px 4px' }}>Rien ici avec ce filtre.</div>}
         {items.map((x) => { const u = URG[x.urgence] || [x.urgence, 'normale'];
           return <button key={x.id} className={'kcarte ' + (sel === x.id ? 'sel ' : '') + (!x.clos && x.jours > 15 ? 'critique' : u[1])} onClick={() => setSel(x.id)}>
-            <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">#{x.numero} · {TYPE_INC[x.type] || x.type}</span><span className={'sev ' + u[1]}>{u[0]}</span></div>
+            <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">#{x.numero} · {TYPE_INC[x.type] || x.type}</span>
+              <span className="row" style={{ gap: 4 }}><span className={'statut-inc ' + colonneDe(x)}>{x.clos ? (ST_INC[x.statut] || 'Clos') : ST_INC[x.statut] || x.statut}</span><span className={'sev ' + u[1]}>{u[0]}</span></span></div>
             <div className="kcarte-titre">{x.titre}</div>
             <div className="muted">{x.adresse || 'Immeuble, pas de lot précis'}</div>
             {x.situation && <div style={{ marginTop: 6 }}><span className={'situ ' + x.situation.code + ' ' + x.situation.gravite}>{x.situation.libelle}</span>
               {x.mandat_statut && x.mandat_statut !== 'Mandat actif' && <span className="situ critique" style={{ marginLeft: 6 }}>{x.mandat_statut}</span>}</div>}
             <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Bailleur</span><span>{x.bailleur || '—'}</span><span className="muted">Locataire</span><span>{x.locataires || '—'}</span><span className="muted">Mandat</span><span>{x.mandat || '—'}</span></div>
             <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
-              <span style={{ fontSize: 12, color: x.prestataires || x.clos ? 'var(--ink2)' : 'var(--red)' }}>{x.prestataires ? x.prestataires + ' prestataire(s)' : x.clos ? 'Clos le ' + date(x.resolu_le) : 'Sans prestataire'}</span>
+              <span style={{ fontSize: 12, color: x.prestataires || x.clos ? 'var(--ink2)' : 'var(--red)' }}>{x.prestataires ? ((x.prestataires_noms || []).join(', ') || x.prestataires + ' prestataire(s)') : x.clos ? 'Clos le ' + date(x.resolu_le) : 'Sans prestataire'}</span>
               <span className="mono" style={{ fontSize: 12 }}>{x.clos ? 'clos' : x.jours + ' j'}</span></div>
           </button>; })}
       </div>)}</div>

@@ -171,3 +171,8 @@ tr.sel td { background: #EEF4FA; }
 
 .grille-baux { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .btn:disabled, .btn[disabled] { opacity: .45; cursor: not-allowed; }
+/* Statut d'un incident (libellés de Rivage) */
+.statut-inc { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--blue-bg); color: var(--blue); white-space: nowrap; }
+.statut-inc.in_progress { background: var(--teal-bg); color: var(--teal); }
+.statut-inc.on_hold { background: var(--amber-bg); color: var(--amber); }
+.statut-inc.clos { background: var(--bg); color: var(--ink2); }
