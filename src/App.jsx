@@ -501,7 +501,7 @@ function AlertesLiees({ items }) {
 
 // ----- Sinistres : colonnes par statut -----
 
-const TYPE_INC = { plumbing: 'Plomberie', roofing: 'Toiture', painting: 'Peinture', electricity: 'Électricité', electrical: 'Électricité', heating: 'Chauffage', locksmith: 'Serrurerie', other: 'Autre' };
+const TYPE_INC = { plumbing: 'Plomberie', roofing: 'Toiture', painting: 'Peinture', electricity: 'Électricité', electrical: 'Électricité', heating: 'Chauffage', locksmith: 'Serrurerie', locksmithing: 'Serrurerie', other: 'Autre' };
 const URG = { urgent: ['Urgent', 'critique'], high: ['Haute', 'haute'], normal: ['Normale', 'normale'], low: ['Basse', 'normale'] };
 // Libellés de Rivage (liste des incidents : Nouveau, En cours, En attente)
 const ST_INC = { open: 'Nouveau', in_progress: 'En cours', on_hold: 'En attente', closed: 'Clos', resolved: 'Résolu', cancelled: 'Annulé' };
