@@ -140,6 +140,20 @@ Deno.serve(async (req) => {
   if (cronValide) mode = corps.mode === 'mensuel' ? 'mensuel' : 'hebdo'
   const aLire = MODELES.filter(([, , f]) => mode !== 'hebdo' || f === 'hebdo')
 
+  const debutDetails = Date.now()
+  const details = async (liste: Record<string, unknown>[]) => {
+    const ordre = liste.map((o, i) => ({ o, i, k: Math.random() })).sort((x, y) => x.k - y.k)
+    const sortie = [...liste]
+    for (const { o, i } of ordre) {
+      if (Date.now() - debutDetails > 60000) break
+      const r = await fetch(`${RIVAGE}/api/v1/assets/${encodeURIComponent(String(o.id))}`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
+      if (r.status === 429) break
+      if (r.ok) { const j = await r.json(); sortie[i] = { ...o, ...((j.data && typeof j.data === 'object') ? j.data : j) } }
+      await new Promise((ok) => setTimeout(ok, 650))
+    }
+    return sortie
+  }
+
   const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur + (mode === 'complet' ? '' : ' (' + mode + ')') })
   const compteurs: Record<string, number> = {}
   try {
@@ -150,7 +164,11 @@ Deno.serve(async (req) => {
         if (!r.ok) throw new Error(`${modele} page ${page} : HTTP ${r.status}`)
         const j = await r.json()
         total = j.pagination?.total_pages || 1
-        const lot = (j.data || []).map((o: Record<string, unknown>) => nettoyer(modele, o))
+        let lot = (j.data || []).map((o: Record<string, unknown>) => nettoyer(modele, o))
+        // Lots : la liste ne donne pas les diagnostics (seul le détail du lot les contient, annonce Rivage du 19/10).
+        // Lecture du détail lot par lot, dans la limite de temps de la fonction (environ 60 s) ; le reste au passage suivant,
+        // dans un ordre mélangé pour que tous les lots soient couverts au fil des passages. Les webhooks complètent.
+        if (modele === 'Asset') lot = await details(lot)
         if (lot.length) {
           const { error } = await service.rpc('pilotage_sync_appliquer', { p_modele: modele, p_objets: lot })
           if (error) throw new Error(`${modele} : ${error.message}`)
