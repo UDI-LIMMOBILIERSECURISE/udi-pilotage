@@ -47,7 +47,7 @@ export default function PermisMandat({ m, onErreur }) {
   </>;
 }
 
-function LotPermis({ l, agir, email, prenom, recharger }) {
+export function LotPermis({ l, agir, email, prenom, recharger }) {
   const p = l.permis || {};
   const [depot, setDepot] = useState({ ouvert: false, le: auj(), numero: '' });
   const [pieces, setPieces] = useState(false);
