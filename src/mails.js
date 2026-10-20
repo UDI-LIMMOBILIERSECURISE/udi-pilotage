@@ -264,13 +264,25 @@ export function preparer(code, ctx) {
 }
 
 // SMS du pilotage (065-067) : « {nom} » est remplacé, pour chaque locataire, par son prénom et son nom repris de Rivage.
-// L'expéditeur « UDI GESTION » ne reçoit pas de réponse : l'adresse où répondre est toujours écrite dans le SMS.
-const REPONDRE = 'Réponse par mail à votregestionnaire@udi-immo.com (ne pas répondre à ce SMS).';
+// Textes courts, sans caractère hors alphabet SMS (ê, ç, «…») : un seul SMS facturé (160 caractères) avec un nom courant.
+// L'expéditeur « UDI GESTION » ne reçoit pas de réponse : l'adresse mail est écrite dans le SMS ; pas de signature (déjà dans l'expéditeur).
+const MAIL = 'votregestionnaire@udi-immo.com';
 export const SMS = {
-  assurance_sms: (ctx) => `Bonjour {nom}, votre attestation d'assurance pour ${ctx.bail?.adresse || 'votre logement'} expire le ${d(ctx.ob?.prochaine)}. Merci de nous envoyer la nouvelle. ${REPONDRE} UDI Gestion`,
-  compteur_sms: (ctx) => `Bonjour {nom}, merci de nous envoyer le relevé et la photo de vos compteurs (${ctx.ob?.libelle || 'eau, chauffage'}) pour ${ctx.bail?.adresse || 'votre logement'}. ${REPONDRE} UDI Gestion`,
-  compteur_sms3: (ctx) => `Bonjour {nom}, dernier rappel : merci de nous envoyer sous 5 jours le relevé et la photo de vos compteurs pour ${ctx.bail?.adresse || 'votre logement'}. À défaut, un relevé sur place sera organisé. ${REPONDRE} UDI Gestion`,
+  assurance_sms: (ctx) => `Bonjour {nom}, votre attestation d'assurance expire le ${d(ctx.ob?.prochaine)}. Merci d'envoyer la nouvelle à ${MAIL}`,
+  compteur_sms: (ctx) => `Bonjour {nom}, merci de nous envoyer le relevé et la photo de vos compteurs. Réponse par mail : ${MAIL}`,
+  compteur_sms3: () => `Bonjour {nom}, dernier rappel : relevé et photo de vos compteurs sous 5 jours, sinon relevé sur place. Mail : ${MAIL}`,
 };
+// Nombre de SMS facturés : alphabet SMS standard (160 caractères, puis 153 par SMS) ; un seul caractère hors alphabet
+// (ê, â, î, ô, û, ç, «…», émoji) fait passer tout le message en Unicode (70, puis 67 par SMS).
+const GSM = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+const GSM_EXT = '^{}\\[~]|€';
+export function smsFactures(t) {
+  const txt = t || '';
+  const unicode = [...txt].some((c) => !GSM.includes(c) && !GSM_EXT.includes(c));
+  if (unicode) return { n: txt.length <= 70 ? 1 : Math.ceil(txt.length / 67), unicode, longueur: txt.length };
+  const l = [...txt].reduce((x, c) => x + (GSM_EXT.includes(c) ? 2 : 1), 0);
+  return { n: l <= 160 ? 1 : Math.ceil(l / 153), unicode, longueur: l };
+}
 // Nom affiché dans un SMS : sans la civilité enregistrée dans Rivage (mr, mrs, M., Mme…)
 export const nomSms = (nom) => (nom || '').replace(/^\s*(mr|mrs|ms|miss|m\.|mme|mlle|monsieur|madame|mademoiselle)\s+/i, '').trim();
 

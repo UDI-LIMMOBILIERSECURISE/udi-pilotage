@@ -4,7 +4,7 @@ import { supabase, rpc } from './supabase.js';
 import { ResumeIA, Tuiles, Filtres } from './App.jsx';
 import { Compteurs } from './SuiviMandat.jsx';
 import { Circuit } from './Circuit.jsx';
-import { preparer, SMS, nomSms, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
+import { preparer, SMS, nomSms, smsFactures, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const auj = () => new Date().toISOString().slice(0, 10);
@@ -217,7 +217,9 @@ export function SmsRivage({ texte, fait, tels = [], noms = [], envoi, apres }) {
   return <div style={{ width: '100%' }}>
     <textarea rows={3} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={t} onChange={(e) => setT(e.target.value)} />
     {t.includes('{nom}') && <div className="muted" style={{ fontSize: 12 }}>« {'{nom}'} » sera remplacé par le nom de chaque locataire{noms.length ? ` : ${noms.join(', ')}` : ''}.</div>}
-    <div className="muted" style={{ fontSize: 12 }}>{t.length} caractères{t.length > 160 ? ` · ${Math.ceil(t.length / 153)} SMS facturés` : ''} · destinataire : {tels.length ? tels.join(', ') : 'aucun numéro du locataire dans Rivage'}</div>
+    {(() => { const f = smsFactures(t.split('{nom}').join(noms[0] || 'Prénom NOM')); return <div className="muted" style={{ fontSize: 12, color: f.n > 1 ? 'var(--red)' : undefined }}>
+      {f.longueur} caractères{f.unicode ? ' (caractère spécial : ê, ç, « »… le message passe en Unicode)' : ''} · {f.n} SMS facturé{f.n > 1 ? 's' : ''}</div>; })()}
+    <div className="muted" style={{ fontSize: 12 }}>Destinataire : {tels.length ? tels.join(', ') : 'aucun numéro du locataire dans Rivage'}</div>
     <div className="row" style={{ marginTop: 4 }}>
       {envoi && tels.length > 0 && <button className="btn plein" disabled={etat.charge || !t.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer le SMS (UDI GESTION)'}</button>}
       <button className="btn" onClick={() => { navigator.clipboard?.writeText(t.split('{nom}').join(noms[0] || '')); setVu(true); }}>Copier le texte</button>
