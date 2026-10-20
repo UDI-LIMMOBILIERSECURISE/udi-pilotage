@@ -68,8 +68,9 @@ export default function DossierMandat({ m, apres }) {
       <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
         {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}</> : <>{c.restant} point(s) à traiter avant la validation{c.lecture_le ? ` · mandat lu par l’IA le ${date(c.lecture_le)}` : lecture.charge ? ' · lecture du mandat par l’IA en cours…' : ''}</>}
         <div className="row" style={{ marginTop: 6 }}>
-          <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le mandat déposé dans Rivage (IA)'}</button>
-          <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>
+          {/* Mandat lu une seule fois : plus de bouton de lecture une fois la lecture enregistrée */}
+          {!c.lecture_le && !d.lecture && <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le mandat déposé dans Rivage (IA)'}</button>}
+          {!c.lecture_le && !d.lecture && <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>}
         </div>
         {lecture.err && <div className="err">{lecture.err}</div>}
         {!c.go_le && !c.restant && <div style={{ marginTop: 4 }}>Questionnaire bouclé.</div>}

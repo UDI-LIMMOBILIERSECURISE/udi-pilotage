@@ -372,8 +372,9 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
       {peut && <div className="row" style={{ marginTop: 6 }}>
         {!c.go_le && <button className="btn plein" disabled={c.restant > 0} onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: true })}>Donner le GO</button>}
         {c.go_le && <button className="btn gris" onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })}>Retirer le GO</button>}
-        <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le bail déposé dans Rivage (IA)'}</button>
-        <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>
+        {/* Bail lu une seule fois : plus de bouton de lecture une fois la lecture enregistrée */}
+        {!d.lecture && <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le bail déposé dans Rivage (IA)'}</button>}
+        {!d.lecture && <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>}
         {manquants.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes', { manquants }, { cle: 'e:' + b.bail_id + ':pieces', etape: auj(), detail: 'Pièces demandées au bailleur' })}>Demander les pièces au bailleur</button>}
       </div>}
       {lecture.err && <div className="err">{lecture.err}</div>}
