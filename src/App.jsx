@@ -100,12 +100,12 @@ function Espace() {
     <div className="appli">
       <header className="barre-mobile">
         <button className="burger" aria-label="Ouvrir le menu" aria-expanded={menuOuvert} onClick={() => setMenuOuvert(true)}><span /><span /><span /></button>
-        <span className="barre-titre">{titre}</span>
+        <img className="barre-logo" src="/logo-udi.png" alt="UDI" /><span className="barre-titre">{titre}</span>
       </header>
       {menuOuvert && <div className="voile" onClick={() => setMenuOuvert(false)} />}
       <aside className={'menu' + (menuOuvert ? ' ouvert' : '')} aria-label="Navigation">
         <div className="menu-tete">
-          <span className="brand">Pilotage UDI Gestion</span>
+          <span className="menu-marque"><span className="menu-logo"><img src="/logo-udi.png" alt="UDI, l’immobilier sécurisé" /></span><span className="brand">Pilotage<br />UDI Gestion</span></span>
           <button className="menu-fermer" aria-label="Fermer le menu" onClick={() => setMenuOuvert(false)}>×</button>
         </div>
         <nav className="menu-liste">
