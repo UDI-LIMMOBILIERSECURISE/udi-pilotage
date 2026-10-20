@@ -43,12 +43,19 @@ export default function PermisMandat({ m, onErreur }) {
   const agir = async (args) => { try { await rpc('pilotage_permis_action', args); await charger(); } catch (e) { onErreur(e.message); } };
   return <>
     <div className="groupe-tete" style={{ marginTop: 14 }}><b>Permis de louer</b></div>
-    {liste.map((l) => <LotPermis key={l.asset_id} l={l} agir={agir} email={email} prenom={prenom} recharger={charger} />)}
+    {liste.map((l) => <LotPermis key={l.asset_id} l={l} agir={agir} email={email} prenom={prenom} recharger={charger} onErreur={onErreur} />)}
   </>;
 }
 
-export function LotPermis({ l, agir, email, prenom, recharger }) {
+export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
   const p = l.permis || {};
+  const [modif, setModif] = useState(false);
+  const modifiable = p.regime !== 'non_concerne';
+  // Régime choisi pour ce lot (062) : prime sur la table des communes
+  const agirRegime = async (regime) => {
+    try { await rpc('pilotage_permis_lot_regime', { p_asset: l.asset_id, p_regime: regime }); recharger && await recharger(); }
+    catch (e) { onErreur ? onErreur(e.message) : alert(e.message); }
+  };
   const [depot, setDepot] = useState({ ouvert: false, le: auj(), numero: '' });
   const [pieces, setPieces] = useState(false);
   const enCours = (l.demandes || []).find((d) => !d.close_le);
@@ -56,7 +63,17 @@ export function LotPermis({ l, agir, email, prenom, recharger }) {
   return <div style={{ borderTop: '1px solid var(--line)', padding: '8px 0', fontSize: 13 }}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <div><b>Lot {l.lot}</b><span className="muted"> · {l.adresse}</span></div>
-      <span className={'sev ' + (COUL[p.regime] || 'normale')}>{REGIME[p.regime] || p.regime}{p.a_confirmer ? ' · à confirmer' : ''}</span>
+      <span className="row" style={{ gap: 6 }}>
+        {modif ? <select autoFocus value={p.force ? p.regime : ''} aria-label="Régime du permis de louer pour ce lot"
+            onChange={async (e) => { await agirRegime(e.target.value || null); setModif(false); }} onBlur={() => setModif(false)}>
+            <option value="">{p.force ? 'Revenir au régime de la commune' : 'Choisir pour ce lot…'}</option>
+            <option value="autorisation">Autorisation préalable (permis de louer)</option>
+            <option value="declaration">Déclaration de mise en location</option>
+            <option value="aucun">Pas de permis de louer</option>
+          </select>
+          : <><span className={'sev ' + (COUL[p.regime] || 'normale')}>{REGIME[p.regime] || p.regime}{p.a_confirmer ? ' · à confirmer' : ''}{p.force ? ' · choisi pour ce lot' : ''}</span>
+            {modifiable && <button className="lien" onClick={() => setModif(true)}>Modifier</button>}</>}
+      </span>
     </div>
     {p.detail && <div className="muted" style={{ fontSize: 12 }}>{p.detail}{p.source ? ' · source : ' + p.source : ''}</div>}
     {p.regime === 'inconnu' && <div className="muted" style={{ fontSize: 12 }}>La recherche automatique de la commune est lancée dans l’heure ; le résultat sera à confirmer par la gestion (onglet À louer).</div>}

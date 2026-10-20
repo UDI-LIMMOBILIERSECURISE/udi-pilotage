@@ -188,7 +188,8 @@ function Journee({ moi }) {
       {err && <div className="banner">{err}</div>}
       {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
       {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
-      {moi.role === 'direction' && cible === moi.user_id && <div className="info">Vous voyez ici les alertes des mandats attribués à vous et celles des mandats qui ne sont encore attribués à personne.</div>}
+      {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
+      {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}
       <div className="row" style={{ marginBottom: 14 }}>
         {[['toutes', 'Toutes']].concat(Object.entries(CAT)).map(([k, l]) => (
           <button key={k} className={'chip' + (cat === k ? ' on' : '')} onClick={() => setCat(k)}>{l}<span className="n">{k === 'toutes' ? ouvertes.length : ouvertes.filter((a) => a.categorie === k).length}</span></button>
@@ -201,7 +202,7 @@ function Journee({ moi }) {
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
-                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
+                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
                   <div className="grid2">
                     {d.bailleur && <><span>Bailleur</span><span>{d.bailleur}</span></>}
                     {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
@@ -209,18 +210,11 @@ function Journee({ moi }) {
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                  {(d.bail_id || d.mandat_id) && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
+                  {(d.bail_id || d.mandat_id || d.dossier?.type === 'organisme') && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
                     onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>{fiche === d.cle ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>}
                   {d.dossier?.lien && <a className="btn gris" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
                 </div>
               </div>
-              {fiche === d.cle && <section className="panneau" style={{ marginTop: 12 }}>
-                <button className="fermer" onClick={() => setFiche(null)} aria-label="Fermer la fiche">×</button>
-                {d.bail_id
-                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
-                      peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
-                  : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
-              </section>}
               <div className="stack" style={{ gap: 6, marginTop: 10 }}>
                 {d.alertes.map((a) => (
                   <div key={a.id} className={'alerte ' + a.gravite}>
@@ -242,6 +236,16 @@ function Journee({ moi }) {
                   </div>
                 ))}
               </div>
+              {fiche === d.cle && <section className="panneau" style={{ marginTop: 12 }}>
+                <button className="fermer" onClick={() => setFiche(null)} aria-label="Fermer la fiche">×</button>
+                {d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'))
+                  ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
+                  : d.bail_id
+                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
+                      peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
+                  : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
+                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}><button className="btn" onClick={() => setFiche(null)}>Fermer la fiche</button></div>
+              </section>}
             </article>
           ))}
         </div>
@@ -263,6 +267,23 @@ const MAILS_ALERTE = {
   loyer_modifie: [['revision_bailleur', 'Mail au bailleur']],
 };
 const dateTitre = (t) => { const x = (t || '').match(/(\d{2})\/(\d{2})\/(\d{4})/); return x ? `${x[3]}-${x[2]}-${x[1]}` : null; };
+
+// Supervision (061) : charge de chaque membre de l'équipe, clic pour ouvrir sa journée
+function Supervision({ voir }) {
+  const [l, setL] = useState(null);
+  useEffect(() => { rpc('pilotage_supervision').then(setL).catch(() => setL([])); }, []);
+  if (!l || !l.length) return null;
+  const ROLE = { gestionnaire: 'Gestion', comptable: 'Comptabilité', negociateur: 'Commercial' };
+  return <section className="card" style={{ marginBottom: 16 }}>
+    <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Supervision de l’équipe</h2>
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>{l.map((m) => <button key={m.user_id} className="tuile" style={{ cursor: 'pointer', textAlign: 'left', borderColor: m.critiques ? 'var(--red)' : undefined }} onClick={() => voir(m.user_id)}>
+      <div className="muted">{ROLE[m.role] || m.role}</div>
+      <div style={{ fontWeight: 700, fontSize: 16 }}>{m.prenom}</div>
+      <div>{m.ouvertes} alerte{m.ouvertes > 1 ? 's' : ''}{m.critiques ? <span style={{ color: 'var(--red)', fontWeight: 700 }}> · {m.critiques} critique{m.critiques > 1 ? 's' : ''}</span> : ''}</div>
+      {m.plus_ancienne && <div className="muted">la plus ancienne depuis le {date(m.plus_ancienne)}</div>}
+    </button>)}</div>
+  </section>;
+}
 
 function useMoiMail() {
   const [moi, setMoi] = useState({ prenom: '', email: '' });
@@ -555,9 +576,12 @@ function RegleEditable({ g, r, apres, setErr }) {
     <tr style={{ cursor: 'pointer' }} onClick={() => setOuvert(!ouvert)}>
       <td><strong>{g.libelle}</strong><div className="muted">{g.explication}</div></td><td>{g.domaine}</td>
       <td><span className={'sev ' + g.gravite}>{SEV[g.gravite]}</span></td>
+      <td><select value={g.destinataire || 'gestion'} onClick={(e) => e.stopPropagation()} aria-label="Destinataire des alertes"
+        onChange={async (e) => { try { await rpc('pilotage_regle_destinataire', { p_cle: g.cle, p_destinataire: e.target.value }); apres(); } catch (x) { setErr(x.message); } }}>
+        <option value="gestion">Gestion</option><option value="compta">Comptabilité</option><option value="direction">Direction</option></select></td>
       <td className="muted" style={{ fontSize: 12 }}>{resume}</td><td>{g.ouvertes}</td>
       <td><label className="switch" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={g.actif} onChange={() => envoyer(!g.actif)} /> {g.actif ? 'Oui' : 'Non'}</label></td></tr>
-    {ouvert && <tr><td colSpan={6} style={{ background: 'var(--fond-2, rgba(0,0,0,0.03))' }}>
+    {ouvert && <tr><td colSpan={7} style={{ background: 'var(--fond-2, rgba(0,0,0,0.03))' }}>
       {delais.length > 0 && <div style={{ marginBottom: 8 }}>
         <div className="muted" style={{ marginBottom: 4 }}>Délais de la règle (pris en compte au contrôle suivant, toutes les 30 minutes)</div>
         {delais.map((p) => <DelaiRegle key={p.nom + p.valeur} cle={g.cle} p={p} apres={apres} setErr={setErr} />)}
@@ -586,7 +610,7 @@ function Regles() {
       <p className="sub">Contrôles exécutés automatiquement toutes les 30 minutes. Cliquer sur une règle pour régler ses délais et, pour les suivis de bail et de mandat, le rythme des relances. Les délais fixés par la loi (date limite d’un congé, restitution du dépôt de garantie…) ne sont pas modifiables. Une règle désactivée ne crée plus d’alerte.</p>
       {err && <div className="banner" onClick={() => setErr('')}>{err}</div>}
       <div className="table-wrap"><table>
-        <thead><tr><th>Règle</th><th>Domaine</th><th>Gravité</th><th>Délais</th><th>Alertes ouvertes</th><th>Active</th></tr></thead>
+        <thead><tr><th>Règle</th><th>Domaine</th><th>Gravité</th><th>Pour</th><th>Délais</th><th>Alertes ouvertes</th><th>Active</th></tr></thead>
         <tbody>{(r.regles || []).map((g) => <RegleEditable key={g.cle} g={g} r={r} apres={charger} setErr={setErr} />)}</tbody>
       </table></div>
     </>
@@ -1271,6 +1295,46 @@ function Commentaires({ id, peut, recharger }) {
     {toutes.length > 3 && <button className="btn gris" style={{ marginTop: 8 }} onClick={() => setTout(!tout)}>{tout ? 'Ne garder que les 3 derniers' : `Voir les ${toutes.length - 3} échanges plus anciens`}</button>}
     {!notes.length && <p className="muted">Aucun échange.</p>}
   </>;
+}
+
+// Fiche des dossiers d'impayé ouverte depuis la journée : ceux d'un organisme (actualisation du mois) ou celui d'un bail
+function FicheImpayes({ organisme, bail, apres }) {
+  const [d, setD] = useState(null);
+  const [mois, setMois] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [extrait, setExtrait] = useState(null);
+  const [err, setErr] = useState('');
+  const charger = () => Promise.all([rpc('pilotage_impayes'), rpc('pilotage_impayes_mois')])
+    .then(([a, b]) => { setD(a); setMois(b); }).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, [organisme, bail]);
+  if (err) return <div className="banner">{err}</div>;
+  if (!d || !mois) return <p className="muted">Chargement des dossiers…</p>;
+  const actu = organisme ? mois.actualisations.find((a) => a.organisme === organisme) : null;
+  const ids = actu ? actu.dossiers.map((x) => x.id) : [];
+  const liste = d.dossiers.filter((x) => (organisme ? ids.includes(x.id) : x.bail_id === bail && x.groupe !== 'Clôturé'));
+  const choisi = d.dossiers.find((x) => x.id === (sel ?? (liste.length === 1 ? liste[0].id : null)));
+  const recharger = () => { charger(); apres && apres(); };
+  const actualiser = async (fait) => { try { await rpc('pilotage_impayes_actualisation', { p_organisme: organisme, p_fait: fait, p_note: null }); recharger(); } catch (e) { setErr(e.message); } };
+  return <div>
+    <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8, paddingRight: 32 }}>
+      <h3 style={{ margin: 0 }}>{organisme ? `Dossiers ${ORGANISMES[organisme] || organisme} à actualiser` : 'Dossier d’impayé'}</h3>
+      {actu && d.peut_saisir && (actu.fait_le
+        ? <span className="muted">Actualisation faite le {date(actu.fait_le)} <button className="lien" onClick={() => actualiser(false)}>Rouvrir</button></span>
+        : <button className="btn plein" onClick={() => actualiser(true)}>Actualisation faite pour tous</button>)}
+    </div>
+    {!liste.length && <p className="muted">{bail ? 'Aucun dossier d’impayé ouvert pour ce bail : à ouvrir depuis l’onglet Impayés.' : 'Aucun dossier à actualiser.'}</p>}
+    {liste.length > 1 && <div className="stack" style={{ gap: 4, marginBottom: 10 }}>
+      {liste.map((x) => { const p = parties(x);
+        return <div key={x.id} className={'row ligne-imp' + (choisi?.id === x.id ? ' sel' : '')} style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--line)', padding: '6px 0' }}>
+          <span><b>{p.titre}</b>{p.adresse ? <span className="muted"> · {p.adresse}</span> : null}{x.montant_impaye != null ? ' · ' + euro(x.montant_impaye) : ''}</span>
+          <span className="row" style={{ gap: 6 }}>
+            {x.bail_id && <button className="btn gris" onClick={() => setExtrait(extrait === x.bail_id ? null : x.bail_id)}>Extrait de compte</button>}
+            <button className={'btn' + (choisi?.id === x.id ? ' plein' : '')} onClick={() => setSel(choisi?.id === x.id ? -1 : x.id)}>{choisi?.id === x.id ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>
+          </span></div>; })}
+    </div>}
+    {extrait && <Extrait bail={extrait} fermer={() => setExtrait(null)} />}
+    {choisi && <div className="panneau" style={{ marginTop: 8 }}><DossierImpaye key={choisi.id} d={choisi} membres={d.membres} peut={d.peut_saisir} recharger={recharger} /></div>}
+  </div>;
 }
 
 function DossierImpaye({ d, membres, peut, recharger }) {

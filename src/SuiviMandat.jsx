@@ -215,24 +215,43 @@ function Clauses({ m, d, c, agir, repondre, recharger, onErreur }) {
 function Equipements({ i, d, agir, repondre, recharger, onErreur }) {
   const compteur = i.cle === 'm_cl_compteurs';
   const nature = compteur ? 'compteur' : 'equipement';
-  const total = d.lots.reduce((t, l) => t + l.equipements.filter((e) => e.nature === nature).length, 0);
+  // Lots marqués « aucun équipement » / « pas de compteur » (062)
+  const [sans, setSans] = useState([]);
+  const lireSans = () => rpc('pilotage_lots_sans', { p_assets: d.lots.map((l) => l.id) }).then((x) => setSans((x || []).filter((y) => y.nature === nature))).catch(() => setSans([]));
+  useEffect(() => { lireSans(); }, [d]);
+  const marquer = async (l, oui) => { try { await rpc('pilotage_lot_sans', { p_asset: l.id, p_nature: nature, p_sans: oui }); await lireSans(); } catch (e) { onErreur(e.message); } };
+  const nbLot = (l) => l.equipements.filter((e) => e.nature === nature).length;
+  const estSans = (l) => sans.some((x) => x.asset_id === l.id);
+  const restants = d.lots.filter((l) => !nbLot(l) && !estSans(l));
+  const toutSans = d.lots.length > 0 && d.lots.every((l) => !nbLot(l) && estSans(l));
+  const aucunTxt = compteur ? 'Pas de compteur dans ce lot' : 'Aucun équipement dans ce lot';
+  const ajouterRecharger = async () => { await recharger(); await lireSans(); };
+  const agirLot = async (fn, args) => { await agir(fn, args); await lireSans(); };
   return <div style={{ borderTop: '1px solid var(--line)', padding: '8px 0' }}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <div><span style={{ color: regle(i) ? 'var(--teal)' : 'var(--amber)', fontWeight: 700 }}>{i.statut === 'ok' ? '✓' : i.statut === 'sans_objet' ? '–' : '○'}</span> <b>{i.libelle}</b>
         <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--blue)', background: 'var(--blue-bg)', borderRadius: 10, padding: '1px 8px' }}>Suivi back-office</span>
-        <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div></div>
+        <div className="muted" style={{ fontSize: 12 }}>{i.aide} Pour chaque lot : ajouter autant {compteur ? 'de compteurs' : 'd’équipements'} que nécessaire, ou indiquer qu’il n’y en a pas.</div></div>
       <div className="row">
         {i.repondu ? <><span className="muted" style={{ fontSize: 12 }}>{i.statut === 'sans_objet' ? (compteur ? 'Pas de compteurs divisionnaires' : 'Aucun équipement à entretenir') : 'Validé'} ({i.par}, {date(i.le)})</span>
           <button className="lien" onClick={() => repondre(i, null)}>Revenir</button></>
-          : <><button className="btn" disabled={!total} onClick={() => repondre(i, 'ok')}>Valider la saisie</button>
-            <button className="btn gris" onClick={() => repondre(i, 'sans_objet')}>{compteur ? 'Pas de compteurs divisionnaires' : 'Aucun équipement'}</button></>}
+          : <><button className="btn" disabled={restants.length > 0} title={restants.length ? `${restants.length} lot(s) sans réponse` : ''}
+              onClick={() => repondre(i, toutSans ? 'sans_objet' : 'ok')}>Valider la saisie{restants.length ? ` (${restants.length} lot${restants.length > 1 ? 's' : ''} à renseigner)` : ''}</button></>}
       </div>
     </div>
-    {i.statut !== 'sans_objet' && d.lots.map((l) => compteur
-      ? <div key={l.id} style={{ margin: '6px 0 6px 18px' }}><b style={{ fontSize: 13 }}>Lot {l.reference || l.id}</b><span className="muted" style={{ fontSize: 13 }}> · {l.adresse}</span>
-          <Propositions props={(d.propositions || []).filter((p) => p.asset_id === l.id && p.nature === 'compteur')} agir={agir} />
-          <Compteurs asset={l.id} compteurs={l.compteurs || []} typeDefaut="mandat" recharger={recharger} onErreur={onErreur} /></div>
-      : <Lot key={l.id} l={l} nature={nature} agir={agir} props={(d.propositions || []).filter((p) => p.asset_id === l.id)} />)}
+    {i.statut !== 'sans_objet' && d.lots.map((l) => <div key={l.id} style={{ margin: compteur ? '8px 0 8px 18px' : '4px 0', paddingBottom: 6, borderBottom: '1px dashed var(--line)' }}>
+      {estSans(l) && !nbLot(l)
+        ? <div className="row" style={{ fontSize: 13, gap: 8, marginLeft: compteur ? 0 : 18 }}><b>Lot {l.reference || l.id}</b><span className="muted">· {l.adresse}</span>
+            <span className="etq ok">✓ {aucunTxt}</span><button className="lien" onClick={() => marquer(l, false)}>Annuler</button></div>
+        : <>
+          {compteur
+            ? <><b style={{ fontSize: 13 }}>Lot {l.reference || l.id}</b><span className="muted" style={{ fontSize: 13 }}> · {l.adresse}</span>
+                <Propositions props={(d.propositions || []).filter((p) => p.asset_id === l.id && p.nature === 'compteur')} agir={agirLot} />
+                <Compteurs asset={l.id} compteurs={l.compteurs || []} typeDefaut="mandat" recharger={ajouterRecharger} onErreur={onErreur} /></>
+            : <Lot l={l} nature={nature} agir={agirLot} props={(d.propositions || []).filter((p) => p.asset_id === l.id)} />}
+          {!nbLot(l) && <button className="btn gris" style={{ marginLeft: compteur ? 0 : 18, marginTop: 4 }} onClick={() => marquer(l, true)}>{aucunTxt}</button>}
+        </>}
+    </div>)}
   </div>;
 }
 
@@ -274,7 +293,7 @@ function Lot({ l, nature, agir, choix, titre, props }) {
     </div>)}
     <div className="row" style={{ gap: 6, marginTop: 4 }}>
       <select value={f.libelle} onChange={(e) => setF({ ...f, libelle: e.target.value })} aria-label="Équipement">
-        <option value="">{nature === 'equipement' ? 'Ajouter un équipement…' : 'Ajouter un compteur…'}</option>
+        <option value="">{liste.length ? (nature === 'equipement' ? '+ Ajouter un autre équipement…' : '+ Ajouter un autre compteur…') : (nature === 'equipement' ? '+ Ajouter un équipement…' : '+ Ajouter un compteur…')}</option>
         {(choix || (nature === 'equipement' ? EQUIPEMENTS : COMPTEURS)).map((x) => <option key={x} value={x}>{x}</option>)}<option value="autre">Autre…</option></select>
       {f.libelle === 'autre' && <input placeholder="Lequel ?" value={f.autre} onChange={(e) => setF({ ...f, autre: e.target.value })} style={{ width: 140 }} />}
       {nature === 'equipement' && f.libelle && <>
@@ -455,7 +474,7 @@ export function Compteurs({ asset, compteurs, bail, typeDefaut = 'periodique', r
     {compteurs.map((c) => <Compteur key={c.id} c={c} asset={asset} bail={bail} typeDefaut={typeDefaut} appel={appel} />)}
     <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
       <select value={nouveau.libelle} onChange={(e) => setNouveau({ ...nouveau, libelle: e.target.value })} aria-label="Compteur">
-        <option value="">Ajouter un compteur…</option>{COMPTEURS.map((x) => <option key={x} value={x}>{x}</option>)}<option value="autre">Autre…</option></select>
+        <option value="">{compteurs.length ? '+ Ajouter un autre compteur…' : '+ Ajouter un compteur…'}</option>{COMPTEURS.map((x) => <option key={x} value={x}>{x}</option>)}<option value="autre">Autre…</option></select>
       {nouveau.libelle && <>
         {nouveau.libelle === 'autre' && <input placeholder="Lequel ?" value={nouveau.autre} onChange={(e) => setNouveau({ ...nouveau, autre: e.target.value })} style={{ width: 120 }} />}
         <input placeholder="Situation (cave, palier, cuisine…)" value={nouveau.situation} onChange={(e) => setNouveau({ ...nouveau, situation: e.target.value })} style={{ width: 200 }} />
