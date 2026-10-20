@@ -263,11 +263,16 @@ export function preparer(code, ctx) {
   }
 }
 
+// SMS du pilotage (065-067) : « {nom} » est remplacé, pour chaque locataire, par son prénom et son nom repris de Rivage.
+// L'expéditeur « UDI GESTION » ne reçoit pas de réponse : l'adresse où répondre est toujours écrite dans le SMS.
+const REPONDRE = 'Réponse par mail à votregestionnaire@udi-immo.com (ne pas répondre à ce SMS).';
 export const SMS = {
-  assurance_sms: (ctx) => `UDI Gestion : votre attestation d'assurance pour ${ctx.bail?.adresse || 'votre logement'} expire le ${d(ctx.ob?.prochaine)}. Merci de nous l'envoyer par mail.`,
-  compteur_sms: (ctx) => `UDI Gestion : merci de nous envoyer le relevé et la photo de vos compteurs (${ctx.ob?.libelle || 'eau, chauffage'}) pour ${ctx.bail?.adresse || 'votre logement'}.`,
-  compteur_sms3: (ctx) => `UDI Gestion : dernier rappel, merci de nous envoyer sous 5 jours le relevé et la photo de vos compteurs pour ${ctx.bail?.adresse || 'votre logement'}. A défaut, un relevé sur place sera organisé.`,
+  assurance_sms: (ctx) => `Bonjour {nom}, votre attestation d'assurance pour ${ctx.bail?.adresse || 'votre logement'} expire le ${d(ctx.ob?.prochaine)}. Merci de nous envoyer la nouvelle. ${REPONDRE} UDI Gestion`,
+  compteur_sms: (ctx) => `Bonjour {nom}, merci de nous envoyer le relevé et la photo de vos compteurs (${ctx.ob?.libelle || 'eau, chauffage'}) pour ${ctx.bail?.adresse || 'votre logement'}. ${REPONDRE} UDI Gestion`,
+  compteur_sms3: (ctx) => `Bonjour {nom}, dernier rappel : merci de nous envoyer sous 5 jours le relevé et la photo de vos compteurs pour ${ctx.bail?.adresse || 'votre logement'}. À défaut, un relevé sur place sera organisé. ${REPONDRE} UDI Gestion`,
 };
+// Nom affiché dans un SMS : sans la civilité enregistrée dans Rivage (mr, mrs, M., Mme…)
+export const nomSms = (nom) => (nom || '').replace(/^\s*(mr|mrs|ms|miss|m\.|mme|mlle|monsieur|madame|mademoiselle)\s+/i, '').trim();
 
 // Brouillon Gmail dans la boîte de l'utilisateur connecté (authuser = son adresse)
 export function lienGmail(m, moiEmail) {

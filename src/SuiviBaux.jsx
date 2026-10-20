@@ -4,7 +4,7 @@ import { supabase, rpc } from './supabase.js';
 import { ResumeIA, Tuiles, Filtres } from './App.jsx';
 import { Compteurs } from './SuiviMandat.jsx';
 import { Circuit } from './Circuit.jsx';
-import { preparer, SMS, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
+import { preparer, SMS, nomSms, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const auj = () => new Date().toISOString().slice(0, 10);
@@ -154,7 +154,7 @@ export function DossierBail({ b, peut, moi, apres }) {
         {a.ech && ['fin_auto', 'verifier_contrat'].includes(ech.action) && <button className="btn" onClick={() => etapeFaite(ech.cle, 'vu', 'Vu')}>C’est noté</button>}
         {a.ob && a.ob.a_faire.modele && !['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <button className="btn plein" onClick={() => ouvrirMail(a.ob.a_faire.modele, { ob: a.ob }, { cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle })}>
           {a.ob.a_faire.canal === 'lrar' ? 'Préparer le recommandé' : 'Préparer le mail'}</button>}
-        {a.ob && ['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <SmsRivage texte={SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} tels={(d.contacts?.locataires || []).map((l) => l.telephone).filter(Boolean)}
+        {a.ob && ['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <SmsRivage texte={SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} tels={(d.contacts?.locataires || []).map((l) => l.telephone).filter(Boolean)} noms={(d.contacts?.locataires || []).filter((l) => l.telephone).map((l) => nomSms(l.nom))}
           envoi={{ bail: b.bail_id, cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle }} apres={async () => { await charger(); apres(); }}
           fait={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), 'SMS envoyé au locataire')} />}
         {a.ob && <button className="btn" onClick={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), a.ob.a_faire.libelle)}>Marquer fait</button>}
@@ -196,9 +196,9 @@ export function DossierBail({ b, peut, moi, apres }) {
   </>;
 }
 
-// SMS au locataire (065, 066) : envoi direct par le pilotage (Zapier → Twilio, expéditeur UDIGESTION) au numéro Rivage du locataire,
+// SMS au locataire (065, 066) : envoi direct par le pilotage (Zapier → Twilio, expéditeur UDI GESTION) au numéro Rivage du locataire,
 // texte modifiable avant l'envoi. À défaut, copie du texte pour un envoi depuis le téléphone de l'agence.
-export function SmsRivage({ texte, fait, tels = [], envoi, apres }) {
+export function SmsRivage({ texte, fait, tels = [], noms = [], envoi, apres }) {
   const [t, setT] = useState(texte || '');
   const [etat, setEtat] = useState({ charge: false, err: '', ok: '' });
   const [vu, setVu] = useState(false);
@@ -216,10 +216,11 @@ export function SmsRivage({ texte, fait, tels = [], envoi, apres }) {
   };
   return <div style={{ width: '100%' }}>
     <textarea rows={3} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={t} onChange={(e) => setT(e.target.value)} />
+    {t.includes('{nom}') && <div className="muted" style={{ fontSize: 12 }}>« {'{nom}'} » sera remplacé par le nom de chaque locataire{noms.length ? ` : ${noms.join(', ')}` : ''}.</div>}
     <div className="muted" style={{ fontSize: 12 }}>{t.length} caractères{t.length > 160 ? ` · ${Math.ceil(t.length / 153)} SMS facturés` : ''} · destinataire : {tels.length ? tels.join(', ') : 'aucun numéro du locataire dans Rivage'}</div>
     <div className="row" style={{ marginTop: 4 }}>
-      {envoi && tels.length > 0 && <button className="btn plein" disabled={etat.charge || !t.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer le SMS (UDIGESTION)'}</button>}
-      <button className="btn" onClick={() => { navigator.clipboard?.writeText(t); setVu(true); }}>Copier le texte</button>
+      {envoi && tels.length > 0 && <button className="btn plein" disabled={etat.charge || !t.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer le SMS (UDI GESTION)'}</button>}
+      <button className="btn" onClick={() => { navigator.clipboard?.writeText(t.split('{nom}').join(noms[0] || '')); setVu(true); }}>Copier le texte</button>
       {vu && <button className="btn" onClick={fait}>Envoyé depuis un téléphone</button>}
     </div>
     {etat.err && <div className="err">{etat.err}</div>}

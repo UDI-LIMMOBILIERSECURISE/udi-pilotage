@@ -1,4 +1,4 @@
-// Envoi d'un SMS au locataire depuis le pilotage (066) : Zapier (webhook) → Twilio « Send SMS », expéditeur UDIGESTION.
+// Envoi d'un SMS au locataire depuis le pilotage (066, 067) : Zapier (webhook) → Twilio « Send SMS », expéditeur UDI GESTION.
 // Droits, numéros (toujours ceux du locataire dans Rivage) et trace : pilotage_sms_preparer, appelé avec la session de l'utilisateur.
 // L'adresse du webhook Zapier est un secret de la fonction : ZAPIER_SMS_WEBHOOK.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
@@ -41,11 +41,12 @@ Deno.serve(async (req) => {
   if (ep) return rep(400, { error: ep.message })
 
   const resultats: { telephone: string; ok: boolean; erreur?: string }[] = []
-  for (const e of envois as { id: number; telephone: string; nom: string }[]) {
+  // Texte personnalisé par locataire (067) : « {nom} » remplacé en base ; repli sur le texte saisi si la base est antérieure à 067
+  for (const e of envois as { id: number; telephone: string; nom: string; texte?: string }[]) {
     let ok = false, erreur: string | null = null
     try {
       const r = await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: e.telephone, message: (c.texte || '').trim(), nom: e.nom, bail: c.bail, envoi: e.id }) })
+        body: JSON.stringify({ to: e.telephone, message: (e.texte || (c.texte || '').split('{nom}').join(e.nom || '')).trim(), nom: e.nom, bail: c.bail, envoi: e.id }) })
       ok = r.ok
       if (!r.ok) erreur = `Zapier HTTP ${r.status}`
     } catch (x) { erreur = x instanceof Error ? x.message : String(x) }
