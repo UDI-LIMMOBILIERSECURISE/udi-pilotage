@@ -36,13 +36,13 @@ function Connexion() {
   const go = async (e) => {
     e.preventDefault(); setBusy(true); setErr('');
     const { error } = await supabase.auth.signInWithPassword({ email, password: mdp });
-    if (error) setErr('Connexion refusée : vérifiez l’e-mail et le mot de passe (les mêmes que sur UDIGESTION).');
+    if (error) setErr('Connexion refusée : vérifiez l’e-mail et le mot de passe (les mêmes que sur UDI GESTION).');
     setBusy(false);
   };
   return (
     <form className="card login" onSubmit={go}>
       <h1>Pilotage UDI Gestion</h1>
-      <p className="sub">Connectez-vous avec votre compte UDIGESTION.</p>
+      <p className="sub">Connectez-vous avec votre compte UDI GESTION.</p>
       <label className="muted" htmlFor="em">E-mail</label>
       <input id="em" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
       <label className="muted" htmlFor="pw">Mot de passe</label>
@@ -633,7 +633,7 @@ function Equipe({ moi }) {
       <p className="sub">Chaque membre ne voit que les alertes des mandats qui lui sont attribués. Romain (superviseur) voit en plus les journées de toute l’équipe et les commissions.</p>
       {err && <div className="banner">{err}</div>}
       <form className="form card" onSubmit={ajouter}>
-        <label>E-mail du compte UDIGESTION<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></label>
+        <label>E-mail du compte UDI GESTION<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></label>
         <label>Prénom<input value={f.prenom} onChange={(e) => setF({ ...f, prenom: e.target.value })} required /></label>
         <label>Rôle<select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{Object.entries(ROLES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
         <button className="btn plein" type="submit">Ajouter</button>

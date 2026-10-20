@@ -1,4 +1,4 @@
-// Envoi d'un SMS au locataire depuis le pilotage (066) : Zapier (webhook) → Twilio « Send SMS », expéditeur UDIGESTION.
+// Envoi d'un SMS au locataire depuis le pilotage (066) : Zapier (webhook) → Twilio « Send SMS », expéditeur UDI GESTION.
 // Droits, numéros (toujours ceux du locataire dans Rivage) et trace : pilotage_sms_preparer, appelé avec la session de l'utilisateur.
 // L'adresse du webhook Zapier est un secret de la fonction : ZAPIER_SMS_WEBHOOK.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'

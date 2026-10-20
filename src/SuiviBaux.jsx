@@ -195,7 +195,7 @@ export function DossierBail({ b, peut, moi, apres }) {
   </>;
 }
 
-// SMS au locataire (065, 066) : envoi direct par le pilotage (Zapier → Twilio, expéditeur UDIGESTION) au numéro Rivage du locataire,
+// SMS au locataire (065, 066) : envoi direct par le pilotage (Zapier → Twilio, expéditeur UDI GESTION) au numéro Rivage du locataire,
 // texte modifiable avant l'envoi. À défaut, copie du texte pour un envoi depuis le téléphone de l'agence.
 export function SmsRivage({ texte, fait, tels = [], envoi, apres }) {
   const [t, setT] = useState(texte || '');
@@ -217,7 +217,7 @@ export function SmsRivage({ texte, fait, tels = [], envoi, apres }) {
     <textarea rows={3} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={t} onChange={(e) => setT(e.target.value)} />
     <div className="muted" style={{ fontSize: 12 }}>{t.length} caractères{t.length > 160 ? ` · ${Math.ceil(t.length / 153)} SMS facturés` : ''} · destinataire : {tels.length ? tels.join(', ') : 'aucun numéro du locataire dans Rivage'}</div>
     <div className="row" style={{ marginTop: 4 }}>
-      {envoi && tels.length > 0 && <button className="btn plein" disabled={etat.charge || !t.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer le SMS (UDIGESTION)'}</button>}
+      {envoi && tels.length > 0 && <button className="btn plein" disabled={etat.charge || !t.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer le SMS (UDI GESTION)'}</button>}
       <button className="btn" onClick={() => { navigator.clipboard?.writeText(t); setVu(true); }}>Copier le texte</button>
       {vu && <button className="btn" onClick={fait}>Envoyé depuis un téléphone</button>}
     </div>
