@@ -932,6 +932,8 @@ function SuiviReversement({ s }) {
   const [suivi, setSuivi] = useState(s.suivi || {});
   const [mail, setMail] = useState(null);
   const [err, setErr] = useState('');
+  const [iban, setIban] = useState(null);
+  useEffect(() => { rpc('pilotage_iban_agence').then(setIban).catch(() => setIban(null)); }, []);
   useEffect(() => { setSuivi(s.suivi || {}); setMail(null); setErr(''); }, [s.bail_id]);
   const maj = async (champ, valeur) => {
     setErr('');
@@ -944,7 +946,7 @@ function SuiviReversement({ s }) {
     setErr('');
     try {
       const c = await rpc('pilotage_contacts_bail', { p_bail: s.bail_id });
-      const m = preparer(code, { bail: { adresse: c.adresse || s.adresse }, contacts: c, moi,
+      const m = preparer(code, { bail: { adresse: c.adresse || s.adresse }, contacts: c, moi, iban,
         dg: { depot: s.depot, loyer_hc: s.loyer_hc, sortie, limite_1_mois: plusMoisDG(sortie, 1), limite_2_mois: plusMoisDG(sortie, 2), demande_le: suivi.demande_le } });
       if (m) setMail({ m, champ });
     } catch (e) { setErr(e.message); }
