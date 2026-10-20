@@ -3,6 +3,9 @@
 // qui relit, corrige et envoie lui-même. Les courriers recommandés sont à copier dans l'outil d'envoi (Rivage ou LRAR en ligne).
 
 const d = (x) => (x ? new Date(x).toLocaleDateString('fr-FR') : '…');
+// Dates calculées (jours ou mois ajoutés), au format AAAA-MM-JJ
+const plusJours = (x, n) => { if (!x) return null; const t = new Date(x); t.setDate(t.getDate() + n); return t.toISOString().slice(0, 10); };
+const plusMois = (x, n) => { if (!x) return null; const t = new Date(x); t.setMonth(t.getMonth() + n); return t.toISOString().slice(0, 10); };
 const eur = (n) => (n == null ? '…' : Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €');
 
 export const TYPES_BAIL = {
@@ -152,8 +155,59 @@ export function preparer(code, ctx) {
       return L({ ...versBai, objet: `Attestation d'assurance propriétaire non occupant — ${adr}`, corps: `${salutation(nomsBai)}\n\nVotre attestation d'assurance propriétaire non occupant (PNO) pour ${adr} arrive à échéance le ${d(ob.prochaine)}. Pourriez-vous nous adresser la nouvelle attestation dès que vous l'aurez reçue de votre assureur ?` });
     case 'pno_2':
       return L({ ...versBai, objet: `Relance : attestation PNO — ${adr}`, corps: `${salutation(nomsBai)}\n\nSauf erreur de notre part, nous n'avons pas reçu votre nouvelle attestation d'assurance propriétaire non occupant pour ${adr}, attendue pour le ${d(ob.prochaine)}.\n\nPour un lot en copropriété, cette assurance de responsabilité civile est obligatoire ; elle vous protège aussi en cas de sinistre pendant une période de vacance. Merci de nous la transmettre rapidement.` });
-    case 'mandat_echeance':
-      return L({ ...versBai, objet: `Votre mandat de gestion — échéance du ${d(ob.prochaine)}`, corps: `${salutation(nomsBai)}\n\nLe mandat de gestion que vous nous avez confié${ctx.mandat?.reference ? ` (n° ${ctx.mandat.reference})` : ''} arrive au terme de sa période en cours le ${d(ob.prochaine)}.\n\nSans démarche de votre part, il sera reconduit tacitement${ctx.mandat?.duree_reconduction ? ` pour ${ctx.mandat.duree_reconduction} an(s)` : ''}, aux mêmes conditions. Si vous ne souhaitez pas le reconduire, il vous suffit de nous en informer avant cette date, dans les formes prévues au mandat.\n\nNous restons bien entendu à votre disposition pour faire le point sur la gestion de votre bien.` });
+    // Loi Chatel (art. L215-1 du code de la consommation) : mail dédié, envoyé entre 3 mois et 1 mois avant la date limite de
+    // non-reconduction, qui figure dans un encadré apparent. Mandat UDI : préavis de 3 mois par LRAR, date limite = échéance - 3 mois.
+    case 'mandat_echeance': {
+      const preavis = ctx.mandat?.preavis_mois || 3;
+      const limite = plusMois(ob.prochaine, -preavis);
+      const auj = new Date().toISOString().slice(0, 10);
+      const passee = limite && limite < auj;
+      const tard = limite && !passee && limite < plusJours(auj, 30);
+      const ref = ctx.mandat?.reference ? ` n° ${ctx.mandat.reference}` : '';
+      const cadre = '==================================================';
+      return L({ ...versBai, objet: `Votre mandat de gestion${ref} — possibilité de ne pas le reconduire`, corps: `${salutation(nomsBai)}\n\nLe mandat de gestion${ref} que vous nous avez confié arrive au terme de sa période en cours le ${d(ob.prochaine)}. Il comporte une clause de reconduction tacite : sans démarche de votre part, il sera reconduit${ctx.mandat?.duree_reconduction ? ` pour ${ctx.mandat.duree_reconduction} an(s)` : ''}, aux mêmes conditions.\n\nVous pouvez refuser cette reconduction.\n\n${cadre}\nDATE LIMITE POUR REFUSER LA RECONDUCTION : ${d(limite)}\n${cadre}\n\nPour cela, il vous suffit de nous en informer avant cette date par lettre recommandée avec demande d'avis de réception, conformément au préavis de ${preavis} mois prévu au mandat.${passee ? '\n\nCette information vous parvenant après la date limite, vous pourrez, si le mandat est reconduit, y mettre fin gratuitement à tout moment.' : tard ? '\n\nCette information vous parvenant moins d\'un mois avant la date limite, vous pourrez, si le mandat est reconduit, y mettre fin gratuitement à tout moment.' : ''}\n\nCette information vous est adressée en application de l'article L. 215-1 du code de la consommation.\n\nNous restons à votre disposition pour faire le point sur la gestion de votre bien.` });
+    }
+
+    // ----- Assurance : accord du bailleur pour souscrire à la place du locataire (J+10) -----
+    case 'assurance_souscription': {
+      const md = plusJours(ob.prochaine, 1); const fin = plusJours(ob.prochaine, 35);
+      if (commercial) return L({ ...versBai, objet: `Assurance de votre preneur : suite à donner — ${adr}`, corps: `${salutation(nomsBai)}\n\nMalgré notre mise en demeure du ${d(md)}, ${civil(nomsLoc)} ne nous a toujours pas justifié de l'assurance des locaux du ${adr}, que le bail lui impose.\n\nSi rien n'est transmis d'ici le ${d(fin)}, vous pourrez, si le bail comporte une clause résolutoire visant ce manquement, faire délivrer un commandement par commissaire de justice. Souhaitez-vous que nous préparions cette démarche ?` });
+      return L({ ...versBai, objet: `Assurance de votre locataire : votre accord pour souscrire à sa place — ${adr}`, corps: `${salutation(nomsBai)}\n\nMalgré notre mise en demeure du ${d(md)}, ${civil(nomsLoc)} ${nomsLoc.length > 1 ? 'ne nous ont' : 'ne nous a'} toujours pas transmis d'attestation d'assurance pour le logement du ${adr}. Le délai d'un mois laissé par la mise en demeure expire vers le ${d(fin)}.\n\nSans justificatif à cette date, deux voies s'offrent à vous :\n- souscrire une assurance pour son compte et lui en refacturer le coût, réparti sur les loyers (article 7 g de la loi du 6 juillet 1989). Ce choix vaut renonciation à la clause résolutoire pour défaut d'assurance ;\n- faire délivrer un commandement par commissaire de justice visant la clause résolutoire du bail.\n\nAcceptez-vous que nous souscrivions l'assurance pour votre compte si nécessaire ? Merci de nous répondre avant le ${d(fin)}.` });
+    }
+
+    // ----- Permis de louer (mail au bailleur) -----
+    case 'permis_choix':
+      return L({ ...versBai, objet: `Permis de louer : votre accord pour la demande d'autorisation — ${adr}`, corps: `${salutation(nomsBai)}\n\nVotre bien situé ${adr} se trouve dans un secteur où la commune impose une autorisation préalable de mise en location (« permis de louer »). Chaque nouvelle location doit être autorisée par la mairie avant la signature du bail.\n\nLa mairie dispose d'un mois à compter du dépôt du dossier complet pour se prononcer ; sans réponse, l'autorisation est acquise. Elle peut subordonner son accord à des travaux. Louer sans autorisation expose le propriétaire à une amende pouvant atteindre 5 000 €, et 15 000 € en cas de location malgré un refus.\n\nDeux possibilités :\n1. Nous préparons et déposons la demande pour vous (formulaire Cerfa n° 15652 et diagnostics), puis en assurons le suivi jusqu'à la décision. Cette prestation est facturée 90 € TTC, conformément à notre barème.\n2. Vous effectuez la démarche vous-même et nous transmettez le récépissé de dépôt, puis l'autorisation. Nous ne pourrons pas signer de bail sans elle.\n\nMerci de nous indiquer votre choix en réponse à ce mail.` });
+    case 'permis_choix_relance':
+      return L({ ...versBai, objet: `Relance : permis de louer — ${adr}`, corps: `${salutation(nomsBai)}\n\nJe reviens vers vous au sujet du permis de louer de votre bien situé ${adr}. Pour pouvoir le remettre en location, il nous faut savoir qui dépose la demande en mairie : nous-mêmes (90 € TTC, conformément à notre barème) ou vous.\n\nPourriez-vous nous indiquer votre choix en réponse à ce mail ? Tant que l'autorisation n'est pas acquise, aucun bail ne peut être signé.` });
+    case 'permis_recepisse':
+      return L({ ...versBai, objet: `Permis de louer : récépissé de votre demande — ${adr}`, corps: `${salutation(nomsBai)}\n\nVous nous avez indiqué déposer vous-même la demande d'autorisation de mise en location de votre bien situé ${adr}. Pourriez-vous nous transmettre le récépissé de dépôt délivré par la mairie, avec la date de dépôt ?\n\nNous suivrons ainsi le délai de réponse d'un mois. Pour rappel, aucun bail ne peut être signé avant que l'autorisation soit acquise.` });
+    case 'permis_depose':
+      return L({ ...versBai, objet: `Permis de louer : demande déposée — ${adr}`, corps: `${salutation(nomsBai)}\n\nLa demande d'autorisation préalable de mise en location de votre bien situé ${adr} a été déposée en mairie le ${d(plusJours(ob.prochaine, -30))}.\n\nLa mairie dispose d'un mois pour se prononcer ; sans réponse dans ce délai, l'autorisation sera acquise. Par prudence, nous attendrons le ${d(plusJours(ob.prochaine, 5))} et l'attestation de la mairie avant de signer le bail. Nous vous tiendrons informé(e) de la décision.` });
+    case 'permis_accord':
+      return L({ ...versBai, objet: `Permis de louer accordé — ${adr}`, corps: `${salutation(nomsBai)}\n\nL'autorisation de mise en location de votre bien situé ${adr} est acquise depuis le ${d(plusMois(ob.prochaine, -24))}. Nous pouvons donc signer le bail.\n\nCette autorisation devient caduque si le bien n'est pas loué dans les deux ans, soit le ${d(ob.prochaine)} : nous en assurons le suivi.` });
+    case 'permis_refus':
+      return L({ ...versBai, objet: `Permis de louer refusé — ${adr}`, corps: `${salutation(nomsBai)}\n\nLa mairie a refusé l'autorisation de mise en location de votre bien situé ${adr}, pour le motif suivant : [motif indiqué par la mairie].\n\nLe bien ne peut pas être loué en l'état. Nous vous proposons d'en parler pour définir les travaux nécessaires et déposer une nouvelle demande.` });
+
+    // ----- Départ d'un colocataire, fin d'engagement d'un garant (alertes de Ma journée) -----
+    // ctx.coloc = { nom, sortie } ; solidarité jusqu'à l'arrivée d'un remplaçant, au plus tard 6 mois après la date d'effet du congé (art. 8-1)
+    case 'coloc_sortant': {
+      // Le nom de l'alerte est « nom prénom », celui des contacts « civilité prénom nom » : comparaison mot à mot
+      const mots = (ctx.coloc?.nom || '').toLowerCase().split(/\s+/).filter(Boolean);
+      const restants = nomsLoc.filter((n) => !mots.length || !mots.every((w) => n.toLowerCase().includes(w)));
+      return L({ ...versLoc, objet: `Départ de ${ctx.coloc?.nom || 'un colocataire'} — ${adr}`, corps: `Bonjour,\n\nNous avons enregistré le départ de ${ctx.coloc?.nom || '[colocataire sortant]'} du logement situé ${adr}, effectif le ${d(ctx.coloc?.sortie)}.${restants.length ? ` Le bail continue avec ${civil(restants)}.` : ''}\n\nSauf remplacement par un nouveau colocataire inscrit au bail, ${ctx.coloc?.nom || 'le colocataire sortant'} et sa caution restent solidairement tenus du paiement du loyer et des charges jusqu'au ${d(plusMois(ctx.coloc?.sortie, 6))}, soit six mois après la date d'effet de son congé.\n\nPour toute question, répondez à ce mail.` });
+    }
+    case 'coloc_bailleur':
+      return L({ ...versBai, objet: `Départ d'un colocataire — ${adr}`, corps: `${salutation(nomsBai)}\n\nPour information, ${ctx.coloc?.nom || 'l\'un des colocataires'} quitte le logement situé ${adr} le ${d(ctx.coloc?.sortie)}. Le bail continue avec les autres colocataires.\n\nSauf arrivée d'un remplaçant inscrit au bail, le colocataire sortant et sa caution restent solidairement tenus jusqu'au ${d(plusMois(ctx.coloc?.sortie, 6))}. Nous vous tiendrons informé(e) si un nouveau colocataire est proposé.` });
+    case 'garant_fin':
+      return L({ ...versBai, objet: `Fin de l'engagement de caution — ${civil(nomsLoc)} — ${adr}`, corps: `${salutation(nomsBai)}\n\nL'engagement de caution [nom du garant] pour le bail de ${civil(nomsLoc)}, logement situé ${adr}, a pris fin le ${d(ctx.garant?.fin)}. Le bail n'est plus garanti par cette caution.\n\nNous vous proposons [une nouvelle caution / la garantie loyers impayés à 2,8 % des sommes quittancées] pour couvrir la suite du bail. Répondez à ce mail pour nous indiquer votre choix.` });
+
+    // ----- Impayés (mail au bailleur, depuis le dossier impayé) -----
+    // ctx.impaye = { declaration_le, organisme }
+    case 'gli_declaree':
+      return L({ ...versBai, objet: `Impayé déclaré à votre assurance loyers impayés — ${adr}`, corps: `${salutation(nomsBai)}\n\nL'impayé de ${civil(nomsLoc)}, pour votre bien situé ${adr}, a été déclaré le ${d(ctx.impaye?.declaration_le)} à votre assurance loyers impayés${ctx.impaye?.organisme ? `, ${ctx.impaye.organisme}` : ''}.\n\nLa suite est désormais encadrée par l'assureur : il instruit le dossier, puis verse les indemnités prévues par le contrat. Nous vous reverserons chaque indemnisation dès sa réception, et elle apparaîtra dans votre compte rendu de gestion.\n\nNous vous tiendrons informé(e) de chaque étape de la procédure.` });
+    case 'impaye_regularise':
+      return L({ ...versBai, objet: `Votre locataire a régularisé sa situation — ${adr}`, corps: `${salutation(nomsBai)}\n\nBonne nouvelle : ${civil(nomsLoc)} a réglé l'intégralité des sommes dues pour votre bien situé ${adr}. Son compte est à jour à ce jour.${ctx.impaye?.declaration_le ? '\n\nUne déclaration était en cours auprès de votre assurance loyers impayés : nous l\'en informons et procédons, le cas échéant, au reversement des sommes perçues.' : ''}` });
     case 'entretien_lot':
       return L({ ...versBai, objet: `Entretien à prévoir — ${adr}`, corps: `${salutation(nomsBai)}\n\nLe lot ${ob.lot ? ob.lot + ' ' : ''}du ${adr} est actuellement vacant. L'entretien annuel de l'équipement suivant est à prévoir avant le ${d(ob.prochaine)} : ${(ob.libelle || 'équipement').replace(/ \(lot vacant\)$/, '').replace(/^Entretien /, '')}. Pendant la vacance, il est à votre charge.\n\nSouhaitez-vous que nous le commandions pour votre compte ? Nous vous transmettrons l'attestation d'intervention.` });
 

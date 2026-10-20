@@ -61,6 +61,11 @@ export function LotPermis({ l, agir, email, prenom, recharger }) {
     {p.detail && <div className="muted" style={{ fontSize: 12 }}>{p.detail}{p.source ? ' · source : ' + p.source : ''}</div>}
     {p.regime === 'inconnu' && <div className="muted" style={{ fontSize: 12 }}>La recherche automatique de la commune est lancée dans l’heure ; le résultat sera à confirmer par la gestion (onglet À louer).</div>}
     {(l.demandes || []).map((d) => <Demande key={d.id} l={l} d={d} agir={agir} email={email} prenom={prenom} />)}
+    {['autorisation', 'a_verifier'].includes(p.regime) && !enCours && <div className="row" style={{ marginTop: 4 }}>
+      <span className="muted">{l.choix === 'agence' ? 'Dépôt par l’agence (90 € TTC à facturer)' : l.choix === 'bailleur' ? 'Dépôt par le bailleur (récépissé à obtenir)' : l.choix_a_demander ? 'Choix du bailleur à obtenir :' : 'Qui dépose ?'}</span>
+      {l.choix !== 'agence' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_agence', p_le: null, p_numero: null, p_notes: null })}>L’agence dépose (90 € TTC)</button>}
+      {l.choix !== 'bailleur' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_bailleur', p_le: null, p_numero: null, p_notes: null })}>Le bailleur dépose</button>}
+    </div>}
     {soumis && !enCours && (depot.ouvert ? <div className="row" style={{ marginTop: 4 }}>
       <label className="muted">Déposée le <input type="date" value={depot.le} onChange={(e) => setDepot({ ...depot, le: e.target.value })} /></label>
       <input placeholder="N° de dossier (facultatif)" value={depot.numero} onChange={(e) => setDepot({ ...depot, numero: e.target.value })} style={{ width: 170 }} />
@@ -85,13 +90,13 @@ function Demande({ l, d, agir, email, prenom }) {
       {d.close_le ? ` · close le ${date(d.close_le)}` : ''}</div>
     {d.reponse ? <div>{d.reponse === 'accord' ? `Accordée le ${date(d.reponse_le)}` : d.reponse === 'tacite' ? `Accord tacite le ${date(d.reponse_le)}` : `Refusée le ${date(d.reponse_le)}`}
       {d.reponse !== 'refus' && ` · caduc le ${date(new Date(new Date(d.reponse_le).setFullYear(new Date(d.reponse_le).getFullYear() + 2)))} sans bail signé`}</div>
-      : d.regime === 'autorisation' && <div className="muted">Sans réponse depuis {jours} jour(s){jours >= 30 ? ' : l’accord est tacite' : jours >= 21 ? ' : relancer la mairie' : ''}.</div>}
+      : d.regime === 'autorisation' && <div className="muted">Sans réponse depuis {jours} jour(s){jours >= 35 ? ' : l’accord est tacite (acquis à 30 jours), à constater' : jours >= 30 ? ' : accord acquis à 30 jours, mais une décision peut encore arriver par courrier : attendre 35 jours avant de signer' : jours >= 21 ? ' : relancer la mairie' : ''}.</div>}
     {d.reponse === 'tacite' && <div>{d.attestation_recue_le ? `Attestation reçue le ${date(d.attestation_recue_le)}` : d.attestation_demandee_le ? `Attestation demandée le ${date(d.attestation_demandee_le)}` : 'Attestation à demander à la mairie'}</div>}
     {!d.close_le && <div className="row" style={{ marginTop: 4 }}>
       {d.regime === 'autorisation' && !d.reponse && <>
         <select value={rep.action} onChange={(e) => setRep({ ...rep, action: e.target.value })} aria-label="Réponse de la mairie">
           <option value="">Réponse de la mairie…</option><option value="accord">Accordée</option><option value="refus">Refusée</option>
-          {jours >= 30 && <option value="tacite">Pas de réponse en un mois : accord tacite</option>}</select>
+          {jours >= 35 && <option value="tacite">Pas de réponse en un mois (+ 5 jours de marge) : accord tacite</option>}</select>
         {rep.action && rep.action !== 'tacite' && <input type="date" value={rep.le} onChange={(e) => setRep({ ...rep, le: e.target.value })} />}
         {rep.action && <button className="btn plein" onClick={() => act(rep.action, { le: rep.le })}>Enregistrer</button>}</>}
       {d.reponse === 'tacite' && !d.attestation_recue_le && <>

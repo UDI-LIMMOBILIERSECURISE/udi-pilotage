@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc, ecouterRivage } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
-import SuiviBaux from './SuiviBaux.jsx';
+import SuiviBaux, { EditeurMail } from './SuiviBaux.jsx';
+import { preparer } from './mails.js';
 import DossierMandat from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
 import MesDossiers from './Circuit.jsx';
@@ -180,6 +181,7 @@ function Journee({ moi }) {
                           {a.lien && <a className="btn" href={a.lien} target="_blank" rel="noopener">Voir dans Rivage</a>}
                           <button className="btn plein" onClick={() => traiter(a, true)}>Traité</button>
                         </div>
+                        {MAILS_ALERTE[a.regle] && a.objet_id && <MailAlerte a={a} />}
                       </div>
                     )}
                   </div>
@@ -197,6 +199,43 @@ function Journee({ moi }) {
       )}
     </>
   );
+}
+
+// Mails proposés depuis une alerte de Ma journée (053) : brouillon Gmail à relire, rien n'est envoyé seul.
+const MAILS_ALERTE = {
+  colocataire_sorti: [['coloc_sortant', 'Mail aux colocataires'], ['coloc_bailleur', 'Mail au bailleur']],
+  garant_sorti: [['garant_fin', 'Mail au bailleur']],
+};
+const dateTitre = (t) => { const x = (t || '').match(/(\d{2})\/(\d{2})\/(\d{4})/); return x ? `${x[3]}-${x[2]}-${x[1]}` : null; };
+
+function useMoiMail() {
+  const [moi, setMoi] = useState({ prenom: '', email: '' });
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setMoi((m) => ({ ...m, email: data?.session?.user?.email || '' })));
+    rpc('pilotage_moi').then((x) => setMoi((m) => ({ ...m, prenom: x?.prenom || '' }))).catch(() => {});
+  }, []);
+  return moi;
+}
+
+function MailAlerte({ a }) {
+  const moi = useMoiMail();
+  const [mail, setMail] = useState(null);
+  const [err, setErr] = useState('');
+  const ouvrir = async (code) => {
+    setErr('');
+    try {
+      const c = await rpc('pilotage_contacts_bail', { p_bail: a.objet_id });
+      const nom = a.regle === 'colocataire_sorti' ? ((a.titre || '').match(/colocataire : (.+) le \d{2}\//) || [])[1] : null;
+      const m = preparer(code, { bail: { adresse: c.adresse || a.dossier?.adresse }, contacts: c, moi,
+        coloc: { nom, sortie: dateTitre(a.titre) }, garant: { fin: dateTitre(a.titre) } });
+      if (m) setMail({ m });
+    } catch (e) { setErr(e.message); }
+  };
+  return <div style={{ marginTop: 8 }}>
+    <div className="row">{MAILS_ALERTE[a.regle].map(([code, lib]) => <button key={code} className="btn" onClick={() => ouvrir(code)}>{lib}</button>)}</div>
+    {err && <div className="err">{err}</div>}
+    {mail && <EditeurMail mail={mail} email={moi.email} fermer={() => setMail(null)} marquer={() => setMail(null)} peut={false} />}
+  </div>;
 }
 
 // ===== Mandats et commissions (direction, superviseur) =====
@@ -1066,11 +1105,35 @@ function DossierImpaye({ d, membres, peut, recharger }) {
       <label style={{ flex: 1 }}>Nouvelle action<input value={action} onChange={(e) => setAction(e.target.value)} placeholder="Ex. envoyer le décompte mensuel à l’assureur" /></label>
       <label>Pour le<input type="date" value={actionLe} onChange={(e) => setActionLe(e.target.value)} /></label>
       <button className="btn plein" onClick={ajouterAction}>Ajouter</button></div>}
+    {r && <MailsImpaye d={d} r={r} p={p} />}
     {r && <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={r.lien} target="_blank" rel="noreferrer">Ouvrir le bail dans Rivage</a></div>}
     <Commentaires id={d.id} peut={peut} recharger={recharger} />
   </>;
 }
 
+
+// Mails au bailleur proposés depuis le dossier impayé (053) : déclaration à la GLI, dette régularisée
+function MailsImpaye({ d, r, p }) {
+  const moi = useMoiMail();
+  const [mail, setMail] = useState(null);
+  const nomComplet = (x) => [civ(x.civilite), x.nom].filter(Boolean).join(' ');
+  const contacts = { bailleurs: (r.bailleurs || []).map((b) => ({ nom: nomComplet(b), email: b.email })), locataires: (r.locataires || []).map((l) => ({ nom: nomComplet(l), email: l.email })) };
+  const ouvrir = (code) => {
+    const m = preparer(code, { bail: { adresse: p.adresse }, contacts, moi, impaye: { declaration_le: d.declaration_le, organisme: ORGANISMES[d.organisme] || d.organisme } });
+    if (m) setMail({ m });
+  };
+  const declare = !!d.declaration_le && d.organisme && d.organisme !== 'aucun';
+  const solde = r.impaye != null && r.impaye <= 0;
+  if (!declare && !solde) return null;
+  return <div style={{ marginTop: 14 }}>
+    <h3>Mails au bailleur</h3>
+    <div className="row">
+      {declare && <button className="btn" onClick={() => ouvrir('gli_declaree')}>Impayé déclaré à l’assurance</button>}
+      {solde && <button className="btn" onClick={() => ouvrir('impaye_regularise')}>Dette régularisée</button>}
+    </div>
+    {mail && <EditeurMail mail={mail} email={moi.email} fermer={() => setMail(null)} marquer={() => setMail(null)} peut={false} />}
+  </div>;
+}
 
 function CarteImpaye({ x, couleur, sel, choisir }) {
   const p = parties(x);

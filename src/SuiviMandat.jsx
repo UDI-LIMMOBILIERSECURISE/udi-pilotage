@@ -325,7 +325,8 @@ function ClauseSimple({ i, repondre }) {
 const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE',
   entretien_immeuble: 'Entretien (immeuble)', ascenseur_ct: 'Contrôle technique de l’ascenseur', assurance_immeuble: 'Assurance de l’immeuble',
   permis_a_demander: 'Permis de louer à demander', permis_demande: 'Permis de louer : réponse de la mairie', permis_attestation: 'Attestation d’accord tacite',
-  permis_refus: 'Permis de louer refusé', permis_caducite: 'Validité du permis de louer', permis_declaration: 'Déclaration de mise en location', permis_absent: 'Bail signé sans permis de louer' };
+  permis_refus: 'Permis de louer refusé', permis_caducite: 'Validité du permis de louer', permis_declaration: 'Déclaration de mise en location', permis_absent: 'Bail signé sans permis de louer',
+  permis_depot_agence: 'Permis de louer : dépôt par l’agence', permis_depot_bailleur: 'Permis de louer : dépôt par le bailleur' };
 const CANAL_M = { mail_bailleur: 'Mail au bailleur', tache: 'Tâche', lrar: 'Recommandé', mail_locataire: 'Mail au locataire', sms_rivage: 'SMS (Rivage)' };
 const plusMois = (iso, n) => { const x = new Date(iso); x.setMonth(x.getMonth() + n); return x.toISOString().slice(0, 10); };
 
