@@ -785,12 +785,43 @@ function Suivis({ d, b, peut, agir }) {
       {o.nature === 'compteur' && <RelevesBail b={b} ob={o} peut={peut} agir={agir} />}
       {CATEG_JUSTIF[o.nature] && <div className="muted" style={{ fontSize: 12 }}>Justificatif à déposer dans Rivage, catégorie « {CATEG_JUSTIF[o.nature]} » : reconnu automatiquement (passage toutes les 30 minutes).</div>}
       {peut && <div className="row" style={{ marginTop: 6 }}>
-        <Realise ob={o} agir={agir} />
+        {o.nature === 'charges_regul' && o.actif ? <ControleRelevesRegul b={b} obs={obs} ob={o} agir={agir} /> : <Realise ob={o} agir={agir} />}
         <button className="btn gris" onClick={() => agir('pilotage_bail_obligation', { p_bail: b.bail_id, p_id: o.id, p_nature: o.nature, p_libelle: null, p_periodicite: o.periodicite_mois, p_prochaine: null, p_actif: !o.actif })}>{o.actif ? 'Arrêter ce suivi' : 'Réactiver'}</button>
       </div>}
     </details>)}
     {peut && (ajout ? <NouveauSuivi b={b} agir={agir} fini={() => setAjout(false)} /> : <button className="lien" onClick={() => setAjout(true)}>+ Ajouter un suivi (assurance, équipement, compteurs…)</button>)}
   </>;
+}
+
+// Garde-fou de la régularisation des charges : si le lot a des compteurs divisionnaires, chaque compteur doit avoir un relevé
+// à la dernière date fixe de relevé (tolérance 7 jours avant, pour un relevé fait dès le mail de prévenance).
+// Sans relevé, la régul ne peut être validée qu'en cochant explicitement qu'elle est faite sans relevé (estimation).
+const moinsMois = (x, n) => { const t = new Date(x); t.setMonth(t.getMonth() - n); return t.toISOString().slice(0, 10); };
+const moinsJours = (x, n) => { const t = new Date(x); t.setDate(t.getDate() - n); return t.toISOString().slice(0, 10); };
+function ControleRelevesRegul({ b, obs, ob, agir }) {
+  const [c, setC] = useState(null); const [err, setErr] = useState(''); const [force, setForce] = useState(false);
+  useEffect(() => { rpc('pilotage_bail_compteurs', { p_bail: b.bail_id }).then(setC).catch((e) => setErr(e.message)); }, [b.bail_id]);
+  if (err) return <><div className="err">Contrôle des relevés impossible : {err}</div><Realise ob={ob} agir={agir} /></>;
+  if (!c) return <span className="muted">Vérification des relevés de compteurs…</span>;
+  const compteurs = c.compteurs || [];
+  if (!compteurs.length) return <Realise ob={ob} agir={agir} />;
+  const auj0 = auj();
+  const suivi = obs.find((x) => x.nature === 'compteur' && x.actif);
+  // Dernière date fixe de relevé déjà atteinte : l'échéance du suivi si elle est passée, sinon celle d'avant
+  const derniereDate = suivi?.prochaine ? (suivi.prochaine <= auj0 ? suivi.prochaine : moinsMois(suivi.prochaine, suivi.periodicite_mois || 6)) : null;
+  const manquants = derniereDate
+    ? compteurs.filter((x) => !(x.releves || []).some((r) => r.le >= moinsJours(derniereDate, 7)))
+    : compteurs;
+  if (!manquants.length) return <><span className="muted" style={{ fontSize: 12 }}>Relevés du {date(derniereDate)} saisis pour tous les compteurs.</span><Realise ob={ob} agir={agir} /></>;
+  return <div style={{ width: '100%' }}>
+    <div className="err">
+      {suivi ? <>Relevé du {date(derniereDate)} manquant pour : {manquants.map((x) => x.libelle).join(', ')}.</>
+        : <>Le lot a des compteurs divisionnaires mais aucun suivi « Relevé des compteurs » n’est actif sur ce bail.</>}
+      {' '}La régularisation partirait sur une estimation : saisir d’abord les relevés dans le suivi des compteurs.
+    </div>
+    <label className="muted" style={{ fontSize: 12 }}><input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> Régularisation faite sans ces relevés, en connaissance de cause</label>
+    {force && <div style={{ marginTop: 4 }}><Realise ob={ob} agir={agir} /></div>}
+  </div>;
 }
 
 // Relevés des compteurs divisionnaires du lot, depuis le suivi du bail : saisie, consommation entre relevés, montant à refacturer.
