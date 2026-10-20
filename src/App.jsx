@@ -188,7 +188,8 @@ function Journee({ moi }) {
       {err && <div className="banner">{err}</div>}
       {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
       {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
-      {moi.role === 'direction' && cible === moi.user_id && <div className="info">Vous voyez ici les alertes des mandats attribués à vous et celles des mandats qui ne sont encore attribués à personne.</div>}
+      {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
+      {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}
       <div className="row" style={{ marginBottom: 14 }}>
         {[['toutes', 'Toutes']].concat(Object.entries(CAT)).map(([k, l]) => (
           <button key={k} className={'chip' + (cat === k ? ' on' : '')} onClick={() => setCat(k)}>{l}<span className="n">{k === 'toutes' ? ouvertes.length : ouvertes.filter((a) => a.categorie === k).length}</span></button>
@@ -263,6 +264,23 @@ const MAILS_ALERTE = {
   loyer_modifie: [['revision_bailleur', 'Mail au bailleur']],
 };
 const dateTitre = (t) => { const x = (t || '').match(/(\d{2})\/(\d{2})\/(\d{4})/); return x ? `${x[3]}-${x[2]}-${x[1]}` : null; };
+
+// Supervision (061) : charge de chaque membre de l'équipe, clic pour ouvrir sa journée
+function Supervision({ voir }) {
+  const [l, setL] = useState(null);
+  useEffect(() => { rpc('pilotage_supervision').then(setL).catch(() => setL([])); }, []);
+  if (!l || !l.length) return null;
+  const ROLE = { gestionnaire: 'Gestion', comptable: 'Comptabilité', negociateur: 'Commercial' };
+  return <section className="card" style={{ marginBottom: 16 }}>
+    <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Supervision de l’équipe</h2>
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>{l.map((m) => <button key={m.user_id} className="tuile" style={{ cursor: 'pointer', textAlign: 'left', borderColor: m.critiques ? 'var(--red)' : undefined }} onClick={() => voir(m.user_id)}>
+      <div className="muted">{ROLE[m.role] || m.role}</div>
+      <div style={{ fontWeight: 700, fontSize: 16 }}>{m.prenom}</div>
+      <div>{m.ouvertes} alerte{m.ouvertes > 1 ? 's' : ''}{m.critiques ? <span style={{ color: 'var(--red)', fontWeight: 700 }}> · {m.critiques} critique{m.critiques > 1 ? 's' : ''}</span> : ''}</div>
+      {m.plus_ancienne && <div className="muted">la plus ancienne depuis le {date(m.plus_ancienne)}</div>}
+    </button>)}</div>
+  </section>;
+}
 
 function useMoiMail() {
   const [moi, setMoi] = useState({ prenom: '', email: '' });
@@ -555,9 +573,12 @@ function RegleEditable({ g, r, apres, setErr }) {
     <tr style={{ cursor: 'pointer' }} onClick={() => setOuvert(!ouvert)}>
       <td><strong>{g.libelle}</strong><div className="muted">{g.explication}</div></td><td>{g.domaine}</td>
       <td><span className={'sev ' + g.gravite}>{SEV[g.gravite]}</span></td>
+      <td><select value={g.destinataire || 'gestion'} onClick={(e) => e.stopPropagation()} aria-label="Destinataire des alertes"
+        onChange={async (e) => { try { await rpc('pilotage_regle_destinataire', { p_cle: g.cle, p_destinataire: e.target.value }); apres(); } catch (x) { setErr(x.message); } }}>
+        <option value="gestion">Gestion</option><option value="compta">Comptabilité</option><option value="direction">Direction</option></select></td>
       <td className="muted" style={{ fontSize: 12 }}>{resume}</td><td>{g.ouvertes}</td>
       <td><label className="switch" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={g.actif} onChange={() => envoyer(!g.actif)} /> {g.actif ? 'Oui' : 'Non'}</label></td></tr>
-    {ouvert && <tr><td colSpan={6} style={{ background: 'var(--fond-2, rgba(0,0,0,0.03))' }}>
+    {ouvert && <tr><td colSpan={7} style={{ background: 'var(--fond-2, rgba(0,0,0,0.03))' }}>
       {delais.length > 0 && <div style={{ marginBottom: 8 }}>
         <div className="muted" style={{ marginBottom: 4 }}>Délais de la règle (pris en compte au contrôle suivant, toutes les 30 minutes)</div>
         {delais.map((p) => <DelaiRegle key={p.nom + p.valeur} cle={g.cle} p={p} apres={apres} setErr={setErr} />)}
@@ -586,7 +607,7 @@ function Regles() {
       <p className="sub">Contrôles exécutés automatiquement toutes les 30 minutes. Cliquer sur une règle pour régler ses délais et, pour les suivis de bail et de mandat, le rythme des relances. Les délais fixés par la loi (date limite d’un congé, restitution du dépôt de garantie…) ne sont pas modifiables. Une règle désactivée ne crée plus d’alerte.</p>
       {err && <div className="banner" onClick={() => setErr('')}>{err}</div>}
       <div className="table-wrap"><table>
-        <thead><tr><th>Règle</th><th>Domaine</th><th>Gravité</th><th>Délais</th><th>Alertes ouvertes</th><th>Active</th></tr></thead>
+        <thead><tr><th>Règle</th><th>Domaine</th><th>Gravité</th><th>Pour</th><th>Délais</th><th>Alertes ouvertes</th><th>Active</th></tr></thead>
         <tbody>{(r.regles || []).map((g) => <RegleEditable key={g.cle} g={g} r={r} apres={charger} setErr={setErr} />)}</tbody>
       </table></div>
     </>
