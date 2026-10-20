@@ -158,6 +158,7 @@ export function DossierBail({ b, peut, moi, apres }) {
           envoi={{ bail: b.bail_id, cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle }} apres={async () => { await charger(); apres(); }}
           fait={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), 'SMS envoyé au locataire')} />}
         {a.ob && <button className="btn" onClick={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), a.ob.a_faire.libelle)}>Marquer fait</button>}
+        {a.ob && a.ob.nature === 'assurance' && !['commercial', 'derogatoire', 'professionnel'].includes(ech.type) && <ChoixAssurance ob={a.ob} agir={agir} />}
         {a.ob && <Realise ob={a.ob} agir={agir} />}
       </div>}
     </div>)}
@@ -828,6 +829,16 @@ function NouveauSuivi({ b, nature: n0, agir, fini }) {
   </div>;
 }
 
+// Assurance (habitation) : choix du bailleur avant la mise en demeure, que la loi oblige à annoncer (art. 7 g)
+function ChoixAssurance({ ob, agir, lien }) {
+  const choisir = (c) => agir('pilotage_assurance_choix', { p_cle: ob.cle, p_choix: c });
+  const cls = lien ? 'lien' : 'btn';
+  return <>
+    {' '}<button className={cls} style={lien ? { marginLeft: 8 } : null} disabled={ob.choix === 'compte'} onClick={() => choisir('compte')}>Bailleur : souscription pour compte</button>
+    {' '}<button className={cls} style={lien ? { marginLeft: 8 } : null} disabled={ob.choix === 'commandement'} onClick={() => choisir('commandement')}>Bailleur : commandement</button>
+  </>;
+}
+
 // ----- Suivis récurrents -----
 function Suivis({ d, b, peut, agir }) {
   const [ajout, setAjout] = useState(false);
@@ -840,6 +851,7 @@ function Suivis({ d, b, peut, agir }) {
       <ol className="etapes">{(o.etapes || []).map((e) => <li key={e.ordre} className={e.fait_le ? 'fait' : e.du ? 'retard' : ''}>
         <span className="puce">{e.fait_le ? '✓' : ''}</span><span>{e.libelle}<span className="muted"> · {date(e.date)}{e.fait_le ? ' · fait le ' + date(e.fait_le) : ''}</span>
         {peut && e.fait_le && <button className="lien" style={{ marginLeft: 8 }} onClick={() => agir('pilotage_suivi_etape', { p_cle: o.cle, p_etape: String(e.ordre), p_detail: null, p_annuler: true })}>Annuler</button>}</span></li>)}</ol>
+      {o.nature === 'assurance' && <div className="muted">Choix du bailleur si l’attestation manque : {o.choix === 'commandement' ? 'commandement par commissaire de justice' : o.choix === 'compte' ? 'souscription pour compte du locataire' : 'non donné (souscription pour compte par défaut)'}{peut && o.actif && <ChoixAssurance ob={o} agir={agir} lien />}</div>}
       {o.derniere_le && <div className="muted">Dernière réalisation : {date(o.derniere_le)}</div>}
       {o.nature === 'compteur' && <RelevesBail b={b} ob={o} peut={peut} agir={agir} />}
       {CATEG_JUSTIF[o.nature] && <div className="muted" style={{ fontSize: 12 }}>Justificatif à déposer dans Rivage, catégorie « {CATEG_JUSTIF[o.nature]} » : reconnu automatiquement (passage toutes les 30 minutes).</div>}
