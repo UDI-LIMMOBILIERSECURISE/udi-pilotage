@@ -729,12 +729,16 @@ function SuiviReversement({ s }) {
     } catch (e) { setErr(e.message); }
   };
   if (!s.parti || s.remboursee) return null;
-  const bailleur = suivi.detenu_par === 'bailleur';
+  // Détenteur : saisie de la gestion, sinon champ deposit_retained_by du bail lu dans Rivage (055)
+  const detenu = suivi.detenu_par || s.detenu_rivage || null;
+  const bailleur = detenu === 'bailleur';
   return <div className="mini-alerte normale" style={{ margin: '10px 0' }}>
     <div className="row">
       <b>Dépôt détenu par</b>
       <select value={suivi.detenu_par || ''} onChange={(e) => maj('detenu_par', e.target.value)} aria-label="Détenteur du dépôt">
-        <option value="">À préciser</option><option value="bailleur">le bailleur</option><option value="agence">l’agence</option></select>
+        <option value="">{s.detenu_rivage ? `Selon Rivage : ${s.detenu_rivage === 'bailleur' ? 'le bailleur' : 'l’agence'}` : 'À préciser'}</option>
+        <option value="bailleur">le bailleur</option><option value="agence">l’agence</option></select>
+      {s.detenu_rivage && suivi.detenu_par && suivi.detenu_par !== s.detenu_rivage && <span className="muted" style={{ color: 'var(--amber)' }}>différent de Rivage ({s.detenu_rivage === 'bailleur' ? 'bailleur' : 'agence'}) : corriger l’un ou l’autre</span>}
     </div>
     {bailleur && <div style={{ marginTop: 6 }}>
       <div className="muted">{suivi.recu_le ? `Reversement reçu le ${date(suivi.recu_le)} : restituer au locataire.` : suivi.demande_le ? `Reversement demandé le ${date(suivi.demande_le)}${suivi.relance_le ? `, relancé le ${date(suivi.relance_le)}` : ''}.` : 'Reversement à demander au bailleur.'}</div>
@@ -743,7 +747,7 @@ function SuiviReversement({ s }) {
         <label className="muted">Reçu le <input type="date" onBlur={(e) => e.target.value && maj('recu_le', e.target.value)} /></label>
       </div>}
     </div>}
-    {(suivi.detenu_par === 'agence' || suivi.recu_le) && <div className="row" style={{ marginTop: 6 }}>
+    {(detenu === 'agence' || suivi.recu_le) && <div className="row" style={{ marginTop: 6 }}>
       <button className="btn" onClick={() => ouvrir('dg_restitution', 'restitution_mail_le')}>Mail de restitution au locataire</button>
       {suivi.restitution_mail_le && <span className="muted">envoyé le {date(suivi.restitution_mail_le)}</span>}
     </div>}
