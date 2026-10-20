@@ -202,7 +202,7 @@ function Journee({ moi }) {
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
-                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
+                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
                   <div className="grid2">
                     {d.bailleur && <><span>Bailleur</span><span>{d.bailleur}</span></>}
                     {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
@@ -210,14 +210,16 @@ function Journee({ moi }) {
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                  {(d.bail_id || d.mandat_id) && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
+                  {(d.bail_id || d.mandat_id || d.dossier?.type === 'organisme') && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
                     onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>{fiche === d.cle ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>}
                   {d.dossier?.lien && <a className="btn gris" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
                 </div>
               </div>
               {fiche === d.cle && <section className="panneau" style={{ marginTop: 12 }}>
                 <button className="fermer" onClick={() => setFiche(null)} aria-label="Fermer la fiche">×</button>
-                {d.bail_id
+                {d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'))
+                  ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
+                  : d.bail_id
                   ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
                       peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
                   : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
@@ -1292,6 +1294,46 @@ function Commentaires({ id, peut, recharger }) {
     {toutes.length > 3 && <button className="btn gris" style={{ marginTop: 8 }} onClick={() => setTout(!tout)}>{tout ? 'Ne garder que les 3 derniers' : `Voir les ${toutes.length - 3} échanges plus anciens`}</button>}
     {!notes.length && <p className="muted">Aucun échange.</p>}
   </>;
+}
+
+// Fiche des dossiers d'impayé ouverte depuis la journée : ceux d'un organisme (actualisation du mois) ou celui d'un bail
+function FicheImpayes({ organisme, bail, apres }) {
+  const [d, setD] = useState(null);
+  const [mois, setMois] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [extrait, setExtrait] = useState(null);
+  const [err, setErr] = useState('');
+  const charger = () => Promise.all([rpc('pilotage_impayes'), rpc('pilotage_impayes_mois')])
+    .then(([a, b]) => { setD(a); setMois(b); }).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, [organisme, bail]);
+  if (err) return <div className="banner">{err}</div>;
+  if (!d || !mois) return <p className="muted">Chargement des dossiers…</p>;
+  const actu = organisme ? mois.actualisations.find((a) => a.organisme === organisme) : null;
+  const ids = actu ? actu.dossiers.map((x) => x.id) : [];
+  const liste = d.dossiers.filter((x) => (organisme ? ids.includes(x.id) : x.bail_id === bail && x.groupe !== 'Clôturé'));
+  const choisi = d.dossiers.find((x) => x.id === (sel ?? (liste.length === 1 ? liste[0].id : null)));
+  const recharger = () => { charger(); apres && apres(); };
+  const actualiser = async (fait) => { try { await rpc('pilotage_impayes_actualisation', { p_organisme: organisme, p_fait: fait, p_note: null }); recharger(); } catch (e) { setErr(e.message); } };
+  return <div>
+    <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8, paddingRight: 32 }}>
+      <h3 style={{ margin: 0 }}>{organisme ? `Dossiers ${ORGANISMES[organisme] || organisme} à actualiser` : 'Dossier d’impayé'}</h3>
+      {actu && d.peut_saisir && (actu.fait_le
+        ? <span className="muted">Actualisation faite le {date(actu.fait_le)} <button className="lien" onClick={() => actualiser(false)}>Rouvrir</button></span>
+        : <button className="btn plein" onClick={() => actualiser(true)}>Actualisation faite pour tous</button>)}
+    </div>
+    {!liste.length && <p className="muted">{bail ? 'Aucun dossier d’impayé ouvert pour ce bail : à ouvrir depuis l’onglet Impayés.' : 'Aucun dossier à actualiser.'}</p>}
+    {liste.length > 1 && <div className="stack" style={{ gap: 4, marginBottom: 10 }}>
+      {liste.map((x) => { const p = parties(x);
+        return <div key={x.id} className={'row ligne-imp' + (choisi?.id === x.id ? ' sel' : '')} style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--line)', padding: '6px 0' }}>
+          <span><b>{p.titre}</b>{p.adresse ? <span className="muted"> · {p.adresse}</span> : null}{x.montant_impaye != null ? ' · ' + euro(x.montant_impaye) : ''}</span>
+          <span className="row" style={{ gap: 6 }}>
+            {x.bail_id && <button className="btn gris" onClick={() => setExtrait(extrait === x.bail_id ? null : x.bail_id)}>Extrait de compte</button>}
+            <button className={'btn' + (choisi?.id === x.id ? ' plein' : '')} onClick={() => setSel(choisi?.id === x.id ? -1 : x.id)}>{choisi?.id === x.id ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>
+          </span></div>; })}
+    </div>}
+    {extrait && <Extrait bail={extrait} fermer={() => setExtrait(null)} />}
+    {choisi && <div className="panneau" style={{ marginTop: 8 }}><DossierImpaye key={choisi.id} d={choisi} membres={d.membres} peut={d.peut_saisir} recharger={recharger} /></div>}
+  </div>;
 }
 
 function DossierImpaye({ d, membres, peut, recharger }) {
