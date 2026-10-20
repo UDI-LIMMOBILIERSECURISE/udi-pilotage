@@ -211,3 +211,10 @@ tr.sel td { background: #EEF4FA; }
   .zone-detail { top: 68px; }
 }
 @media (prefers-reduced-motion: reduce) { .menu { transition: none; } }
+
+/* Logo UDI (059) : noir et rose sur cartouche blanc, lisible sur le menu sombre */
+.menu-marque { display: flex; align-items: center; gap: 12px; }
+.menu-logo { background: #fff; border-radius: 10px; padding: 6px 8px; display: inline-flex; }
+.menu-logo img { height: 44px; width: auto; display: block; }
+.menu-tete .brand { font-size: 14px; line-height: 1.25; }
+.barre-logo { height: 32px; width: auto; background: #fff; border-radius: 6px; padding: 3px 4px; }
