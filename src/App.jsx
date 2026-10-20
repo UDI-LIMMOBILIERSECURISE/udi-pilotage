@@ -53,15 +53,36 @@ function Connexion() {
   );
 }
 
+// Menu de navigation : rubriques regroupées, page courante gardée dans l'adresse (#regles) pour le retour arrière et le rechargement
+const MENU = [
+  ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['alouer', 'À louer', '⌂']]],
+  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['sinistres', 'Sinistres', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
+  ['Commercial', [['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
+  ['Réglages', [['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['equipe', 'Équipe', '☺']]],
+];
+const lireHash = () => (typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '') || 'jour';
+
 function Espace() {
   const [moi, setMoi] = useState(undefined);
-  const [onglet, setOnglet] = useState('jour');
+  const [onglet, setOngletEtat] = useState(lireHash);
+  const [menuOuvert, setMenuOuvert] = useState(false);
   const [err, setErr] = useState('');
   const [tableaux, setTableaux] = useState([]);
   useEffect(() => {
     rpc('pilotage_moi').then(setMoi).catch((e) => setErr(e.message));
     rpc('pilotage_tableaux_visibles').then((t) => setTableaux(t || [])).catch(() => {});
+    const surHash = () => setOngletEtat(lireHash());
+    window.addEventListener('hashchange', surHash);
+    return () => window.removeEventListener('hashchange', surHash);
   }, []);
+  useEffect(() => {
+    if (!menuOuvert) return undefined;
+    const echap = (e) => { if (e.key === 'Escape') setMenuOuvert(false); };
+    window.addEventListener('keydown', echap);
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', echap); document.body.style.overflow = ''; };
+  }, [menuOuvert]);
+  const setOnglet = (k) => { if (window.location.hash !== '#' + k) window.location.hash = k; setOngletEtat(k); setMenuOuvert(false); window.scrollTo(0, 0); };
   const voit = (t) => tableaux.includes(t);
   if (err) return <main><div className="banner">{err}</div></main>;
   if (moi === undefined) return <main><p className="sub">Chargement…</p></main>;
@@ -69,34 +90,54 @@ function Espace() {
     <main><div className="card"><h1>Accès non ouvert</h1><p className="sub">Votre compte existe mais n’a pas encore accès au pilotage. Demandez à Nicolas de vous ajouter dans l’onglet Équipe.</p>
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
-  const tabs = [['jour', 'Ma journée', true], ['agence', 'Toute l’agence', voit('agence')], ['sinistres', 'Sinistres', voit('sinistres')],
-    ['dg', 'Sorties et DG', voit('dg')], ['compta', 'Comptabilité', voit('compta')], ['impayes', 'Impayés', voit('impayes')], ['alouer', 'À louer', true], ['mandats', 'Mandats', moi.voit_commissions], ['baux', 'Baux et obligations', voit('baux')], ['commissions', 'Commissions', moi.voit_commissions], ['reprise', 'Reprise', moi.voit_equipe], ['obligations', 'Obligations suivies', moi.voit_reglages],
-    ['regles', 'Règles de relance', moi.voit_reglages], ['equipe', 'Équipe', moi.voit_reglages]].filter((t) => t[2]);
+  const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true,
+    mandats: moi.voit_commissions, baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
+    obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages };
+  const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
+  const page = droit[onglet] ? onglet : 'jour';
+  const titre = MENU.flatMap(([, items]) => items).find(([k]) => k === page)?.[1] || '';
   return (
-    <>
-      <header className="top">
-        <span className="brand">Pilotage UDI Gestion</span>
-        <nav className="tabs">{tabs.map(([k, l]) => <button key={k} className={'tab' + (onglet === k ? ' on' : '')} onClick={() => setOnglet(k)}>{l}</button>)}</nav>
-        <span className="me">{moi.prenom} · {ROLES[moi.role]} <button onClick={() => supabase.auth.signOut()}>Déconnexion</button></span>
+    <div className="appli">
+      <header className="barre-mobile">
+        <button className="burger" aria-label="Ouvrir le menu" aria-expanded={menuOuvert} onClick={() => setMenuOuvert(true)}><span /><span /><span /></button>
+        <span className="barre-titre">{titre}</span>
       </header>
+      {menuOuvert && <div className="voile" onClick={() => setMenuOuvert(false)} />}
+      <aside className={'menu' + (menuOuvert ? ' ouvert' : '')} aria-label="Navigation">
+        <div className="menu-tete">
+          <span className="brand">Pilotage UDI Gestion</span>
+          <button className="menu-fermer" aria-label="Fermer le menu" onClick={() => setMenuOuvert(false)}>×</button>
+        </div>
+        <nav className="menu-liste">
+          {menu.map(([g, items]) => <div key={g} className="menu-groupe">
+            <div className="menu-groupe-titre">{g}</div>
+            {items.map(([k, l, ic]) => <button key={k} className={'menu-item' + (page === k ? ' on' : '')} aria-current={page === k ? 'page' : undefined} onClick={() => setOnglet(k)}>
+              <span className="menu-ic" aria-hidden="true">{ic}</span>{l}</button>)}
+          </div>)}
+        </nav>
+        <div className="menu-pied">
+          <div><strong>{moi.prenom}</strong><div className="menu-role">{ROLES[moi.role]}</div></div>
+          <button onClick={() => supabase.auth.signOut()}>Déconnexion</button>
+        </div>
+      </aside>
       <main>
         <Synchro direction={moi.role === 'direction'} />
-        {onglet === 'jour' && <Journee moi={moi} />}
-        {onglet === 'agence' && voit('agence') && <Agence />}
-        {onglet === 'sinistres' && voit('sinistres') && <Sinistres />}
-        {onglet === 'dg' && voit('dg') && <SortiesDG />}
-        {onglet === 'compta' && voit('compta') && <Compta />}
-        {onglet === 'impayes' && voit('impayes') && <Impayes />}
-        {onglet === 'alouer' && <ALouer />}
-        {onglet === 'reprise' && moi.voit_equipe && <Reprise moi={moi} />}
-        {onglet === 'baux' && voit('baux') && <SuiviBaux moi={moi} />}
-        {onglet === 'mandats' && moi.voit_commissions && <Mandats />}
-        {onglet === 'commissions' && moi.voit_commissions && <Commissions />}
-        {onglet === 'obligations' && moi.voit_reglages && <Obligations />}
-        {onglet === 'regles' && moi.voit_reglages && <Regles />}
-        {onglet === 'equipe' && moi.voit_reglages && <Equipe moi={moi} />}
+        {page === 'jour' && <Journee moi={moi} />}
+        {page === 'agence' && <Agence />}
+        {page === 'sinistres' && <Sinistres />}
+        {page === 'dg' && <SortiesDG />}
+        {page === 'compta' && <Compta />}
+        {page === 'impayes' && <Impayes />}
+        {page === 'alouer' && <ALouer />}
+        {page === 'reprise' && <Reprise moi={moi} />}
+        {page === 'baux' && <SuiviBaux moi={moi} />}
+        {page === 'mandats' && <Mandats />}
+        {page === 'commissions' && <Commissions />}
+        {page === 'obligations' && <Obligations />}
+        {page === 'regles' && <Regles />}
+        {page === 'equipe' && <Equipe moi={moi} />}
       </main>
-    </>
+    </div>
   );
 }
 
