@@ -202,7 +202,7 @@ export function preparer(code, ctx) {
     case 'coloc_bailleur':
       return L({ ...versBai, objet: `Départ d'un colocataire — ${adr}`, corps: `${salutation(nomsBai)}\n\nPour information, ${ctx.coloc?.nom || 'l\'un des colocataires'} quitte le logement situé ${adr} le ${d(ctx.coloc?.sortie)}. Le bail continue avec les autres colocataires.\n\nSauf arrivée d'un remplaçant inscrit au bail, le colocataire sortant et sa caution restent solidairement tenus jusqu'au ${d(plusMois(ctx.coloc?.sortie, 6))}. Nous vous tiendrons informé(e) si un nouveau colocataire est proposé.` });
     case 'garant_fin':
-      return L({ ...versBai, objet: `Fin de l'engagement de caution — ${civil(nomsLoc)} — ${adr}`, corps: `${salutation(nomsBai)}\n\nL'engagement de caution [nom du garant] pour le bail de ${civil(nomsLoc)}, logement situé ${adr}, a pris fin le ${d(ctx.garant?.fin)}. Le bail n'est plus garanti par cette caution.\n\nNous vous proposons [une nouvelle caution / la garantie loyers impayés à 2,8 % des sommes quittancées] pour couvrir la suite du bail. Répondez à ce mail pour nous indiquer votre choix.` });
+      return L({ ...versBai, objet: `Fin de l'engagement de caution — ${civil(nomsLoc)} — ${adr}`, corps: `${salutation(nomsBai)}\n\nL'engagement de caution de [nom du garant] pour le bail de ${civil(nomsLoc)}, logement situé ${adr}, a pris fin le ${d(ctx.garant?.fin)}. Le bail n'est plus garanti par cette caution.\n\nNous vous proposons [une nouvelle caution / la garantie loyers impayés à 2,8 % des sommes quittancées] pour couvrir la suite du bail. Répondez à ce mail pour nous indiquer votre choix.` });
 
     // ----- Impayés (mail au bailleur, depuis le dossier impayé) -----
     // ctx.impaye = { declaration_le, organisme }
