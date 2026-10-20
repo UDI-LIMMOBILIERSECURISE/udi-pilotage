@@ -26,7 +26,7 @@ export default function MesDossiers({ moi }) {
   if (!liste.length && !sel) return null;
   const gestion = !!d.gestion;
   const lecture = !!d.lecture;
-  const prendre = async (x) => { setErr(''); try { await rpc('pilotage_dossier_prendre', { p_objet: x.objet, p_id: x.id }); await charger(); } catch (e) { setErr(e.message); } };
+  const prendre = async (x, user) => { setErr(''); try { await rpc('pilotage_dossier_prendre', { p_objet: x.objet, p_id: x.id, p_user: user }); await charger(); } catch (e) { setErr(e.message); } };
   const attribuer = liste.filter((x) => x.a_attribuer && x.etat !== 'valide');
   const attente = liste.filter((x) => x.etat === 'en_attente' && !x.a_attribuer);
   const finaliser = liste.filter((x) => x.etat === 'a_finaliser' && !x.a_attribuer);
@@ -34,7 +34,7 @@ export default function MesDossiers({ moi }) {
   const groupe = (titre, items, aide, ouvrir = true, avecPrise = false) => items.length > 0 && <details className="replie" open={ouvrir} style={{ marginBottom: 10 }}>
     <summary style={{ cursor: 'pointer', fontWeight: 700 }}>{titre} <span className="pastille">{items.length}</span></summary>
     {aide && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>{aide}</div>}
-    <div className="stack" style={{ gap: 6, marginTop: 6 }}>{items.map((x) => <Ligne key={x.objet + x.id} x={x} gestion={gestion} prendre={avecPrise ? () => prendre(x) : null}
+    <div className="stack" style={{ gap: 6, marginTop: 6 }}>{items.map((x) => <Ligne key={x.objet + x.id} x={x} gestion={gestion} prendre={avecPrise ? (u) => prendre(x, u) : null} commerciaux={d.commerciaux || []} moi={d.moi}
       sel={sel && sel.objet === x.objet && sel.id === x.id} choisir={() => setSel(sel && sel.id === x.id ? null : { objet: x.objet, id: x.id })} />)}</div>
   </details>;
   // Gestion, comptable, direction : leur file d'abord ; les dossiers encore chez les commerciaux restent repliés
@@ -44,9 +44,9 @@ export default function MesDossiers({ moi }) {
     {gestion ? <>
       {groupe(lecture ? 'En attente de validation par la gestion' : 'À valider', attente, lecture ? null : 'Le commercial a tout complété : vérifier les écarts et les justifications, puis valider ou lui écrire.')}
       {groupe('En cours chez les commerciaux', finaliser, 'Pour consultation : le commercial complète encore le dossier.', false)}
-      {groupe('Pas encore attribués à un commercial', attribuer, 'Arrivés dans Rivage sans commercial : un commercial doit se les attribuer.', false, d.role === 'direction' || d.role === 'superviseur')}
+      {groupe('Pas encore attribués à un commercial', attribuer, 'Arrivés dans Rivage sans commercial : choisir le commercial dans la liste.', attribuer.length > 0 && !attente.length, !!d.peut_attribuer)}
     </> : <>
-      {groupe('À attribuer', attribuer, 'Nouveaux dossiers arrivés dans Rivage sans commercial : « Je le prends » pour le compléter.', true, true)}
+      {groupe('À attribuer', attribuer, 'Nouveaux dossiers arrivés dans Rivage sans commercial : choisir le commercial qui le complète.', true, !!d.peut_attribuer)}
       {groupe('À finaliser', finaliser, 'Répondre aux questions, déposer les pièces dans Rivage et y corriger les champs vides : le dossier part seul en validation.')}
       {groupe('En attente de validation', attente, 'Plus rien à faire, sauf si la gestion vous écrit.', !finaliser.length)}
     </>}
@@ -57,14 +57,21 @@ export default function MesDossiers({ moi }) {
   </section>;
 }
 
-function Ligne({ x, gestion, sel, choisir, prendre }) {
+function Ligne({ x, gestion, sel, choisir, prendre, commerciaux, moi }) {
   const vides = x.vides || [];
+  const [qui, setQui] = useState('');
   return <div className={'kcarte ' + (sel ? 'sel ' : '') + (x.demandes > 0 ? 'critique' : x.etat === 'a_finaliser' ? 'haute' : 'normale')} role="button" tabIndex={0}
     onClick={choisir} onKeyDown={(e) => { if (e.key === 'Enter') choisir(); }} style={{ textAlign: 'left' }}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <span className="kcarte-titre">{x.objet === 'mandat' ? 'Mandat · ' : ''}{x.titre}</span>
       <span className="row" style={{ gap: 6 }}>
-        {prendre && <button className="btn plein" onClick={(e) => { e.stopPropagation(); prendre(); }}>Je le prends</button>}
+        {prendre && <span className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <select value={qui} onChange={(e) => setQui(e.target.value)} aria-label="Commercial à qui attribuer le dossier" style={{ minHeight: 36 }}>
+            <option value="">Attribuer à…</option>
+            {commerciaux.map((c) => <option key={c.id} value={c.id}>{c.prenom}{c.id === moi ? ' (moi)' : ''}</option>)}
+          </select>
+          <button className="btn plein" disabled={!qui} onClick={() => prendre(qui)}>Attribuer</button>
+        </span>}
         <span className={'sev ' + COULEUR[x.etat]}>{x.a_attribuer ? 'À attribuer' : ETAT[x.etat]}</span>
       </span>
     </div>
