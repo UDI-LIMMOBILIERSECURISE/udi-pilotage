@@ -242,6 +242,19 @@ function Echeance({ d, b, peut, agir, ouvrirMail }) {
   useEffect(() => { setChoix(ech.choix || ''); }, [ech.choix, b.bail_id]);
   const habitation = ['vide', 'meuble', 'mixte'].includes(ech.type);
   const congeChoisi = ech.choix && !['reconduire', 'ne_rien_faire', 'laisser_commercial', 'renouveler_loyer'].includes(ech.choix);
+  const [voir65, setVoir65] = useState(false);
+  const age = d.rivage?.locataire_65;
+  const ageRivage = age?.connu && fiche.locataire_65 == null;
+  // Avant la date d'information du bailleur, rien à décider : on affiche seulement l'échéance et la prochaine étape
+  const enAttente = ech.etat === 'a_venir' && !ech.informe_le && !ech.choix && !ech.manquee;
+  if (ech.etat !== 'incomplet' && enAttente) return <>
+    <h3>Échéance du bail</h3>
+    <div className="echeance"><div><b>Échéance</b>
+      <div className="muted">Rien à faire avant le {date(ech.info)} : information du bailleur ce jour-là{ech.type === 'commercial' ? ' (12 mois avant)' : ''}.</div></div>
+      <div className="echeance-n">{date(ech.echeance)}</div></div>
+    {ech.douze_ans && <p className="muted">12 ans de durée le {date(ech.douze_ans)} : au-delà, déplafonnement possible du loyer du bail renouvelé.</p>}
+    {ech.triennale && <p className="muted">Prochaine fin de période triennale : {date(ech.triennale)} (faculté de congé du preneur avec 6 mois de préavis).</p>}
+  </>;
   return <>
     <h3>Échéance du bail</h3>
     {ech.etat === 'incomplet' ? <div className="mini-alerte haute">{ech.raison}</div> : <>
@@ -261,7 +274,8 @@ function Echeance({ d, b, peut, agir, ouvrirMail }) {
       {ech.triennale && <p className="muted">Prochaine fin de période triennale : {date(ech.triennale)} (faculté de congé du preneur avec 6 mois de préavis).</p>}
       {(ech.blocages || []).map((x, i) => <div key={i} className="mini-alerte critique">{x}</div>)}
       {habitation && d.rivage?.locataire_65?.detail && <p className="muted" style={{ margin: '6px 0 0' }}>Âge d’après Rivage : {d.rivage.locataire_65.detail}.{fiche.locataire_65 == null && d.rivage.locataire_65.connu ? ' Utilisé tant que la fiche n’est pas renseignée.' : ''}</p>}
-      {habitation && <div className="row" style={{ marginTop: 6 }}>
+      {habitation && ageRivage && !voir65 && peut && <button className="lien" onClick={() => setVoir65(true)}>Corriger l’âge (Rivage incomplet ou erroné)</button>}
+      {habitation && (!ageRivage || voir65) && <div className="row" style={{ marginTop: 6 }}>
         <ChampFiche b={b} fiche={fiche} champ="locataire_65" libelle="Locataire de plus de 65 ans à l’échéance" peut={peut} agir={agir} />
         {fiche.locataire_65 && <ChampFiche b={b} fiche={fiche} champ="ressources_sous_plafond" libelle="Ressources sous le plafond" peut={peut} agir={agir} />}
       </div>}
@@ -519,6 +533,9 @@ function Question({ i, d, b, peut, agir }) {
   const suivi = i.mode === 'document' || i.bloc === 'rivage' ? 'rivage' : 'backoffice';
   const [motif, setMotif] = useState(null);
   const [creer, setCreer] = useState(false);
+  const [corriger, setCorriger] = useState(false);
+  // Point déjà connu par Rivage (DPE du lot, âge des locataires) : validé d'office, la valeur Rivage est affichée
+  const parRivage = !i.repondu && i.auto === 'ok' && i.bloc !== 'rivage' && i.mode !== 'document' && /^Rivage : /.test(i.detail || '') && !corriger;
   useEffect(() => { setCom(i.commentaire || ''); }, [i.commentaire]);
   const [errJ, setErrJ] = useState('');
   const ecart = i.auto === 'anomalie' && i.bloc !== 'pieces';
@@ -555,11 +572,12 @@ function Question({ i, d, b, peut, agir }) {
           ? <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--blue)', background: 'var(--blue-bg)', borderRadius: 10, padding: '1px 8px', whiteSpace: 'nowrap' }}>Suivi back-office</span>
           : <span className="muted" style={{ marginLeft: 8, fontSize: 11, whiteSpace: 'nowrap' }}>· géré dans Rivage</span>}
         {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
-        {i.detail && i.mode !== 'fiche' && <div style={{ fontSize: 13 }}>{i.mode === 'rivage' ? 'Rivage : ' : ''}{i.detail}</div>}
+        {parRivage && <div style={{ fontSize: 13 }}>D’après {i.detail.replace(/^Rivage : /, 'Rivage : ')}{peut && <button className="lien" onClick={() => setCorriger(true)}>Corriger</button>}</div>}
+        {i.detail && i.mode !== 'fiche' && !parRivage && <div style={{ fontSize: 13 }}>{i.mode === 'rivage' ? 'Rivage : ' : ''}{i.detail}</div>}
         {i.ia && (i.bloc !== 'rivage' || ecart) && !(i.bloc === 'pieces' && !i.ia.valeur) && <div style={{ fontSize: 13, background: 'var(--blue-bg)', padding: '4px 8px', borderRadius: 6, marginTop: 4 }}>
           ✦ Lu dans le bail : {i.ia.valeur || (i.ia.trouve === false ? 'non trouvé' : '—')}{i.ia.page ? ` (page ${i.ia.page})` : ''}
           {i.ia.extrait && <div className="muted" style={{ fontSize: 12 }}>« {i.ia.extrait} »</div>}</div>}
-        {i.mode === 'fiche' && <div style={{ marginTop: 4 }}><ChampFiche b={b} fiche={d.fiche} champ={i.ref} peut={peut} agir={agir} /></div>}
+        {i.mode === 'fiche' && !parRivage && <div style={{ marginTop: 4 }}><ChampFiche b={b} fiche={d.fiche} champ={i.ref} peut={peut} agir={agir} /></div>}
         {i.repondu && <div className="muted" style={{ fontSize: 12 }}>Répondu par {i.par || '—'} le {date(i.le)}{i.commentaire ? ' · ' + i.commentaire : ''}</div>}
         {i.repondu && ecart && i.statut === 'ok' && !i.commentaire && <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>Écart validé sans justification : revenez sur la réponse pour l’expliquer ou corriger Rivage.</div>}
         {errJ && <div className="err">{errJ}</div>}
@@ -567,7 +585,7 @@ function Question({ i, d, b, peut, agir }) {
       {peut && i.repondu && <div className="row" style={{ justifyContent: 'flex-end' }}><button className="btn gris" onClick={() => revenir()}>Revenir sur ma réponse</button></div>}
       {!peut && !i.repondu && (i.mode === 'document' || i.bloc === 'rivage') && <div className="row" style={{ justifyContent: 'flex-end' }}>
         <a className="btn" href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">{i.mode === 'document' ? 'Déposer dans Rivage ↗' : 'Corriger dans Rivage ↗'}</a></div>}
-      {peut && !i.repondu && !(i.genere && i.genere !== 'garantie') && <div className="row" style={{ justifyContent: 'flex-end' }}>
+      {peut && !i.repondu && !parRivage && !(i.genere && i.genere !== 'garantie') && <div className="row" style={{ justifyContent: 'flex-end' }}>
         {i.mode === 'document'
           ? <><a className="btn" href={'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id} target="_blank" rel="noreferrer">Déposer dans Rivage ↗</a>
               <button className="btn gris" onClick={() => repondre('sans_objet')}>Sans objet</button></>
@@ -581,7 +599,7 @@ function Question({ i, d, b, peut, agir }) {
           </>}
       </div>}
     </div>
-    {peut && i.genere && i.genere !== 'garantie' && !i.repondu && <QuestionSuivi i={i} d={d} b={b} agir={agir} />}
+    {peut && i.genere && i.genere !== 'garantie' && !i.repondu && !parRivage && <QuestionSuivi i={i} d={d} b={b} agir={agir} />}
     {suiviExiste && <div className="muted" style={{ fontSize: 12 }}>Suivi « {NATURES[i.genere]} » en place : {(d.obligations || []).filter((o) => o.nature === i.genere && o.actif).map((o) => `${o.libelle} (échéance ${date(o.prochaine)})`).join(' · ')}</div>}
     {peut && i.genere && i.repondu && i.statut !== 'sans_objet' && (creer
       ? <NouveauSuivi b={b} nature={i.genere} agir={agir} fini={() => setCreer(false)} />
