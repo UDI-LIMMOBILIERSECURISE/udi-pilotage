@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc, ecouterRivage } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
-import SuiviBaux, { EditeurMail, NATURES } from './SuiviBaux.jsx';
+import SuiviBaux, { EditeurMail, NATURES, DossierBail } from './SuiviBaux.jsx';
 import { preparer, MODELES } from './mails.js';
 import DossierMandat, { NATURES_MANDAT } from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
-import MesDossiers from './Circuit.jsx';
+import MesDossiers, { RecapRemuneration } from './Circuit.jsx';
 import ALouer from './ALouer.jsx';
 import Reprise from './Reprise.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
@@ -147,6 +147,7 @@ function Journee({ moi }) {
   const [alertes, setAlertes] = useState(null);
   const [cat, setCat] = useState('toutes');
   const [ouvert, setOuvert] = useState(null);
+  const [fiche, setFiche] = useState(null);
   const [err, setErr] = useState('');
   const charger = () => rpc('pilotage_journee', { p_user: cible }).then(setAlertes).catch((e) => setErr(e.message));
   useEffect(() => { if (moi.voit_equipe) rpc('pilotage_membres').then(setMembres).catch(() => {}); }, []);
@@ -160,8 +161,9 @@ function Journee({ moi }) {
     const m = new Map();
     visibles.forEach((a) => {
       const k = a.dossier?.type === 'bail' || a.dossier?.type === 'lot' ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
-      if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, bailleur: a.bailleur, alertes: [] });
+      if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, bailleur: a.bailleur, mandat_id: a.mandat_id, alertes: [] });
       m.get(k).alertes.push(a);
+      if (a.objet_type === 'LeasingContract') m.get(k).bail_id = a.objet_id;
     });
     const rang = { critique: 0, haute: 1, normale: 2 };
     return [...m.values()].map((d) => ({ ...d, pire: d.alertes.reduce((p, a) => Math.min(p, rang[a.gravite]), 2) }))
@@ -184,7 +186,8 @@ function Journee({ moi }) {
         )}
       </div>
       {err && <div className="banner">{err}</div>}
-      {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
+      {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
+      {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
       {moi.role === 'direction' && cible === moi.user_id && <div className="info">Vous voyez ici les alertes des mandats attribués à vous et celles des mandats qui ne sont encore attribués à personne.</div>}
       <div className="row" style={{ marginBottom: 14 }}>
         {[['toutes', 'Toutes']].concat(Object.entries(CAT)).map(([k, l]) => (
@@ -205,8 +208,19 @@ function Journee({ moi }) {
                     {d.mandat && <><span>Mandat</span><span>{d.mandat}</span></>}
                   </div>
                 </div>
-                {d.dossier?.lien && <a className="btn" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
+                <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                  {(d.bail_id || d.mandat_id) && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
+                    onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>{fiche === d.cle ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>}
+                  {d.dossier?.lien && <a className="btn gris" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
+                </div>
               </div>
+              {fiche === d.cle && <section className="panneau" style={{ marginTop: 12 }}>
+                <button className="fermer" onClick={() => setFiche(null)} aria-label="Fermer la fiche">×</button>
+                {d.bail_id
+                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
+                      peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
+                  : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
+              </section>}
               <div className="stack" style={{ gap: 6, marginTop: 10 }}>
                 {d.alertes.map((a) => (
                   <div key={a.id} className={'alerte ' + a.gravite}>
