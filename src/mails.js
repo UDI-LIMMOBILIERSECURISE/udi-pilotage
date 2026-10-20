@@ -252,3 +252,6 @@ export function lienGmail(m, moiEmail) {
   if (moiEmail) p.set('authuser', moiEmail);
   return 'https://mail.google.com/mail/?' + p.toString();
 }
+
+// Codes des modèles de mails et de SMS, proposés dans l'écran des calendriers de relance
+export const MODELES = ['echeance_info', 'echeance_relance', 'echeance_lrar', 'pieces_manquantes', 'assurance_1', 'assurance_2', 'assurance_md', 'assurance_bailleur', 'entretien_1', 'entretien_2', 'entretien_md', 'entretien_bailleur', 'entretien_bailleur_relance', 'entretien_resolutoire', 'compteur_prevenance', 'compteur_1', 'compteur_2', 'garantie_1', 'garantie_2', 'dpe_bailleur', 'tsb_rappel', 'tsb_justif', 'tertiaire', 'compteur_bailleur', 'dpe_relance', 'garantie_bailleur', 'garantie_md', 'etat_travaux_preneur', 'tertiaire_relance', 'dg_ajust', 'pno_1', 'pno_2', 'mandat_echeance', 'assurance_souscription', 'permis_choix', 'permis_choix_relance', 'permis_recepisse', 'permis_depose', 'permis_accord', 'permis_refus', 'coloc_sortant', 'coloc_bailleur', 'garant_fin', 'gli_declaree', 'impaye_regularise', 'entretien_lot', 'dg_reversement_demande', 'dg_reversement_relance', 'dg_restitution', 'revision_bailleur', 'palier_locataire'].concat(Object.keys(SMS));

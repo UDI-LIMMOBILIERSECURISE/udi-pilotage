@@ -11,7 +11,7 @@ const auj = () => new Date().toISOString().slice(0, 10);
 const jours = (d) => (d ? Math.round((new Date(d) - new Date(auj())) / 86400000) : null);
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
 const BLOCS = { pieces: 'Pièces du dossier', rivage: 'Croisement avec Rivage', clauses: 'Clauses et suivis' };
-const NATURES = {
+export const NATURES = {
   assurance: 'Assurance', entretien: 'Entretien d\'équipement', compteur: 'Relevé de compteurs', garantie: 'Expiration de garantie', caution: 'Fin d\'engagement de la caution',
   dpe: 'Validité du DPE', tsb: 'Taxe sur les bureaux', surprime: 'Surprime d\'assurance', charges_regul: 'Régularisation des charges', etat_travaux: 'État prévisionnel des travaux',
   tertiaire: 'Décret tertiaire (OPERAT)', destination: 'Contrôle de la destination', dg_ajust: 'Ajustement du dépôt de garantie',
