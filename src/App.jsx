@@ -707,6 +707,8 @@ function SortiesDG() {
   </>;
 }
 
+const plusMoisDG = (x, n) => { if (!x) return null; const t = new Date(x); t.setMonth(t.getMonth() + n); return t.toISOString().slice(0, 10); };
+
 // Détenteur du dépôt, reversement du bailleur et mails (054). Rivage ne donne ni l'un ni l'autre : saisie de la gestion.
 function SuiviReversement({ s }) {
   const moi = useMoiMail();
@@ -719,21 +721,23 @@ function SuiviReversement({ s }) {
     try { await rpc('pilotage_dg_maj', { p_bail: s.bail_id, p_champ: champ, p_valeur: valeur ?? '' }); setSuivi((x) => ({ ...x, [champ]: valeur || null })); }
     catch (e) { setErr(e.message); }
   };
+  // Départ : sortie réelle, sinon dernière sortie annoncée dans Rivage, sinon fin du bail (même règle que le 055)
+  const sortie = s.sortie_reelle || (s.sortie_locataires?.tous_sortis ? s.sortie_locataires.derniere_sortie : null) || s.fin;
   const ouvrir = async (code, champ) => {
     setErr('');
     try {
       const c = await rpc('pilotage_contacts_bail', { p_bail: s.bail_id });
       const m = preparer(code, { bail: { adresse: c.adresse || s.adresse }, contacts: c, moi,
-        dg: { depot: s.depot, loyer_hc: s.loyer_hc, sortie: s.sortie_reelle || s.fin, limite_1_mois: s.limite_1_mois, limite_2_mois: s.limite_2_mois, demande_le: suivi.demande_le } });
+        dg: { depot: s.depot, loyer_hc: s.loyer_hc, sortie, limite_1_mois: plusMoisDG(sortie, 1), limite_2_mois: plusMoisDG(sortie, 2), demande_le: suivi.demande_le } });
       if (m) setMail({ m, champ });
     } catch (e) { setErr(e.message); }
   };
   // Détenteur : saisie de la gestion, sinon champ deposit_retained_by du bail lu dans Rivage (055)
   const detenu = suivi.detenu_par || s.detenu_rivage || null;
   const bailleur = detenu === 'bailleur';
-  // Dépôt chez le bailleur : demande de reversement possible dès 15 jours avant la fin du bail ; sinon, après le départ
-  const bientot = s.fin && (new Date(s.fin) - new Date(auj())) / 86400000 <= 15;
-  if (s.remboursee || !(s.parti || (bailleur && bientot))) return null;
+  // Dépôt chez le bailleur : demande de reversement dès le congé (bail en sortie dans Rivage ou sortie saisie pour tous les locataires)
+  const conge = s.statut === 'move_out' || !!s.sortie_locataires?.tous_sortis;
+  if (s.remboursee || !(s.parti || conge)) return null;
   return <div className="mini-alerte normale" style={{ margin: '10px 0' }}>
     <div className="row">
       <b>Dépôt détenu par</b>
