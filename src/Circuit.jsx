@@ -20,26 +20,33 @@ export default function MesDossiers({ moi }) {
   const [sel, setSel] = useState(null);
   const charger = () => rpc('pilotage_mes_dossiers').then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
-  if (err) return <div className="banner">{err}</div>;
+  if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return null;
   const liste = d.dossiers || [];
   if (!liste.length && !sel) return null;
-  const attente = liste.filter((x) => x.etat === 'en_attente');
-  const finaliser = liste.filter((x) => x.etat === 'a_finaliser');
   const gestion = !!d.gestion;
+  const lecture = !!d.lecture;
+  const prendre = async (x) => { setErr(''); try { await rpc('pilotage_dossier_prendre', { p_objet: x.objet, p_id: x.id }); await charger(); } catch (e) { setErr(e.message); } };
+  const attribuer = liste.filter((x) => x.a_attribuer && x.etat !== 'valide');
+  const attente = liste.filter((x) => x.etat === 'en_attente' && !x.a_attribuer);
+  const finaliser = liste.filter((x) => x.etat === 'a_finaliser' && !x.a_attribuer);
   const ouvert = sel && liste.find((x) => x.objet === sel.objet && x.id === sel.id);
-  const groupe = (titre, items, aide, ouvrir = true) => items.length > 0 && <details className="replie" open={ouvrir} style={{ marginBottom: 10 }}>
+  const groupe = (titre, items, aide, ouvrir = true, avecPrise = false) => items.length > 0 && <details className="replie" open={ouvrir} style={{ marginBottom: 10 }}>
     <summary style={{ cursor: 'pointer', fontWeight: 700 }}>{titre} <span className="pastille">{items.length}</span></summary>
     {aide && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>{aide}</div>}
-    <div className="stack" style={{ gap: 6, marginTop: 6 }}>{items.map((x) => <Ligne key={x.objet + x.id} x={x} gestion={gestion}
+    <div className="stack" style={{ gap: 6, marginTop: 6 }}>{items.map((x) => <Ligne key={x.objet + x.id} x={x} gestion={gestion} prendre={avecPrise ? () => prendre(x) : null}
       sel={sel && sel.objet === x.objet && sel.id === x.id} choisir={() => setSel(sel && sel.id === x.id ? null : { objet: x.objet, id: x.id })} />)}</div>
   </details>;
+  // Gestion, comptable, direction : leur file d'abord ; les dossiers encore chez les commerciaux restent repliés
   return <section className="card" style={{ marginBottom: 16 }}>
-    <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>{gestion ? 'Dossiers des commerciaux' : 'Mes dossiers à finaliser'}</h2>
+    {err && <div className="err">{err}</div>}
+    <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>{gestion ? (lecture ? 'Dossiers en cours de validation' : 'Dossiers des commerciaux') : 'Mes dossiers'}</h2>
     {gestion ? <>
-      {groupe('À valider', attente, 'Le commercial a tout complété : vérifier les écarts et les justifications, puis valider ou lui écrire.')}
-      {groupe('En cours chez le commercial', finaliser, null, !attente.length)}
+      {groupe(lecture ? 'En attente de validation par la gestion' : 'À valider', attente, lecture ? null : 'Le commercial a tout complété : vérifier les écarts et les justifications, puis valider ou lui écrire.')}
+      {groupe('En cours chez les commerciaux', finaliser, 'Pour consultation : le commercial complète encore le dossier.', false)}
+      {groupe('Pas encore attribués à un commercial', attribuer, 'Arrivés dans Rivage sans commercial : un commercial doit se les attribuer.', false, d.role === 'direction' || d.role === 'superviseur')}
     </> : <>
+      {groupe('À attribuer', attribuer, 'Nouveaux dossiers arrivés dans Rivage sans commercial : « Je le prends » pour le compléter.', true, true)}
       {groupe('À finaliser', finaliser, 'Répondre aux questions, déposer les pièces dans Rivage et y corriger les champs vides : le dossier part seul en validation.')}
       {groupe('En attente de validation', attente, 'Plus rien à faire, sauf si la gestion vous écrit.', !finaliser.length)}
     </>}
@@ -50,12 +57,16 @@ export default function MesDossiers({ moi }) {
   </section>;
 }
 
-function Ligne({ x, gestion, sel, choisir }) {
+function Ligne({ x, gestion, sel, choisir, prendre }) {
   const vides = x.vides || [];
-  return <button className={'kcarte ' + (sel ? 'sel ' : '') + (x.demandes > 0 ? 'critique' : x.etat === 'a_finaliser' ? 'haute' : 'normale')} onClick={choisir} style={{ textAlign: 'left' }}>
+  return <div className={'kcarte ' + (sel ? 'sel ' : '') + (x.demandes > 0 ? 'critique' : x.etat === 'a_finaliser' ? 'haute' : 'normale')} role="button" tabIndex={0}
+    onClick={choisir} onKeyDown={(e) => { if (e.key === 'Enter') choisir(); }} style={{ textAlign: 'left' }}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <span className="kcarte-titre">{x.objet === 'mandat' ? 'Mandat · ' : ''}{x.titre}</span>
-      <span className={'sev ' + COULEUR[x.etat]}>{ETAT[x.etat]}</span>
+      <span className="row" style={{ gap: 6 }}>
+        {prendre && <button className="btn plein" onClick={(e) => { e.stopPropagation(); prendre(); }}>Je le prends</button>}
+        <span className={'sev ' + COULEUR[x.etat]}>{x.a_attribuer ? 'À attribuer' : ETAT[x.etat]}</span>
+      </span>
     </div>
     <div className="muted" style={{ fontSize: 12 }}>{x.sous_titre || ''}{gestion ? ' · commercial : ' + (x.commercial || 'non attribué') : ''}</div>
     <div className="row" style={{ gap: 6, marginTop: 4, fontSize: 12 }}>
@@ -65,7 +76,58 @@ function Ligne({ x, gestion, sel, choisir }) {
       {x.demandes > 0 && <span className="etq rose">{x.demandes} demande(s) de correction</span>}
       {x.non_lus > 0 && <span className="etq ok">{x.non_lus} message(s) non lu(s)</span>}
     </div>
-  </button>;
+  </div>;
+}
+
+// ----- Récap de la direction : rémunérations à valider (dossiers validés par la gestion) -----
+const eur = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €');
+export function RecapRemuneration() {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const charger = () => rpc('pilotage_remu_a_valider').then(setD).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, []);
+  if (err && !d) return <div className="banner">{err}</div>;
+  if (!d || !(d.dossiers || []).length) return null;
+  return <section className="card" style={{ marginBottom: 16 }}>
+    <h2 style={{ fontSize: 17, margin: '0 0 4px' }}>Rémunérations à valider <span className="pastille">{d.dossiers.length}</span></h2>
+    <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Dossiers validés par la gestion : vérifier la commission calculée, la corriger si besoin, puis valider. {d.valides_30j ? `${d.valides_30j} dossier(s) validé(s) ces 30 derniers jours.` : ''}</p>
+    {err && <div className="err">{err}</div>}
+    <div className="stack" style={{ gap: 8 }}>{d.dossiers.map((x) => <DossierRemu key={x.objet} x={x} apres={charger} setErr={setErr} />)}</div>
+  </section>;
+}
+
+function DossierRemu({ x, apres, setErr }) {
+  const [corriger, setCorriger] = useState(false);
+  const [l, setL] = useState(() => x.lignes.map((y) => ({ ...y, saisi: String(y.montant ?? ''), note: '' })));
+  const total = l.reduce((t, y) => t + (Number(String(y.saisi).replace(',', '.')) || 0), 0);
+  const valider = async () => {
+    setErr('');
+    try {
+      await rpc('pilotage_remu_valider', { p_objet: x.objet, p_annuler: false,
+        p_lignes: l.map((y) => ({ regle: y.regle, beneficiaire: y.beneficiaire, montant: Number(String(y.saisi).replace(',', '.')), note: y.note })) });
+      apres();
+    } catch (e) { setErr(e.message); }
+  };
+  return <details className="kcarte normale" style={{ cursor: 'default' }}>
+    <summary style={{ cursor: 'pointer' }}>
+      <span className="kcarte-titre">{x.titre}</span> <span className="muted">· {x.bailleur || ''} · total {eur(total)}{x.gestion_le ? ' · validé par la gestion le ' + date(x.gestion_le) : ''}</span>
+    </summary>
+    <div className="table-wrap" style={{ marginTop: 8 }}><table>
+      <thead><tr><th>Bénéficiaire</th><th>Étape</th><th>Base de calcul</th><th>Montant</th></tr></thead>
+      <tbody>{l.map((y, i) => <tr key={y.regle + y.beneficiaire}>
+        <td>{y.prenom || '—'}</td><td>{y.phase}<div className="muted">{y.condition}</div></td><td className="muted">{y.base}</td>
+        <td>{corriger
+          ? <><input style={{ width: 90, textAlign: 'right' }} inputMode="decimal" value={y.saisi} onChange={(e) => setL(l.map((z, j) => (j === i ? { ...z, saisi: e.target.value } : z)))} />
+            {Number(String(y.saisi).replace(',', '.')) !== Number(y.montant) && <input style={{ width: '100%', marginTop: 4 }} placeholder="Raison de la correction"
+              value={y.note} onChange={(e) => setL(l.map((z, j) => (j === i ? { ...z, note: e.target.value } : z)))} />}</>
+          : eur(y.montant)}</td></tr>)}</tbody>
+    </table></div>
+    <div className="row" style={{ marginTop: 8 }}>
+      <button className="btn plein" onClick={valider}>{corriger ? 'Valider les montants saisis' : 'Valider la rémunération'}</button>
+      <button className="btn gris" onClick={() => setCorriger(!corriger)}>{corriger ? 'Revenir au calcul' : 'Corriger un montant'}</button>
+      {x.bail_a_valider && <span className="muted" style={{ fontSize: 12 }}>Valider ici valide aussi le bail pour les commissions.</span>}
+    </div>
+  </details>;
 }
 
 // Le bandeau du circuit est affiché par le dossier lui-même (mandat ou bail)
