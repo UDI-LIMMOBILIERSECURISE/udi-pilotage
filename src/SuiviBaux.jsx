@@ -25,7 +25,7 @@ const ETATS = {
 // Catégorie Rivage où déposer le justificatif d'un suivi : le dépôt fait passer le suivi à l'échéance suivante (027)
 const CATEG_JUSTIF = { assurance: 'Attestation d’assurance habitation', entretien: 'Attestation d’entretien de chaudière ou Contrats d’entretien', dpe: 'Diagnostic de Performance Énergétique',
   garantie: 'Acte de caution ou Documents de caution', caution: 'Acte de caution ou Documents de caution', charges_regul: 'Avis de régularisation de charges' };
-const CANAL = { mail_locataire: 'Mail au locataire', mail_bailleur: 'Mail au bailleur', sms_rivage: 'SMS (Rivage)', lrar: 'Recommandé', tache: 'Tâche' };
+const CANAL = { mail_locataire: 'Mail au locataire', mail_bailleur: 'Mail au bailleur', sms: 'SMS au locataire', sms_rivage: 'SMS au locataire', lrar: 'Recommandé', tache: 'Tâche' };
 
 function useEmail() {
   const [e, setE] = useState('');
@@ -110,6 +110,8 @@ export function DossierBail({ b, peut, moi, apres }) {
   const agir = async (fn, args) => { setErr(''); try { await rpc(fn, args); await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await charger(); apres(); } catch (e) { setErr(e.message); } };
   const ech = d.echeance || {}; const fiche = d.fiche || {};
   const ctx = { bail: b, fiche, ech, contacts: d.contacts, moi: { prenom: moi.prenom, email } };
+  // Relances, suivis, échéance, paliers et actes : pilotés par la gestion. Le commercial (circuit) ne garde la main que sur le contrôle d'entrée.
+  const gere = peut && (!moi?.role || ['direction', 'superviseur', 'gestionnaire'].includes(moi.role));
   const ouvrirMail = (code, extra, etape) => {
     const m = preparer(code, { ...ctx, ...extra });
     if (m) setMail({ m, etape });
@@ -145,45 +147,47 @@ export function DossierBail({ b, peut, moi, apres }) {
       <b>{SEV[a.grav] || 'Normale'}</b> · {a.libelle}
       {a.ob && <div className="muted">{a.ob.libelle} · échéance le {date(a.ob.prochaine)} · {CANAL[a.ob.a_faire.canal]} prévu le {date(a.ob.a_faire.date)}</div>}
       {a.ob && CATEG_JUSTIF[a.ob.nature] && <div className="muted" style={{ fontSize: 12 }}>Justificatif reçu : le déposer dans Rivage, catégorie « {CATEG_JUSTIF[a.ob.nature]} » (sur le bail ou le lot) ; le suivi passe alors à l’échéance suivante.</div>}
-      {peut && <div className="row" style={{ marginTop: 6 }}>
+      {gere && <div className="row" style={{ marginTop: 6 }}>
         {a.ech && ech.action === 'informer' && <button className="btn plein" onClick={() => ouvrirMail('echeance_info', {}, { cle: ech.cle, etape: 'informe', detail: 'Bailleur informé' })}>Préparer le mail au bailleur</button>}
         {a.ech && ech.action === 'relancer' && <button className="btn plein" onClick={() => ouvrirMail('echeance_relance', {}, { cle: ech.cle, etape: 'relance', detail: 'Bailleur relancé' })}>Préparer la relance</button>}
         {a.ech && ech.action === 'lrar_silence' && <button className="btn plein" onClick={() => ouvrirMail('echeance_lrar', {}, { cle: ech.cle, etape: 'lrar', detail: 'LRAR envoyée au bailleur' })}>Préparer la LRAR</button>}
         {a.ech && ['fin_auto', 'verifier_contrat'].includes(ech.action) && <button className="btn" onClick={() => etapeFaite(ech.cle, 'vu', 'Vu')}>C’est noté</button>}
-        {a.ob && a.ob.a_faire.modele && a.ob.a_faire.canal !== 'sms_rivage' && <button className="btn plein" onClick={() => ouvrirMail(a.ob.a_faire.modele, { ob: a.ob }, { cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle })}>
+        {a.ob && a.ob.a_faire.modele && !['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <button className="btn plein" onClick={() => ouvrirMail(a.ob.a_faire.modele, { ob: a.ob }, { cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle })}>
           {a.ob.a_faire.canal === 'lrar' ? 'Préparer le recommandé' : 'Préparer le mail'}</button>}
-        {a.ob && a.ob.a_faire.canal === 'sms_rivage' && <SmsRivage texte={SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} fait={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), 'SMS envoyé depuis Rivage')} />}
+        {a.ob && ['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <SmsRivage texte={SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} tels={(d.contacts?.locataires || []).map((l) => l.telephone).filter(Boolean)}
+          envoi={{ bail: b.bail_id, cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle }} apres={async () => { await charger(); apres(); }}
+          fait={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), 'SMS envoyé au locataire')} />}
         {a.ob && <button className="btn" onClick={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), a.ob.a_faire.libelle)}>Marquer fait</button>}
         {a.ob && <Realise ob={a.ob} agir={agir} />}
       </div>}
     </div>)}
-    {mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={peut} />}
+    {mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={gere} />}
 
     {synthese ? <>
       {/* Mode synthèse (même présentation que le mandat) : la fiche d'abord, le détail replié en dessous */}
-      <Synthese d={d} b={b} peut={peut} soumis={soumis} parametrer={() => setParametrer(true)} />
+      <Synthese d={d} b={b} peut={gere} soumis={soumis} parametrer={() => setParametrer(true)} />
       <details className="replie" open={!!ech.action || ['a_informer', 'attente_bailleur', 'conge_a_delivrer', 'conge_en_cours', 'conge_depose', 'hors_delai'].includes(ech.etat)} style={{ marginTop: 14 }}>
         <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Échéance du bail · {date(ech.echeance)}{ETATS[ech.etat] ? ' · ' + ETATS[ech.etat] : ''}</summary>
-        <Echeance d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
+        <Echeance d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
       </details>
       <details className="replie" style={{ marginTop: 10 }} open={(d.obligations || []).some((o) => o.actif && (o.a_faire || o.en_retard))}>
         <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Suivis et relances ({(d.obligations || []).filter((o) => o.actif).length})</summary>
-        <Suivis d={d} b={b} peut={peut} agir={agir} />
+        <Suivis d={d} b={b} peut={gere} agir={agir} />
       </details>
-      <Paliers d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
-      <Actes d={d} b={b} peut={peut} agir={agir} />
+      <Paliers d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
+      <Actes d={d} b={b} peut={gere} agir={agir} />
       {journal.length > 0 && <details className="replie" style={{ marginTop: 10 }}>
         <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Journal ({journal.length})</summary>
         <ol className="histo">{journal.slice(0, 30).map((j, i) =>
           <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol>
       </details>}
     </> : <>
-      <Echeance d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
+      <Echeance d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
       {(d.controle?.go_le || !soumis) && <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}><button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse du bail</button></div>}
       <Controle d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} />
-      <Suivis d={d} b={b} peut={peut} agir={agir} />
-      <Paliers d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} />
-      <Actes d={d} b={b} peut={peut} agir={agir} />
+      <Suivis d={d} b={b} peut={gere} agir={agir} />
+      <Paliers d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
+      <Actes d={d} b={b} peut={gere} agir={agir} />
       {journal.length > 0 && <><h3>Journal</h3><ol className="histo">{journal.slice(0, 30).map((j, i) =>
         <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol></>}
     </>}
@@ -191,12 +195,35 @@ export function DossierBail({ b, peut, moi, apres }) {
   </>;
 }
 
-export function SmsRivage({ texte, fait }) {
+// SMS au locataire (065, 066) : envoi direct par le pilotage (Zapier → Twilio, expéditeur UDIGESTION) au numéro Rivage du locataire,
+// texte modifiable avant l'envoi. À défaut, copie du texte pour un envoi depuis le téléphone de l'agence.
+export function SmsRivage({ texte, fait, tels = [], envoi, apres }) {
+  const [t, setT] = useState(texte || '');
+  const [etat, setEtat] = useState({ charge: false, err: '', ok: '' });
   const [vu, setVu] = useState(false);
-  return <>
-    <button className="btn plein" onClick={() => { navigator.clipboard?.writeText(texte || ''); setVu(true); }}>Copier le SMS (à envoyer depuis Rivage)</button>
-    {vu && <><span className="muted" style={{ fontSize: 12 }}>Copié : « {texte} »</span><button className="btn" onClick={fait}>SMS envoyé</button></>}
-  </>;
+  useEffect(() => { setT(texte || ''); }, [texte]);
+  const envoyer = async () => {
+    setEtat({ charge: true, err: '', ok: '' });
+    const { data, error } = await supabase.functions.invoke('pilotage-sms', { body: { ...envoi, texte: t } });
+    if (error || !data?.ok) {
+      let msg = data?.error;
+      if (!msg && error?.context?.json) { try { msg = (await error.context.json()).error; } catch { /* réponse illisible */ } }
+      setEtat({ charge: false, err: msg || 'SMS non envoyé', ok: '' }); return;
+    }
+    setEtat({ charge: false, err: '', ok: `SMS envoyé au ${data.resultats.filter((r) => r.ok).map((r) => r.telephone).join(', ')}` });
+    apres && await apres();
+  };
+  return <div style={{ width: '100%' }}>
+    <textarea rows={3} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={t} onChange={(e) => setT(e.target.value)} />
+    <div className="muted" style={{ fontSize: 12 }}>{t.length} caractères{t.length > 160 ? ` · ${Math.ceil(t.length / 153)} SMS facturés` : ''} · destinataire : {tels.length ? tels.join(', ') : 'aucun numéro du locataire dans Rivage'}</div>
+    <div className="row" style={{ marginTop: 4 }}>
+      {envoi && tels.length > 0 && <button className="btn plein" disabled={etat.charge || !t.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer le SMS (UDIGESTION)'}</button>}
+      <button className="btn" onClick={() => { navigator.clipboard?.writeText(t); setVu(true); }}>Copier le texte</button>
+      {vu && <button className="btn" onClick={fait}>Envoyé depuis un téléphone</button>}
+    </div>
+    {etat.err && <div className="err">{etat.err}</div>}
+    {etat.ok && <div style={{ color: 'var(--teal)', fontSize: 13 }}>{etat.ok}</div>}
+  </div>;
 }
 
 export function Realise({ ob, agir }) {
@@ -329,13 +356,24 @@ function ChampFiche({ b, fiche, champ, libelle, peut, agir }) {
     onBlur={() => { if (val !== (v == null ? '' : String(v))) enr(val); }} style={def.type === 'text' ? { minWidth: 260 } : undefined} /></label>;
 }
 
+// Qui fournit chaque pièce du contrôle d'entrée (064) : bailleur, locataire ou agence (pièces établies par UDI Gestion)
+let fournisseursP = null;
+export function useFournisseurs() {
+  const [f, setF] = useState({});
+  useEffect(() => { (fournisseursP = fournisseursP || rpc('pilotage_pieces_fournisseurs').catch(() => { fournisseursP = null; return {}; })).then((x) => setF(x || {})); }, []);
+  return f;
+}
+export const FOURNI_PAR = { bailleur: 'à fournir par le bailleur', locataire: 'à fournir par le locataire', agence: 'à établir par l’agence' };
+
 // ----- Contrôle d'entrée -----
 function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
+  const fourn = useFournisseurs();
   const c = d.controle || { items: [] };
   const [ouvert, setOuvert] = useState(true); // après le GO, on n'arrive ici que par « Modifier le paramétrage »
   const [lecture, setLecture] = useState({ charge: false, err: '' });
   useEffect(() => { setOuvert(true); }, [b.bail_id]);
-  const manquants = c.items.filter((i) => i.bloc === 'pieces' && i.statut !== 'ok' && i.statut !== 'sans_objet').map((i) => i.libelle);
+  const manquantsDe = (qui) => c.items.filter((i) => i.bloc === 'pieces' && i.statut !== 'ok' && i.statut !== 'sans_objet' && (fourn[i.cle] || 'bailleur') === qui).map((i) => i.libelle);
+  const manqBailleur = manquantsDe('bailleur'); const manqLocataire = manquantsDe('locataire'); const manqAgence = manquantsDe('agence');
   // Écarts détectés (Rivage vide, différence avec le bail lu, incohérence légale) : restent visibles même une fois répondus.
   const ecarts = c.items.filter((i) => i.auto === 'anomalie' && i.bloc !== 'pieces');
   const ficheRivage = 'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id;
@@ -375,8 +413,10 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
         {/* Bail lu une seule fois : plus de bouton de lecture une fois la lecture enregistrée */}
         {!d.lecture && <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le bail déposé dans Rivage (IA)'}</button>}
         {!d.lecture && <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>}
-        {manquants.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes', { manquants }, { cle: 'e:' + b.bail_id + ':pieces', etape: auj(), detail: 'Pièces demandées au bailleur' })}>Demander les pièces au bailleur</button>}
+        {manqBailleur.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes', { manquants: manqBailleur }, { cle: 'e:' + b.bail_id + ':pieces', etape: auj(), detail: 'Pièces demandées au bailleur' })}>Demander les pièces au bailleur ({manqBailleur.length})</button>}
+        {manqLocataire.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes_locataire', { manquants: manqLocataire }, { cle: 'e:' + b.bail_id + ':pieces_locataire', etape: auj(), detail: 'Pièces demandées au locataire' })}>Demander les pièces au locataire ({manqLocataire.length})</button>}
       </div>}
+      {manqAgence.length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>À établir et déposer dans Rivage par l’agence (pas de demande au bailleur ni au locataire) : {manqAgence.join(', ')}.</div>}
       {lecture.err && <div className="err">{lecture.err}</div>}
     </div>
     {ecartsOuverts.length > 0 && <div className="mini-alerte critique">
