@@ -113,6 +113,8 @@ export function preparer(code, ctx) {
       return L({ ...versBai, objet: `Suite à donner : entretien non réalisé — ${adr}`, corps: `${salutation(nomsBai)}\n\nL'entretien (${ob.libelle || 'équipement'}) n'est toujours pas justifié par ${civil(nomsLoc)} malgré la mise en demeure. Si la clause résolutoire du bail vise ce manquement, vous pouvez envisager de vous en prévaloir, ce qui suppose un commandement par commissaire de justice, ou saisir le juge.\n\nC'est une décision importante : je vous propose d'en parler avant toute démarche. Quelle suite souhaitez-vous donner ?` });
 
     // ----- Compteurs -----
+    case 'compteur_prevenance':
+      return L({ ...versLoc, objet: `Relevé de vos compteurs le ${d(ob.prochaine)} — ${adr}`, corps: `${salutation(nomsLoc)}\n\nPour établir la régularisation des charges de votre ${commercial ? 'local' : 'logement'} situé ${adr}, nous aurons besoin du relevé de vos compteurs (${ob.libelle || 'eau, chauffage'}) à la date du ${d(ob.prochaine)}.\n\nCe jour-là, merci de nous envoyer en réponse à ce mail une photo lisible de chaque compteur, sur laquelle apparaissent l'index et, si possible, le numéro du compteur.\n\nSans relevé de votre part, nous devrons organiser un passage sur place.` });
     case 'compteur_1':
       return L({ ...versLoc, objet: `Relevé de vos compteurs — ${adr}`, corps: `${salutation(nomsLoc)}\n\nMerci de nous transmettre le relevé de vos compteurs (${ob.libelle || 'eau, chauffage'}) au ${d(ob.prochaine)}, avec une photo de chaque compteur sur laquelle l'index est lisible. Ces relevés servent à la régularisation de vos charges.` });
     case 'compteur_2':
