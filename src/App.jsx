@@ -494,7 +494,7 @@ function Obligations() {
   );
 }
 
-const CANAUX = { mail_locataire: 'Mail au locataire', mail_bailleur: 'Mail au bailleur', sms_rivage: 'SMS (Rivage)', lrar: 'Recommandé', tache: 'Tâche' };
+const CANAUX = { mail_locataire: 'Mail au locataire', mail_bailleur: 'Mail au bailleur', sms: 'SMS (envoyé par l’agence)', sms_rivage: 'SMS (ancien : Rivage)', lrar: 'Recommandé', tache: 'Tâche' };
 const NOM_NATURE = (n) => ({ ...NATURES_MANDAT, ...NATURES })[n] || n;
 const delai = (j) => (j === 0 ? 'À l’échéance' : j < 0 ? `J${j}` : `J+${j}`);
 
