@@ -329,13 +329,24 @@ function ChampFiche({ b, fiche, champ, libelle, peut, agir }) {
     onBlur={() => { if (val !== (v == null ? '' : String(v))) enr(val); }} style={def.type === 'text' ? { minWidth: 260 } : undefined} /></label>;
 }
 
+// Qui fournit chaque pièce du contrôle d'entrée (064) : bailleur, locataire ou agence (pièces établies par UDI Gestion)
+let fournisseursP = null;
+export function useFournisseurs() {
+  const [f, setF] = useState({});
+  useEffect(() => { (fournisseursP = fournisseursP || rpc('pilotage_pieces_fournisseurs').catch(() => { fournisseursP = null; return {}; })).then((x) => setF(x || {})); }, []);
+  return f;
+}
+export const FOURNI_PAR = { bailleur: 'à fournir par le bailleur', locataire: 'à fournir par le locataire', agence: 'à établir par l’agence' };
+
 // ----- Contrôle d'entrée -----
 function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
+  const fourn = useFournisseurs();
   const c = d.controle || { items: [] };
   const [ouvert, setOuvert] = useState(true); // après le GO, on n'arrive ici que par « Modifier le paramétrage »
   const [lecture, setLecture] = useState({ charge: false, err: '' });
   useEffect(() => { setOuvert(true); }, [b.bail_id]);
-  const manquants = c.items.filter((i) => i.bloc === 'pieces' && i.statut !== 'ok' && i.statut !== 'sans_objet').map((i) => i.libelle);
+  const manquantsDe = (qui) => c.items.filter((i) => i.bloc === 'pieces' && i.statut !== 'ok' && i.statut !== 'sans_objet' && (fourn[i.cle] || 'bailleur') === qui).map((i) => i.libelle);
+  const manqBailleur = manquantsDe('bailleur'); const manqLocataire = manquantsDe('locataire'); const manqAgence = manquantsDe('agence');
   // Écarts détectés (Rivage vide, différence avec le bail lu, incohérence légale) : restent visibles même une fois répondus.
   const ecarts = c.items.filter((i) => i.auto === 'anomalie' && i.bloc !== 'pieces');
   const ficheRivage = 'https://rivage.immo/leasing_contracts?leasing_contract_id=' + b.bail_id;
@@ -375,8 +386,10 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
         {/* Bail lu une seule fois : plus de bouton de lecture une fois la lecture enregistrée */}
         {!d.lecture && <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le bail déposé dans Rivage (IA)'}</button>}
         {!d.lecture && <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>}
-        {manquants.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes', { manquants }, { cle: 'e:' + b.bail_id + ':pieces', etape: auj(), detail: 'Pièces demandées au bailleur' })}>Demander les pièces au bailleur</button>}
+        {manqBailleur.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes', { manquants: manqBailleur }, { cle: 'e:' + b.bail_id + ':pieces', etape: auj(), detail: 'Pièces demandées au bailleur' })}>Demander les pièces au bailleur ({manqBailleur.length})</button>}
+        {manqLocataire.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes_locataire', { manquants: manqLocataire }, { cle: 'e:' + b.bail_id + ':pieces_locataire', etape: auj(), detail: 'Pièces demandées au locataire' })}>Demander les pièces au locataire ({manqLocataire.length})</button>}
       </div>}
+      {manqAgence.length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>À établir et déposer dans Rivage par l’agence (pas de demande au bailleur ni au locataire) : {manqAgence.join(', ')}.</div>}
       {lecture.err && <div className="err">{lecture.err}</div>}
     </div>
     {ecartsOuverts.length > 0 && <div className="mini-alerte critique">
