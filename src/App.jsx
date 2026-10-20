@@ -215,15 +215,6 @@ function Journee({ moi }) {
                   {d.dossier?.lien && <a className="btn gris" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
                 </div>
               </div>
-              {fiche === d.cle && <section className="panneau" style={{ marginTop: 12 }}>
-                <button className="fermer" onClick={() => setFiche(null)} aria-label="Fermer la fiche">×</button>
-                {d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'))
-                  ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
-                  : d.bail_id
-                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
-                      peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
-                  : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
-              </section>}
               <div className="stack" style={{ gap: 6, marginTop: 10 }}>
                 {d.alertes.map((a) => (
                   <div key={a.id} className={'alerte ' + a.gravite}>
@@ -245,6 +236,16 @@ function Journee({ moi }) {
                   </div>
                 ))}
               </div>
+              {fiche === d.cle && <section className="panneau" style={{ marginTop: 12 }}>
+                <button className="fermer" onClick={() => setFiche(null)} aria-label="Fermer la fiche">×</button>
+                {d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'))
+                  ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
+                  : d.bail_id
+                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
+                      peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
+                  : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
+                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}><button className="btn" onClick={() => setFiche(null)}>Fermer la fiche</button></div>
+              </section>}
             </article>
           ))}
         </div>
