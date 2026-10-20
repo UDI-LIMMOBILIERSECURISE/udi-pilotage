@@ -1,6 +1,6 @@
--- 066 : envoi des SMS depuis le pilotage par Zapier et Twilio, expéditeur UDIGESTION (Nicolas, 20/10/2026)
+-- 066 : envoi des SMS depuis le pilotage par Zapier et Twilio, expéditeur UDI GESTION (Nicolas, 20/10/2026)
 --   Le bouton « Envoyer le SMS » d'une étape de relance appelle la fonction serveur pilotage-sms, qui transmet le SMS
---   au Zap (webhook Zapier → Twilio « Send SMS », expéditeur UDIGESTION). Le numéro est toujours celui du locataire
+--   au Zap (webhook Zapier → Twilio « Send SMS », expéditeur UDI GESTION). Le numéro est toujours celui du locataire
 --   dans Rivage, jamais un numéro saisi à la main. Chaque envoi est tracé ici et coche l'étape du suivi.
 --   L'adresse du webhook est un secret de la fonction (ZAPIER_SMS_WEBHOOK), jamais dans le code ni dans la base.
 
@@ -53,7 +53,7 @@ begin
    where id = p_id returning * into e;
   if p_ok and e.cle is not null and e.etape is not null then
     insert into pilotage.suivis_etapes (cle, etape, par, detail)
-    values (e.cle, e.etape, e.par, coalesce(p_detail, 'SMS envoyé') || ' (UDIGESTION, au ' || e.telephone || ')')
+    values (e.cle, e.etape, e.par, coalesce(p_detail, 'SMS envoyé') || ' (UDI GESTION, au ' || e.telephone || ')')
     on conflict (cle, etape) do update set fait_le = now(), par = excluded.par, detail = excluded.detail;
   end if;
 end $$;
