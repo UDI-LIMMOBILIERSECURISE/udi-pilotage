@@ -211,6 +211,25 @@ export function preparer(code, ctx) {
     case 'entretien_lot':
       return L({ ...versBai, objet: `Entretien à prévoir — ${adr}`, corps: `${salutation(nomsBai)}\n\nLe lot ${ob.lot ? ob.lot + ' ' : ''}du ${adr} est actuellement vacant. L'entretien annuel de l'équipement suivant est à prévoir avant le ${d(ob.prochaine)} : ${(ob.libelle || 'équipement').replace(/ \(lot vacant\)$/, '').replace(/^Entretien /, '')}. Pendant la vacance, il est à votre charge.\n\nSouhaitez-vous que nous le commandions pour votre compte ? Nous vous transmettrons l'attestation d'intervention.` });
 
+    // ----- Restitution du dépôt de garantie (054) -----
+    // ctx.dg = { depot, sortie, limite_1_mois, limite_2_mois, loyer_hc, demande_le }
+    // Uniquement quand le dépôt est détenu par le bailleur (deposit_retained_by = landlord) : proposé dès 15 jours avant la fin du bail
+    case 'dg_reversement_demande': {
+      const avant = ctx.dg?.sortie && ctx.dg.sortie > new Date().toISOString().slice(0, 10);
+      return L({ ...versBai, objet: `Dépôt de garantie à reverser — ${adr}`, corps: `${salutation(nomsBai)}\n\n${civil(nomsLoc)} ${avant ? 'quittera' : 'a quitté'} le logement situé ${adr} le ${d(ctx.dg?.sortie)}. Le dépôt de garantie de ${eur(ctx.dg?.depot)}, qui vous a été reversé à l'entrée du locataire, ${avant ? 'devra lui être restitué' : 'doit lui être restitué'} au plus tard le ${d(ctx.dg?.limite_1_mois)} si l'état des lieux de sortie est conforme à celui d'entrée, le ${d(ctx.dg?.limite_2_mois)} dans le cas contraire, déduction faite des sommes justifiées. Au-delà, la loi prévoit une majoration de 10 % du loyer mensuel hors charges par mois de retard.\n\nMerci de nous retourner ce montant par virement sur le compte de l'agence, [IBAN de l'agence], en indiquant l'adresse du bien en référence. Nous établissons le décompte de sortie et procédons à la restitution.` });
+    }
+    case 'dg_reversement_relance':
+      return L({ ...versBai, objet: `Relance : dépôt de garantie à reverser — ${adr}`, corps: `${salutation(nomsBai)}\n\nSauf erreur de notre part, nous n'avons pas reçu le reversement du dépôt de garantie de ${eur(ctx.dg?.depot)} de ${civil(nomsLoc)}, demandé le ${d(ctx.dg?.demande_le)}.\n\nLa restitution au locataire doit intervenir au plus tard le ${d(ctx.dg?.limite_1_mois)} si l'état des lieux de sortie est conforme. Passé le délai légal, le dépôt restant dû est majoré de 10 % du loyer hors charges, soit ${eur(ctx.dg?.loyer_hc != null ? Math.round(ctx.dg.loyer_hc * 10) / 100 : null)}, par mois de retard commencé, et cette majoration resterait à votre charge.\n\nMerci de procéder au virement dès que possible.` });
+    case 'dg_restitution':
+      return L({ ...versLoc, objet: `Restitution de votre dépôt de garantie — ${adr}`, corps: `${salutation(nomsLoc)}\n\nÀ la suite de votre départ du logement situé ${adr}, voici le décompte de votre dépôt de garantie :\n\nDépôt de garantie versé : ${eur(ctx.dg?.depot)}\n[Retenues justifiées : intitulé – montant, avec justificatif joint]\n[Solde de charges : montant]\nMontant restitué : [montant]\n\nCe montant est viré ce jour sur le compte que vous nous avez communiqué.\n\nPour toute question sur ce décompte, répondez à ce mail.` });
+
+    // ----- Révision ou évolution du loyer, au bailleur (054) : ctx.revision = { ancien, nouveau, le, indice, commercial }
+    case 'revision_bailleur': {
+      const r = ctx.revision || {}; const i = r.indice || {};
+      const indice = i.nature ? `, en application de la clause de révision du bail (indice ${String(i.nature).toUpperCase().replace(/_/g, ' ')} du ${i.quarter ? 'T' + i.quarter + ' ' : ''}${i.year || ''} : ${String(i.value).replace('.', ',')})` : '';
+      return L({ ...versBai, objet: `Révision du loyer — ${adr}`, corps: `${salutation(nomsBai)}\n\nLe loyer de votre bien situé ${adr}, loué à ${civil(nomsLoc)}, a été révisé${indice}. Il passe de ${eur(r.ancien)} à ${eur(r.nouveau)} par mois hors charges${r.commercial ? ' et hors taxes' : ''}.\n\nLe nouveau montant est appliqué sur les appels de loyer et apparaîtra sur votre compte rendu de gestion.` });
+    }
+
     // ----- Paliers -----
     case 'palier_locataire':
       return L({ ...versLoc, objet: `Évolution de votre loyer — ${adr}`, corps: `${salutation(nomsLoc)}\n\nComme prévu à votre bail, votre loyer évolue à compter du ${d(ctx.palier?.debut)}. Le montant appelé sera de ${eur(ctx.palier?.loyer_rivage)} hors charges${commercial ? ' et hors taxes' : ''}.` });

@@ -205,6 +205,7 @@ function Journee({ moi }) {
 const MAILS_ALERTE = {
   colocataire_sorti: [['coloc_sortant', 'Mail aux colocataires'], ['coloc_bailleur', 'Mail au bailleur']],
   garant_sorti: [['garant_fin', 'Mail au bailleur']],
+  loyer_modifie: [['revision_bailleur', 'Mail au bailleur']],
 };
 const dateTitre = (t) => { const x = (t || '').match(/(\d{2})\/(\d{2})\/(\d{4})/); return x ? `${x[3]}-${x[2]}-${x[1]}` : null; };
 
@@ -226,8 +227,9 @@ function MailAlerte({ a }) {
     try {
       const c = await rpc('pilotage_contacts_bail', { p_bail: a.objet_id });
       const nom = a.regle === 'colocataire_sorti' ? ((a.titre || '').match(/colocataire : (.+) le \d{2}\//) || [])[1] : null;
+      const revision = a.regle === 'loyer_modifie' ? await rpc('pilotage_loyer_changement', { p_bail: a.objet_id }) : null;
       const m = preparer(code, { bail: { adresse: c.adresse || a.dossier?.adresse }, contacts: c, moi,
-        coloc: { nom, sortie: dateTitre(a.titre) }, garant: { fin: dateTitre(a.titre) } });
+        coloc: { nom, sortie: dateTitre(a.titre) }, garant: { fin: dateTitre(a.titre) }, revision });
       if (m) setMail({ m });
     } catch (e) { setErr(e.message); }
   };
@@ -679,6 +681,7 @@ function SortiesDG() {
         <AlertesLiees items={s.alertes} />
         {aCharge.length > 0 && <div className="mini-alerte haute"><b>À regarder avant restitution</b> · {aCharge.length} incident(s) à la charge du locataire :
           {aCharge.map((i) => <div key={i.numero}><a href={i.lien} target="_blank" rel="noreferrer">n°{i.numero} {i.titre}</a> · {ST_INC[i.statut] || i.statut} · estimé {euro(i.montant_estime)}</div>)}</div>}
+        <SuiviReversement s={s} />
         <h3>Étapes</h3>
         <ol className="etapes">{etapesDG(s).map((st) => <li key={st.l} className={st.fait ? 'fait' : st.retard ? 'retard' : ''}>
           <span className="puce">{st.fait ? '✓' : ''}</span><span>{st.l}{st.info ? <span className="muted"> · {st.info}</span> : null}</span></li>)}</ol>
@@ -702,6 +705,62 @@ function SortiesDG() {
     </AvecDetail>
     <p className="muted" style={{ marginTop: 16 }}>Délais : restitution sous 1 mois après la remise des clés si l’état des lieux de sortie est conforme à celui d’entrée, 2 mois sinon (loi du 6 juillet 1989, art. 22) ; au-delà, majoration de 10 % du loyer mensuel hors charges par mois de retard commencé. Rivage n’expose ni la date de remise des clés ni la conformité de l’EDL : le calcul part de la date de fin du bail.</p>
   </>;
+}
+
+const plusMoisDG = (x, n) => { if (!x) return null; const t = new Date(x); t.setMonth(t.getMonth() + n); return t.toISOString().slice(0, 10); };
+
+// Détenteur du dépôt, reversement du bailleur et mails (054). Rivage ne donne ni l'un ni l'autre : saisie de la gestion.
+function SuiviReversement({ s }) {
+  const moi = useMoiMail();
+  const [suivi, setSuivi] = useState(s.suivi || {});
+  const [mail, setMail] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { setSuivi(s.suivi || {}); setMail(null); setErr(''); }, [s.bail_id]);
+  const maj = async (champ, valeur) => {
+    setErr('');
+    try { await rpc('pilotage_dg_maj', { p_bail: s.bail_id, p_champ: champ, p_valeur: valeur ?? '' }); setSuivi((x) => ({ ...x, [champ]: valeur || null })); }
+    catch (e) { setErr(e.message); }
+  };
+  // Départ : sortie réelle, sinon dernière sortie annoncée dans Rivage, sinon fin du bail (même règle que le 055)
+  const sortie = s.sortie_reelle || (s.sortie_locataires?.tous_sortis ? s.sortie_locataires.derniere_sortie : null) || s.fin;
+  const ouvrir = async (code, champ) => {
+    setErr('');
+    try {
+      const c = await rpc('pilotage_contacts_bail', { p_bail: s.bail_id });
+      const m = preparer(code, { bail: { adresse: c.adresse || s.adresse }, contacts: c, moi,
+        dg: { depot: s.depot, loyer_hc: s.loyer_hc, sortie, limite_1_mois: plusMoisDG(sortie, 1), limite_2_mois: plusMoisDG(sortie, 2), demande_le: suivi.demande_le } });
+      if (m) setMail({ m, champ });
+    } catch (e) { setErr(e.message); }
+  };
+  // Détenteur : saisie de la gestion, sinon champ deposit_retained_by du bail lu dans Rivage (055)
+  const detenu = suivi.detenu_par || s.detenu_rivage || null;
+  const bailleur = detenu === 'bailleur';
+  // Dépôt chez le bailleur : demande de reversement dès le congé (bail en sortie dans Rivage ou sortie saisie pour tous les locataires)
+  const conge = s.statut === 'move_out' || !!s.sortie_locataires?.tous_sortis;
+  if (s.remboursee || !(s.parti || conge)) return null;
+  return <div className="mini-alerte normale" style={{ margin: '10px 0' }}>
+    <div className="row">
+      <b>Dépôt détenu par</b>
+      <select value={suivi.detenu_par || ''} onChange={(e) => maj('detenu_par', e.target.value)} aria-label="Détenteur du dépôt">
+        <option value="">{s.detenu_rivage ? `Selon Rivage : ${s.detenu_rivage === 'bailleur' ? 'le bailleur' : 'l’agence'}` : 'À préciser'}</option>
+        <option value="bailleur">le bailleur</option><option value="agence">l’agence</option></select>
+      {s.detenu_rivage && suivi.detenu_par && suivi.detenu_par !== s.detenu_rivage && <span className="muted" style={{ color: 'var(--amber)' }}>différent de Rivage ({s.detenu_rivage === 'bailleur' ? 'bailleur' : 'agence'}) : corriger l’un ou l’autre</span>}
+    </div>
+    {bailleur && <div style={{ marginTop: 6 }}>
+      <div className="muted">{suivi.recu_le ? `Reversement reçu le ${date(suivi.recu_le)} : restituer au locataire.` : suivi.demande_le ? `Reversement demandé le ${date(suivi.demande_le)}${suivi.relance_le ? `, relancé le ${date(suivi.relance_le)}` : ''}.` : 'Reversement à demander au bailleur.'}</div>
+      {!suivi.recu_le && <div className="row" style={{ marginTop: 4 }}>
+        <button className="btn" onClick={() => ouvrir(suivi.demande_le ? 'dg_reversement_relance' : 'dg_reversement_demande', suivi.demande_le ? 'relance_le' : 'demande_le')}>{suivi.demande_le ? 'Relancer le bailleur' : 'Demander le reversement au bailleur'}</button>
+        <label className="muted">Reçu le <input type="date" onBlur={(e) => e.target.value && maj('recu_le', e.target.value)} /></label>
+      </div>}
+    </div>}
+    {(detenu === 'agence' || suivi.recu_le) && <div className="row" style={{ marginTop: 6 }}>
+      <button className="btn" onClick={() => ouvrir('dg_restitution', 'restitution_mail_le')}>Mail de restitution au locataire</button>
+      {suivi.restitution_mail_le && <span className="muted">envoyé le {date(suivi.restitution_mail_le)}</span>}
+    </div>}
+    {err && <div className="err">{err}</div>}
+    {mail && <EditeurMail mail={mail} email={moi.email} fermer={() => setMail(null)} peut
+      marquer={async () => { await maj(mail.champ, auj()); setMail(null); }} />}
+  </div>;
 }
 
 // ----- Comptabilité -----
