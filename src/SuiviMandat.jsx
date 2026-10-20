@@ -322,7 +322,7 @@ function ClauseSimple({ i, repondre }) {
 // ----- Suivis du mandat : PNO, échéance du mandat, entretien d'un lot vacant, DPE d'un lot -----
 // Échéance et entretien des lots vacants sont créés automatiquement (034) ; PNO et DPE se saisissent ici.
 // Un justificatif PNO ou DPE déposé dans Rivage fait passer le suivi à l'échéance suivante.
-const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE',
+export const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE',
   entretien_immeuble: 'Entretien (immeuble)', ascenseur_ct: 'Contrôle technique de l’ascenseur', assurance_immeuble: 'Assurance de l’immeuble',
   permis_a_demander: 'Permis de louer à demander', permis_demande: 'Permis de louer : réponse de la mairie', permis_attestation: 'Attestation d’accord tacite',
   permis_refus: 'Permis de louer refusé', permis_caducite: 'Validité du permis de louer', permis_declaration: 'Déclaration de mise en location', permis_absent: 'Bail signé sans permis de louer',
