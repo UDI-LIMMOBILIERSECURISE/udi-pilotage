@@ -117,12 +117,16 @@ function AssuranceImmeuble({ m, g, agir }) {
   </div>;
 }
 
+// Libellés des pièces encore manquantes (ni reçues ni sans objet), repris dans les mails au bailleur (063)
+const piecesManquantes = (d) => ((d.controle || {}).items || []).filter((i) => i.bloc === 'pieces' && !regle(i)).map((i) => i.libelle);
+
 // ----- Pièces : toutes dans Rivage -----
-function Pieces({ m, c, repondre, lien }) {
+function Pieces({ m, d, c, repondre, lien, recharger, onErreur }) {
   const manq = c.items.filter((i) => i.bloc === 'pieces' && !regle(i));
   const faites = c.items.filter((i) => i.bloc === 'pieces' && regle(i));
   return <>
     <div className="groupe-tete" style={{ marginTop: 10 }}><b>Pièces du dossier</b></div>
+    {manq.length > 0 && <DemandePieces m={m} d={d} recharger={recharger} onErreur={onErreur} />}
     {!manq.length ? <div style={{ color: 'var(--teal)', fontSize: 13, padding: '6px 0' }}>✓ Toutes les pièces exigées sont dans Rivage.</div>
       : <div className="mini-alerte haute"><b>{manq.length} pièce(s) manquante(s)</b>
         {manq.map((i) => <div key={i.cle} className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid rgba(0,0,0,.08)', padding: '5px 0', color: 'var(--ink)' }}>
@@ -139,6 +143,41 @@ function Pieces({ m, c, repondre, lien }) {
         {i.auto === 'ok' && i.piece?.par_nom && !i.repondu && <VerifPiece i={i} m={m} repondre={repondre} />}
         {i.repondu && <button className="lien" style={{ marginLeft: 8 }} onClick={() => repondre(i, null)}>Revenir</button>}</li>)}</ul></details>}
   </>;
+}
+
+// Demande des pièces manquantes au bailleur (063) : brouillon Gmail, puis suivi de relances (J+7, J+14, appel à J+21)
+function DemandePieces({ m, d, recharger, onErreur }) {
+  const [mail, setMail] = useState(null);
+  const [moi, setMoi] = useState({ prenom: '', email: '' });
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setMoi((x) => ({ ...x, email: data?.session?.user?.email || '' })));
+    rpc('pilotage_moi').then((x) => setMoi((y) => ({ ...y, prenom: x?.prenom || '' }))).catch(() => {});
+  }, []);
+  const ob = (d.obligations || []).find((o) => o.nature === 'mandat_pieces' && o.actif);
+  const adresse = (d.lots[0] || {}).adresse || 'votre bien';
+  const preparerMail = (o, modele, etape, detail) => {
+    const x = preparer(modele, { bail: { adresse }, ob: o, contacts: d.contacts, mandat: d.mandat, moi, manquants: piecesManquantes(d) });
+    if (x) setMail({ m: x, etape: { cle: o.cle, etape, detail } });
+  };
+  const demander = async () => {
+    try { const o = await rpc('pilotage_mandat_pieces_demander', { p_mandat: m.id }); preparerMail(o, 'mandat_pieces', '1', 'Pièces demandées au bailleur'); }
+    catch (e) { onErreur(e.message); }
+  };
+  const envoye = async () => {
+    try { await rpc('pilotage_mandat_pieces_envoye', { p_mandat: m.id, p_etape: mail.etape.etape, p_detail: mail.etape.detail }); setMail(null); await recharger(); }
+    catch (e) { onErreur(e.message); }
+  };
+  const premier = ob && (ob.etapes || []).find((e) => e.ordre === 1);
+  return <div style={{ margin: '6px 0' }}>
+    <div className="row" style={{ gap: 8 }}>
+      {!ob || !premier?.fait_le
+        ? <button className="btn plein" onClick={() => (ob ? preparerMail(ob, 'mandat_pieces', '1', 'Pièces demandées au bailleur') : demander())}>Demander les pièces au bailleur (mail)</button>
+        : <span style={{ fontSize: 13 }}>Pièces demandées au bailleur le {date(premier.fait_le)}
+            {ob.a_faire ? <> · <b>{ob.a_faire.libelle}</b> (prévu le {date(ob.a_faire.date)})</> : ob.suivante ? ` · prochaine étape le ${date(ob.suivante.date)} : ${ob.suivante.libelle.toLowerCase()}` : ''}</span>}
+      {ob && premier?.fait_le && ob.a_faire?.modele && <button className="btn" onClick={() => preparerMail(ob, ob.a_faire.modele, String(ob.a_faire.ordre), ob.a_faire.libelle)}>Préparer la relance</button>}
+    </div>
+    {mail && <EditeurMail mail={mail} email={moi.email} peut fermer={() => setMail(null)} marquer={envoye} />}
+  </div>;
 }
 
 function VerifPiece({ i, m, repondre }) {
@@ -342,7 +381,7 @@ function ClauseSimple({ i, repondre }) {
 // ----- Suivis du mandat : PNO, échéance du mandat, entretien d'un lot vacant, DPE d'un lot -----
 // Échéance et entretien des lots vacants sont créés automatiquement (034) ; PNO et DPE se saisissent ici.
 // Un justificatif PNO ou DPE déposé dans Rivage fait passer le suivi à l'échéance suivante.
-export const NATURES_MANDAT = { pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE',
+export const NATURES_MANDAT = { mandat_pieces: 'Pièces du dossier à obtenir du bailleur', pno: 'Assurance PNO du bailleur', mandat_echeance: 'Échéance du mandat', entretien_lot: 'Entretien (lot vacant)', dpe: 'Validité du DPE',
   entretien_immeuble: 'Entretien (immeuble)', ascenseur_ct: 'Contrôle technique de l’ascenseur', assurance_immeuble: 'Assurance de l’immeuble',
   permis_a_demander: 'Permis de louer à demander', permis_demande: 'Permis de louer : réponse de la mairie', permis_attestation: 'Attestation d’accord tacite',
   permis_refus: 'Permis de louer refusé', permis_caducite: 'Validité du permis de louer', permis_declaration: 'Déclaration de mise en location', permis_absent: 'Bail signé sans permis de louer',
@@ -362,7 +401,7 @@ function SuivisMandat({ m, d, agir }) {
   const obs = d.obligations || [];
   const adresse = (ob) => (d.lots.find((l) => l.id === ob.asset_id) || d.lots[0] || {}).adresse || 'votre bien';
   const ouvrir = (ob) => {
-    const x = preparer(ob.a_faire.modele, { bail: { adresse: adresse(ob) }, ob, contacts: d.contacts, mandat: d.mandat, moi: { prenom, email } });
+    const x = preparer(ob.a_faire.modele, { bail: { adresse: adresse(ob) }, ob, contacts: d.contacts, mandat: d.mandat, moi: { prenom, email }, manquants: piecesManquantes(d) });
     if (x) setMail({ m: x, etape: { cle: ob.cle, etape: String(ob.a_faire.ordre), detail: ob.a_faire.libelle } });
   };
   const fait = (cle, etape, detail) => agir('pilotage_suivi_etape', { p_cle: cle, p_etape: etape, p_detail: detail, p_annuler: false });
@@ -378,6 +417,7 @@ function SuivisMandat({ m, d, agir }) {
         {e.fait_le && <button className="lien" style={{ marginLeft: 8 }} onClick={() => agir('pilotage_suivi_etape', { p_cle: o.cle, p_etape: String(e.ordre), p_detail: null, p_annuler: true })}>Annuler</button>}</span></li>)}</ol>
       {o.derniere_le && <div className="muted">Dernière réalisation : {date(o.derniere_le)}</div>}
       {['pno', 'dpe'].includes(o.nature) && <div className="muted" style={{ fontSize: 12 }}>Justificatif à déposer dans Rivage, catégorie « {o.nature === 'pno' ? 'Contrats d’assurance du bien' : 'Diagnostic de Performance Énergétique'} » (mandat, lot ou fiche du bailleur) : reconnu automatiquement.</div>}
+      {o.nature === 'mandat_pieces' && o.actif && <div className="muted" style={{ fontSize: 12 }}>Pièces encore manquantes : {piecesManquantes(d).join(', ') || 'aucune'}. Le suivi se ferme tout seul quand elles sont toutes dans Rivage (ou déclarées sans objet).</div>}
       {o.nature === 'mandat_echeance' && <div className="muted" style={{ fontSize: 12 }}>Créé d’après la date de fin du mandat dans Rivage. Après reconduction, mettez à jour la date de fin dans Rivage : le suivi repart tout seul sur la nouvelle date.</div>}
       {o.actif && <div className="row" style={{ marginTop: 6 }}>
         {o.a_faire?.modele && <button className="btn plein" onClick={() => ouvrir(o)}>Préparer le mail</button>}
