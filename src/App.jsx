@@ -443,43 +443,83 @@ function EtapeEditable({ e, nature, apres, setErr }) {
         {!neuve && <button className="btn gris" onClick={() => envoyer(true)}>Supprimer</button>}</div></td></tr>;
 }
 
-function Calendriers({ r, charger, setErr }) {
+// Calendriers rattachés aux règles « Suivi du bail » et « Suivi du mandat » : chaque nature de suivi et ses étapes
+const NATURES_DE_REGLE = { bail_suivi: Object.keys(NATURES), bail_suivi_retard: [], mandat_suivi: Object.keys(NATURES_MANDAT), mandat_suivi_retard: [] };
+function CalendriersRegle({ r, cle, charger, setErr }) {
   const [ajout, setAjout] = useState(null);
   const parNature = {};
   (r.calendriers || []).forEach((c) => { (parNature[c.nature] = parNature[c.nature] || []).push(c); });
-  const natures = Object.keys(parNature).sort((a, b) => NOM_NATURE(a).localeCompare(NOM_NATURE(b), 'fr'));
+  const natures = (NATURES_DE_REGLE[cle] || []).filter((n) => parNature[n]).sort((x, y) => NOM_NATURE(x).localeCompare(NOM_NATURE(y), 'fr'));
+  if (!natures.length) return null;
   const apres = () => { setAjout(null); charger(); };
-  return <>
-    <h2 style={{ marginTop: 28 }}>Calendriers de relance</h2>
-    <p className="sub">Étapes de chaque suivi (entretien, compteurs, assurance, DPE…), comptées depuis l’échéance du suivi. Cliquer sur une étape pour la modifier. Les étapes s’enchaînent selon leur délai. Un modèle de mail inexistant donne un brouillon vide.</p>
+  return <div style={{ marginTop: 10 }}>
+    <div className="muted" style={{ marginBottom: 4 }}>Rythme des relances de chaque suivi (délais comptés depuis l’échéance du suivi ; négatif = avant). Cliquer sur une étape pour la modifier.</div>
     <datalist id="modeles-mails">{MODELES.map((m) => <option key={m} value={m} />)}</datalist>
-    {natures.map((n) => <details key={n} className="card" style={{ marginBottom: 8 }}>
-      <summary style={{ cursor: 'pointer' }}><strong>{NOM_NATURE(n)}</strong> <span className="muted">· {parNature[n].length} étape{parNature[n].length > 1 ? 's' : ''}</span></summary>
-      <div className="table-wrap" style={{ marginTop: 8 }}><table>
+    {natures.map((n) => <details key={n} style={{ marginBottom: 6 }}>
+      <summary style={{ cursor: 'pointer' }}><strong>{NOM_NATURE(n)}</strong> <span className="muted">· {parNature[n].map((e) => delai(e.jours)).join(', ')}</span>
+        {NATURES[n] && NATURES_MANDAT[n] && <span className="muted"> · commun aux baux et aux mandats</span>}</summary>
+      <div className="table-wrap" style={{ marginTop: 6 }}><table>
         <thead><tr><th>Délai</th><th>Canal</th><th>Étape</th><th>Modèle</th></tr></thead>
-        <tbody>{parNature[n].map((e) => <EtapeEditable key={e.ordre + ':' + e.jours + ':' + e.libelle} e={e} nature={n} apres={apres} setErr={setErr} />)}
+        <tbody>{parNature[n].map((e) => <EtapeEditable key={e.ordre + ':' + e.jours + ':' + e.libelle + ':' + e.canal} e={e} nature={n} apres={apres} setErr={setErr} />)}
           {ajout === n && <EtapeEditable e={{ ordre: null, jours: 0, canal: 'tache' }} nature={n} apres={apres} setErr={setErr} />}</tbody>
       </table></div>
       {ajout !== n && <button className="lien" onClick={() => setAjout(n)}>+ Ajouter une étape</button>}
     </details>)}
-  </>;
+  </div>;
 }
 
-function RegleEditable({ g, apres, setErr }) {
+// Un délai d'une règle : modifié et enregistré tout de suite
+function DelaiRegle({ cle, p, apres, setErr }) {
+  const [v, setV] = useState(String(p.valeur));
+  const [etat, setEtat] = useState('');
+  const change = String(v) !== String(p.valeur);
+  const enregistrer = async () => {
+    try { await rpc('pilotage_regle_parametre', { p_cle: cle, p_nom: p.nom, p_valeur: Number(String(v).replace(',', '.')) }); setEtat('Enregistré'); apres(); }
+    catch (e) { setErr(e.message); setEtat(''); }
+  };
+  return <div className="row" style={{ alignItems: 'center', marginBottom: 4 }}>
+    <span style={{ flex: 1 }}>{p.libelle}</span>
+    <input type="text" inputMode="decimal" style={{ width: 70, textAlign: 'right' }} value={v} onChange={(e) => { setV(e.target.value); setEtat(''); }} />
+    <span className="muted" style={{ width: 90 }}>{p.unite}</span>
+    {change ? <button className="btn plein" onClick={enregistrer}>Enregistrer</button> : <span className="muted" style={{ fontSize: 12, width: 80 }}>{etat}</span>}
+  </div>;
+}
+
+function RegleEditable({ g, r, apres, setErr }) {
   const [ouvert, setOuvert] = useState(false);
+  const [texte, setTexte] = useState(false);
   const [f, setF] = useState({ libelle: g.libelle, explication: g.explication || '', domaine: g.domaine || '', gravite: g.gravite });
   const envoyer = async (actif) => {
-    try { await rpc('pilotage_regle_modifier', { p_cle: g.cle, p_libelle: f.libelle, p_explication: f.explication, p_domaine: f.domaine, p_gravite: f.gravite, p_actif: actif ?? g.actif }); setOuvert(false); apres(); }
+    try { await rpc('pilotage_regle_modifier', { p_cle: g.cle, p_libelle: f.libelle, p_explication: f.explication, p_domaine: f.domaine, p_gravite: f.gravite, p_actif: actif ?? g.actif }); setTexte(false); apres(); }
     catch (e) { setErr(e.message); }
   };
-  const bascule = <label className="switch" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={g.actif} onChange={() => envoyer(!g.actif)} /> {g.actif ? 'Oui' : 'Non'}</label>;
-  if (!ouvert) return <tr style={{ cursor: 'pointer' }} onClick={() => setOuvert(true)}><td><strong>{g.libelle}</strong><div className="muted">{g.explication}</div></td><td>{g.domaine}</td><td><span className={'sev ' + g.gravite}>{SEV[g.gravite]}</span></td><td>{g.ouvertes}</td><td>{bascule}</td></tr>;
-  return <tr><td><input style={{ width: '100%' }} value={f.libelle} onChange={(e) => setF({ ...f, libelle: e.target.value })} />
-      <textarea rows={3} style={{ width: '100%', marginTop: 4 }} value={f.explication} onChange={(e) => setF({ ...f, explication: e.target.value })} />
-      <div className="row" style={{ marginTop: 4 }}><button className="btn plein" onClick={() => envoyer()}>Enregistrer</button><button className="btn gris" onClick={() => setOuvert(false)}>Annuler</button></div></td>
-    <td><input value={f.domaine} onChange={(e) => setF({ ...f, domaine: e.target.value })} /></td>
-    <td><select value={f.gravite} onChange={(e) => setF({ ...f, gravite: e.target.value })}>{Object.entries(SEV).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
-    <td>{g.ouvertes}</td><td>{bascule}</td></tr>;
+  const delais = g.parametres || [];
+  const aCal = (NATURES_DE_REGLE[g.cle] || []).length > 0;
+  const resume = delais.length ? delais.map((p) => `${p.valeur} ${p.unite === 'jour du mois' ? '(jour)' : p.unite}`).join(' · ') : aCal ? 'Rythmes des suivis' : 'Aucun délai réglable';
+  return <>
+    <tr style={{ cursor: 'pointer' }} onClick={() => setOuvert(!ouvert)}>
+      <td><strong>{g.libelle}</strong><div className="muted">{g.explication}</div></td><td>{g.domaine}</td>
+      <td><span className={'sev ' + g.gravite}>{SEV[g.gravite]}</span></td>
+      <td className="muted" style={{ fontSize: 12 }}>{resume}</td><td>{g.ouvertes}</td>
+      <td><label className="switch" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={g.actif} onChange={() => envoyer(!g.actif)} /> {g.actif ? 'Oui' : 'Non'}</label></td></tr>
+    {ouvert && <tr><td colSpan={6} style={{ background: 'var(--fond-2, rgba(0,0,0,0.03))' }}>
+      {delais.length > 0 && <div style={{ marginBottom: 8 }}>
+        <div className="muted" style={{ marginBottom: 4 }}>Délais de la règle (pris en compte au contrôle suivant, toutes les 30 minutes)</div>
+        {delais.map((p) => <DelaiRegle key={p.nom + p.valeur} cle={g.cle} p={p} apres={apres} setErr={setErr} />)}
+      </div>}
+      {!delais.length && !aCal && <div className="muted" style={{ marginBottom: 8 }}>Cette règle n’a pas de délai réglable : elle se déclenche sur une incohérence ou sur un délai fixé par la loi.</div>}
+      {aCal && <CalendriersRegle r={r} cle={g.cle} charger={apres} setErr={setErr} />}
+      {!texte ? <button className="lien" style={{ marginTop: 6 }} onClick={() => setTexte(true)}>Modifier le libellé, l’explication, le domaine ou la gravité</button>
+        : <div style={{ marginTop: 8 }}>
+          <input style={{ width: '100%' }} value={f.libelle} onChange={(e) => setF({ ...f, libelle: e.target.value })} />
+          <textarea rows={3} style={{ width: '100%', marginTop: 4 }} value={f.explication} onChange={(e) => setF({ ...f, explication: e.target.value })} />
+          <div className="row" style={{ marginTop: 4 }}>
+            <input value={f.domaine} onChange={(e) => setF({ ...f, domaine: e.target.value })} placeholder="Domaine" />
+            <select value={f.gravite} onChange={(e) => setF({ ...f, gravite: e.target.value })}>{Object.entries(SEV).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            <button className="btn plein" onClick={() => envoyer()}>Enregistrer</button><button className="btn gris" onClick={() => setTexte(false)}>Annuler</button></div>
+        </div>}
+    </td></tr>}
+  </>;
 }
 
 function Regles() {
@@ -488,14 +528,12 @@ function Regles() {
   return (
     <>
       <h1>Règles de relance</h1>
-      {err && <div className="banner">{err}</div>}
-      <h2>Règles d’alerte</h2>
-      <p className="sub">Contrôles exécutés automatiquement toutes les 30 minutes. Cliquer sur une règle pour modifier son libellé, son explication, son domaine ou sa gravité. Une règle désactivée ne crée plus d’alerte ; les alertes déjà ouvertes se ferment au contrôle suivant.</p>
+      <p className="sub">Contrôles exécutés automatiquement toutes les 30 minutes. Cliquer sur une règle pour régler ses délais et, pour les suivis de bail et de mandat, le rythme des relances. Les délais fixés par la loi (date limite d’un congé, restitution du dépôt de garantie…) ne sont pas modifiables. Une règle désactivée ne crée plus d’alerte.</p>
+      {err && <div className="banner" onClick={() => setErr('')}>{err}</div>}
       <div className="table-wrap"><table>
-        <thead><tr><th>Règle</th><th>Domaine</th><th>Gravité</th><th>Alertes ouvertes</th><th>Active</th></tr></thead>
-        <tbody>{(r.regles || []).map((g) => <RegleEditable key={g.cle + g.libelle + g.gravite + g.actif} g={g} apres={charger} setErr={setErr} />)}</tbody>
+        <thead><tr><th>Règle</th><th>Domaine</th><th>Gravité</th><th>Délais</th><th>Alertes ouvertes</th><th>Active</th></tr></thead>
+        <tbody>{(r.regles || []).map((g) => <RegleEditable key={g.cle} g={g} r={r} apres={charger} setErr={setErr} />)}</tbody>
       </table></div>
-      <Calendriers r={r} charger={charger} setErr={setErr} />
     </>
   );
 }
