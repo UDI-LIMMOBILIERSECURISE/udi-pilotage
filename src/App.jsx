@@ -728,10 +728,12 @@ function SuiviReversement({ s }) {
       if (m) setMail({ m, champ });
     } catch (e) { setErr(e.message); }
   };
-  if (!s.parti || s.remboursee) return null;
   // Détenteur : saisie de la gestion, sinon champ deposit_retained_by du bail lu dans Rivage (055)
   const detenu = suivi.detenu_par || s.detenu_rivage || null;
   const bailleur = detenu === 'bailleur';
+  // Dépôt chez le bailleur : demande de reversement possible dès 15 jours avant la fin du bail ; sinon, après le départ
+  const bientot = s.fin && (new Date(s.fin) - new Date(auj())) / 86400000 <= 15;
+  if (s.remboursee || !(s.parti || (bailleur && bientot))) return null;
   return <div className="mini-alerte normale" style={{ margin: '10px 0' }}>
     <div className="row">
       <b>Dépôt détenu par</b>
