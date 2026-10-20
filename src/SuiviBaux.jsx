@@ -154,7 +154,9 @@ export function DossierBail({ b, peut, moi, apres }) {
         {a.ech && ['fin_auto', 'verifier_contrat'].includes(ech.action) && <button className="btn" onClick={() => etapeFaite(ech.cle, 'vu', 'Vu')}>C’est noté</button>}
         {a.ob && a.ob.a_faire.modele && !['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <button className="btn plein" onClick={() => ouvrirMail(a.ob.a_faire.modele, { ob: a.ob }, { cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle })}>
           {a.ob.a_faire.canal === 'lrar' ? 'Préparer le recommandé' : 'Préparer le mail'}</button>}
-        {a.ob && ['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <SmsRivage texte={SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} tels={(d.contacts?.locataires || []).map((l) => l.telephone).filter(Boolean)} fait={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), 'SMS envoyé au locataire')} />}
+        {a.ob && ['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <SmsRivage texte={SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} tels={(d.contacts?.locataires || []).map((l) => l.telephone).filter(Boolean)}
+          envoi={{ bail: b.bail_id, cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle }} apres={async () => { await charger(); apres(); }}
+          fait={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), 'SMS envoyé au locataire')} />}
         {a.ob && <button className="btn" onClick={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), a.ob.a_faire.libelle)}>Marquer fait</button>}
         {a.ob && <Realise ob={a.ob} agir={agir} />}
       </div>}
@@ -193,15 +195,35 @@ export function DossierBail({ b, peut, moi, apres }) {
   </>;
 }
 
-// SMS préparé par le pilotage (065) : texte copié, envoyé depuis le téléphone de l'agence. Rivage n'envoie pas ces relances.
-export function SmsRivage({ texte, fait, tels = [] }) {
+// SMS au locataire (065, 066) : envoi direct par le pilotage (Zapier → Twilio, expéditeur UDIGESTION) au numéro Rivage du locataire,
+// texte modifiable avant l'envoi. À défaut, copie du texte pour un envoi depuis le téléphone de l'agence.
+export function SmsRivage({ texte, fait, tels = [], envoi, apres }) {
+  const [t, setT] = useState(texte || '');
+  const [etat, setEtat] = useState({ charge: false, err: '', ok: '' });
   const [vu, setVu] = useState(false);
-  return <>
-    <button className="btn plein" onClick={() => { navigator.clipboard?.writeText(texte || ''); setVu(true); }}>Copier le SMS</button>
-    {tels.length > 0 ? tels.map((t) => <a key={t} className="btn" href={`sms:${t.replace(/\s/g, '')}?body=${encodeURIComponent(texte || '')}`} onClick={() => setVu(true)}>SMS au {t}</a>)
-      : <span className="muted" style={{ fontSize: 12 }}>Pas de numéro du locataire dans Rivage.</span>}
-    {vu && <><span className="muted" style={{ fontSize: 12 }}>Copié : « {texte} »</span><button className="btn" onClick={fait}>SMS envoyé</button></>}
-  </>;
+  useEffect(() => { setT(texte || ''); }, [texte]);
+  const envoyer = async () => {
+    setEtat({ charge: true, err: '', ok: '' });
+    const { data, error } = await supabase.functions.invoke('pilotage-sms', { body: { ...envoi, texte: t } });
+    if (error || !data?.ok) {
+      let msg = data?.error;
+      if (!msg && error?.context?.json) { try { msg = (await error.context.json()).error; } catch { /* réponse illisible */ } }
+      setEtat({ charge: false, err: msg || 'SMS non envoyé', ok: '' }); return;
+    }
+    setEtat({ charge: false, err: '', ok: `SMS envoyé au ${data.resultats.filter((r) => r.ok).map((r) => r.telephone).join(', ')}` });
+    apres && await apres();
+  };
+  return <div style={{ width: '100%' }}>
+    <textarea rows={3} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={t} onChange={(e) => setT(e.target.value)} />
+    <div className="muted" style={{ fontSize: 12 }}>{t.length} caractères{t.length > 160 ? ` · ${Math.ceil(t.length / 153)} SMS facturés` : ''} · destinataire : {tels.length ? tels.join(', ') : 'aucun numéro du locataire dans Rivage'}</div>
+    <div className="row" style={{ marginTop: 4 }}>
+      {envoi && tels.length > 0 && <button className="btn plein" disabled={etat.charge || !t.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer le SMS (UDIGESTION)'}</button>}
+      <button className="btn" onClick={() => { navigator.clipboard?.writeText(t); setVu(true); }}>Copier le texte</button>
+      {vu && <button className="btn" onClick={fait}>Envoyé depuis un téléphone</button>}
+    </div>
+    {etat.err && <div className="err">{etat.err}</div>}
+    {etat.ok && <div style={{ color: 'var(--teal)', fontSize: 13 }}>{etat.ok}</div>}
+  </div>;
 }
 
 export function Realise({ ob, agir }) {
