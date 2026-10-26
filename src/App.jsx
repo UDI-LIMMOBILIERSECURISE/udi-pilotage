@@ -91,7 +91,7 @@ function Espace() {
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
   const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true,
-    mandats: moi.voit_commissions, baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
+    mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
     obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages };
   const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
   const page = droit[onglet] ? onglet : 'jour';
@@ -354,7 +354,7 @@ function Mandats() {
   const sansGo = mandats.filter((m) => m.bail && !m.go_le && m.suivi_commission);
   // Lignes de commission : versements mandat au négociateur du mandat, versement location à celui qui a loué
   const lignes = [];
-  suivis.forEach((m) => m.versements.forEach((v) => {
+  suivis.forEach((m) => (m.versements || []).forEach((v) => {
     const benef = v.cle === 'loc' ? v.beneficiaire : m.negociateur;
     if (!benef || v.montant == null) return;
     lignes.push({ m, v, benef, facture: m.factures?.[v.cle] });

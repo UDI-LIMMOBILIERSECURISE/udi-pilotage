@@ -7,6 +7,16 @@ import { Tuiles } from './App.jsx';
 const euro = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }));
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const auj = () => new Date().toISOString().slice(0, 10);
+const moisCourant = () => new Date().toISOString().slice(0, 7);
+const libMois = (m) => new Date(m + '-01T12:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+// Mois d'une commission : signature du mandat (rentrée) ; pour le 3e versement et la commission de location, signature
+// (à défaut début) du bail de mise en location ; à défaut, signature du mandat.
+function moisLigne(l, parMandat, parBail) {
+  const m = parMandat[l.mandat_id || l.objet];
+  const b = l.type === 'bail' ? (parBail[l.objet] || (m?.bail?.id === l.objet ? m.bail : null)) : (l.regle === 'v3' || l.phase === 'bail_signe' ? m?.bail : null);
+  const d = (b && (b.signe_le || b.debut)) || m?.signe_le || null;
+  return d ? String(d).slice(0, 7) : null;
+}
 const PHASES = { apport: 'Apport du mandat', mandat_signe: 'Mandat signé', dossier_complet: 'Dossier complet (GO)', bail_signe: 'Bail signé', edl_fait: 'État des lieux d’entrée fait' };
 const BENEF = { apporteur: 'Apporteur du mandat', negociateur: 'Négociateur du mandat', loueur: 'Commercial qui a loué', edl: 'Auteur de l’EDL' };
 const BASES = { gestion: 'Honoraires de gestion HT (N mois)', loc_total: 'Honoraires de location HT totaux', loc_bailleur: 'Honoraires de location HT bailleur',
@@ -20,13 +30,17 @@ export default function Commissions() {
   const [err, setErr] = useState('');
   const [vue, setVue] = useState('suivi');
   const [qui, setQui] = useState(null);
+  const [mois, setMois] = useState(moisCourant());   // '' = tous les mois
   const charger = () => Promise.all([rpc('pilotage_commissions'), rpc('pilotage_mandats'), rpc('pilotage_baux_a_valider')])
     .then(([c, m, b]) => { setD(c); setMandats(m); setBaux(b || []); }).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d || !mandats) return <p className="sub">Chargement…</p>;
   const agir = async (fn, args) => { setErr(''); try { await rpc(fn, args); await charger(); } catch (e) { setErr(e.message); } };
-  const lignes = d.lignes || [];
+  const parMandat = Object.fromEntries((mandats.mandats || []).map((m) => [m.id, m]));
+  const parBail = Object.fromEntries((baux || []).map((b) => [b.id, b]));
+  const toutes = (d.lignes || []).map((l) => ({ ...l, mois: moisLigne(l, parMandat, parBail) }));
+  const lignes = mois ? toutes.filter((l) => l.mois === mois) : toutes;
   const membres = d.membres || [];
   const direction = d.mon_role === 'direction';
   const sansBenef = lignes.filter((l) => !l.beneficiaire).length;
@@ -35,6 +49,13 @@ export default function Commissions() {
     <div className="entete"><div><h1>Commissions</h1>
       <p className="sub">Commissions des commerciaux sur les mandats et les baux depuis le 01/01/2026, calculées avec les règles de rémunération en vigueur.</p></div></div>
     {err && <div className="banner">{err}</div>}
+    <div className="row" style={{ marginBottom: 12, alignItems: 'center', gap: 8 }}>
+      <span className="muted">Mois</span>
+      <input type="month" value={mois} onChange={(e) => setMois(e.target.value)} />
+      {mois !== moisCourant() && <button className="btn" onClick={() => setMois(moisCourant())}>Mois en cours</button>}
+      {mois && <button className="btn" onClick={() => setMois('')}>Tous les mois</button>}
+      <span className="muted">{mois ? `${lignes.length} ligne(s) en ${libMois(mois)}` : `${lignes.length} ligne(s), tous mois confondus`}</span>
+    </div>
     <Tuiles items={[[euro(lignes.filter((l) => l.du && !l.facture).reduce((t, l) => t + Number(l.montant || 0), 0)), 'Dues à facturer'],
       [euro(lignes.filter((l) => l.facture).reduce((t, l) => t + Number(l.facture.montant ?? l.montant ?? 0), 0)), 'Déjà facturé'],
       [euro(lignes.filter((l) => !l.du && !l.facture).reduce((t, l) => t + Number(l.montant || 0), 0)), 'À venir'],
@@ -42,7 +63,7 @@ export default function Commissions() {
     <div className="bascule" style={{ marginBottom: 14 }}>{[['suivi', 'Suivi par commercial'], ['affectation', `Affectations et validations${aValider ? ' (' + aValider + ')' : ''}`], ['parametres', 'Paramètres de rémunération']].map(([k, l]) =>
       <button key={k} className={vue === k ? 'on' : ''} onClick={() => setVue(k)}>{l}</button>)}</div>
     {vue === 'suivi' && <Suivi lignes={lignes} membres={membres} qui={qui} setQui={setQui} agir={agir} />}
-    {vue === 'affectation' && <Affectations mandats={mandats} baux={baux} membres={membres} lignes={lignes} agir={agir} role={d.mon_role} />}
+    {vue === 'affectation' && <Affectations mandats={mandats} baux={baux} membres={membres} lignes={toutes} agir={agir} role={d.mon_role} />}
     {vue === 'parametres' && <Parametres d={d} direction={direction} agir={agir} />}
   </>;
 }
