@@ -20,6 +20,9 @@ const MODELES: [string, string, 'hebdo' | 'mensuel'][] = [
   ['LeasingContract', '/api/v1/leasing_contracts', 'hebdo'],
   ['Profile', '/api/v1/profiles', 'hebdo'],
   ['Incident', '/api/v1/incidents', 'hebdo'],
+  // Pièces (068-069) : jusqu'ici reçues par webhook seulement ; à la bascule, le stock de production n'a envoyé aucun webhook.
+  // Un échec de cette liste n'interrompt pas la synchronisation (compteur négatif = code HTTP).
+  ['Upload', '/api/v1/uploads', 'hebdo'],
   ['AccountingEventGroup', '/api/v1/accounting_event_groups', 'mensuel'],
   ['AccountingAccount', '/api/v1/accounting_accounts', 'mensuel'],
 ]
@@ -203,7 +206,10 @@ Deno.serve(async (req) => {
       let page = 1, total = 1, n = 0
       while (page <= total) {
         const r = await fetch(`${RIVAGE}${chemin}?page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
-        if (!r.ok) throw new Error(`${modele} page ${page} : HTTP ${r.status}`)
+        if (!r.ok) {
+          if (modele === 'Upload') { n = -r.status; break }
+          throw new Error(`${modele} page ${page} : HTTP ${r.status}`)
+        }
         const j = await r.json()
         total = j.pagination?.total_pages || 1
         let lot = (j.data || []).map((o: Record<string, unknown>) => nettoyer(modele, o))
