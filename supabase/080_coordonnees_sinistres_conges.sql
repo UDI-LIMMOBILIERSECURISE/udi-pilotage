@@ -1,5 +1,6 @@
 -- 080 — Coordonnées des parties sur les sinistres et sur les congés / dépôts de garantie (demande de Nicolas du 26/10).
--- Sinistres : locataires et bailleurs du bail lié à l'incident ; sans bail lié, bailleurs du mandat du lot.
+-- Sinistres : locataires et bailleurs du bail lié à l'incident ; sans bail lié, bailleurs du mandat du lot ;
+-- entreprises (prestataires désignés sur l'incident dans Rivage).
 -- Congés et DG : locataires et bailleurs du bail. Nom, téléphone et e-mail repris de Rivage (mêmes fonctions que les cartes 079).
 
 begin;
@@ -12,7 +13,11 @@ begin
     ('public', 'pilotage_sinistres',
      $a$'adresse', l.adresse, 'lot', l.reference, 'locataires', b.locataires, 'bail', b.reference,$a$,
      $a$'adresse', l.adresse, 'lot', l.reference, 'locataires', b.locataires, 'bail', b.reference,
-        'parties', coalesce(pilotage.contacts_bail(b.id), pilotage.contacts_mandat(l.mandat_id)),$a$),
+        'parties', coalesce(pilotage.contacts_bail(b.id), pilotage.contacts_mandat(l.mandat_id), '{}'::jsonb)
+          || jsonb_build_object('entreprises', (select coalesce(jsonb_agg(jsonb_build_object('nom', coalesce(pilotage.nom_profil(c), 'Prestataire inconnu du pilotage'),
+               'email', pr.data->>'email', 'telephone', pr.data->>'phone_number')), '[]'::jsonb)
+             from jsonb_array_elements_text(coalesce(i.data->'contractor_ids', '[]'::jsonb)) c
+             left join pilotage.objets pr on pr.type = 'Profile' and pr.id = c)),$a$),
     ('public', 'pilotage_dg',
      $a$'bail_id', b.id, 'reference', b.reference, 'locataires', b.locataires,$a$,
      $a$'bail_id', b.id, 'reference', b.reference, 'locataires', b.locataires, 'parties', pilotage.contacts_bail(b.id),$a$)

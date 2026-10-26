@@ -829,6 +829,7 @@ function Sinistres() {
         ['Bailleur', s.bailleur], ['Locataire', s.locataires], ['Bail', s.bail], ['Mandat', s.mandat], ['Déclaré le', date(s.declare_le)],
         ['Ancienneté', s.jours + ' jours'], ['Résolu le', s.resolu_le ? date(s.resolu_le) : null], ['À la charge de', CHARGE[s.a_charge] || s.a_charge],
         ['Montant estimé', euro(s.montant_estime)], ['Prestataires', s.prestataires ? ((s.prestataires_noms || []).join(', ') || String(s.prestataires)) : 'Aucun désigné']]} />
+      <Parties titre="Entreprises" liste={s.parties?.entreprises} max={9} />
       <Parties titre="Locataires" liste={s.parties?.locataires} max={9} />
       <Parties titre="Bailleurs" liste={s.parties?.bailleurs} max={9} />
       {!s.clos && !s.prestataires && <div className="mini-alerte haute">Aucun prestataire désigné dans Rivage.</div>}
@@ -851,6 +852,7 @@ function Sinistres() {
             <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
               <span style={{ fontSize: 12, color: x.prestataires || x.clos ? 'var(--ink2)' : 'var(--red)' }}>{x.prestataires ? ((x.prestataires_noms || []).join(', ') || x.prestataires + ' prestataire(s)') : x.clos ? 'Clos le ' + date(x.resolu_le) : 'Sans prestataire'}</span>
               <span className="mono" style={{ fontSize: 12 }}>{x.clos ? 'clos' : x.jours + ' j'}</span></div>
+            <Parties titre="Entreprises" liste={x.parties?.entreprises} />
             <Parties titre="Locataires" liste={x.parties?.locataires} />
             <Parties titre="Bailleurs" liste={x.parties?.bailleurs} max={1} />
           </Carte>; })}
