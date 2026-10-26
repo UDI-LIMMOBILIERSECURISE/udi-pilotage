@@ -31,7 +31,7 @@ export default function ImpayesMois({ peut, apres }) {
     <h2 style={{ fontSize: 17, margin: '0 0 6px' }}>Ce mois-ci</h2>
     {err && <div className="banner">{err}</div>}
     {rien && <p className="muted">Rien à déclarer ni à actualiser pour l’instant.</p>}
-    {d.sans_organisme > 0 && <div className="muted" style={{ fontSize: 12 }}>{d.sans_organisme} dossier(s) en cours sans organisme renseigné : à compléter dans le dossier.</div>}
+    {d.sans_organisme > 0 && <div className="muted" style={{ fontSize: 12 }}>{d.sans_organisme} dossier(s) en cours sans organisme (garantie « CDT via huissier », « avocat » ou non renseignée) : à compléter dans le dossier.</div>}
 
     {d.a_declarer.length > 0 && <div className={'mini-alerte ' + (fenetre ? (d.jour >= 18 ? 'critique' : 'haute') : 'normale')} style={{ marginTop: 8 }}>
       <b>Impayés à déclarer à Zelok ({d.a_declarer.length})</b>{fenetre ? ` · date limite le 19, ${d.jour >= 18 ? 'dernier délai' : 'encore ' + (19 - d.jour + 1) + ' jour(s)'}` : d.jour < 16 ? ' · déclarations du 16 au 19' : ' · délai du mois dépassé : voir avec Zelok'}
