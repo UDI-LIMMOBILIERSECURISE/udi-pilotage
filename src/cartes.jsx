@@ -10,12 +10,13 @@ export function tel(t) {
   const c = String(t || '').replace(/[^0-9+]/g, '');
   if (!c) return '';
   const fr = c.startsWith('+33') ? '0' + c.slice(3) : c.startsWith('33') && c.length === 11 ? '0' + c.slice(2) : c;
-  return /^0\d{9}$/.test(fr) ? fr.replace(/(\d{2})(?=\d)/g, '$1 ') : c;
+  if (/^0\d{9}$/.test(fr)) return fr.replace(/(\d{2})(?=\d)/g, '$1 ');
+  return /^\d{11,15}$/.test(c) ? '+' + c : c; // numéro étranger repris de Rivage sans « + » (ex. 216…)
 }
 const sansCivilite = (n) => String(n || '').replace(/^\s*(mr|mrs|ms|miss|m\.|mme|mlle)\s+/i, '');
 
 const stop = (e) => e.stopPropagation();
-const telLien = (t) => { const c = String(t || '').replace(/[^0-9+]/g, ''); return c.startsWith('33') && c.length === 11 ? '+' + c : c; };
+const telLien = (t) => { const c = String(t || '').replace(/[^0-9+]/g, ''); return c.startsWith('+') || c.startsWith('0') ? c : /^\d{11,15}$/.test(c) ? '+' + c : c; };
 
 // Une ligne par personne : nom, téléphone (appel d'un toucher sur mobile), e-mail (ouvre la messagerie)
 export function Parties({ titre, liste, max = 2 }) {
