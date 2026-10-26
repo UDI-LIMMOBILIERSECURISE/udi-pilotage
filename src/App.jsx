@@ -789,7 +789,10 @@ function TexteLiens({ texte }) {
   return <>{morceaux.map((m, i) => (i % 2 ? <a key={i} href={m} target="_blank" rel="noreferrer" title={m} onClick={(e) => e.stopPropagation()}>{libelleLien(m)}</a> : m))}</>;
 }
 
-// Fil des mises à jour d'un sinistre : dossiers repris de Monday (081, avec clôture / réouverture) et incidents Rivage (084)
+// Outil d'origine d'un dossier repris (081 Monday, 086 WeRoof)
+const ORIGINE = (x) => (x?.origine === 'weroof' ? 'WeRoof' : 'Monday');
+
+// Fil des mises à jour d'un sinistre : dossiers repris de Monday ou WeRoof (081, 086 ; clôture / réouverture) et incidents Rivage (084)
 function SuiviSinistre({ dossier, recharger }) {
   const [notes, setNotes] = useState(null);
   const [texte, setTexte] = useState('');
@@ -823,7 +826,7 @@ function SuiviSinistre({ dossier, recharger }) {
     </div>)}
     {racines.length > 3 && <button className="btn gris" style={{ marginTop: 8 }} onClick={() => setTout(!tout)}>{tout ? 'Ne garder que les 3 dernières' : `Voir les ${racines.length - 3} mises à jour plus anciennes`}</button>}
     {!notes.length && <p className="muted">Aucune mise à jour.</p>}
-    {monday && <p className="muted" style={{ marginTop: 8 }}>Pièces jointes et photos restées dans Monday.</p>}
+    {monday && <p className="muted" style={{ marginTop: 8 }}>Pièces jointes et photos restées dans {ORIGINE(dossier)}.</p>}
   </>;
 }
 
@@ -841,7 +844,7 @@ function Sinistres() {
   const [statut, setStatut] = useState('tous');
   const [sel, setSel] = useState(null);
   const [cherche, setCherche] = useState('');
-  // Colonne « Clos » repliée au départ (190 dossiers repris de Monday) ; un clic sur l'en-tête replie ou ouvre une colonne
+  // Colonne « Clos » repliée au départ (plus de 200 dossiers repris de Monday et WeRoof) ; un clic sur l'en-tête replie ou ouvre une colonne
   const [replie, setReplie] = useState({ clos: true });
   if (err) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
@@ -849,7 +852,7 @@ function Sinistres() {
   const q = normaliser(cherche);
   // Recherche sur tout : titre, adresse, lot, bail, locataires, bailleur, mandat, entreprises, téléphones, e-mails, bail Monday
   const trouve = (x) => !q || correspond(texteRecherche(x.titre, x.numero, x.adresse, x.lot, x.bail, x.locataires, x.bailleur, x.mandat,
-    x.prestataires_noms, x.monday_bail, x.statut_monday, x.parties), q);
+    x.prestataires_noms, x.monday_bail, x.statut_monday, x.reference, x.description, x.parties), q);
   // Colonne (et filtre) de statut d'un incident, avec les libellés de Rivage
   const colonneDe = (x) => (x.clos ? 'clos' : ['in_progress', 'on_hold'].includes(x.statut) ? x.statut : 'open');
   const STATUTS = [['open', 'Nouveau'], ['in_progress', 'En cours'], ['on_hold', 'En attente'], ['clos', 'Clos']];
@@ -866,7 +869,7 @@ function Sinistres() {
   return <>
     <div className="entete">
       <div><h1>Sinistres et incidents techniques</h1><p className="sub">Au {date(auj())} · {d.filter((x) => x.source !== 'monday').length} incidents reçus de Rivage
-        · {d.filter((x) => x.source === 'monday').length} dossiers repris du suivi des travaux Monday</p></div>
+        · {d.filter((x) => x.source === 'monday' && x.origine !== 'weroof').length} repris de Monday · {d.filter((x) => x.origine === 'weroof').length} repris de WeRoof</p></div>
       <div className="objectif"><div className="row" style={{ justifyContent: 'space-between' }}><span className="muted">Objectif : aucun incident ouvert depuis plus de 15 jours</span><b>{aJour}/{ouverts.length}</b></div>
         <div className="jauge"><div style={{ width: (ouverts.length ? (aJour / ouverts.length) * 100 : 100) + '%' }} /></div></div>
     </div>
@@ -882,22 +885,22 @@ function Sinistres() {
     {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) avec les filtres choisis.</div>}
     <div style={{ height: 8 }} />
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un incident pour voir le détail." detail={s && <>
-      <div className="muted">{s.source === 'monday' ? `Suivi des travaux repris de Monday · ${s.clos ? 'Clos' : 'En cours'}${s.statut_monday ? ' (Monday : ' + s.statut_monday + ')' : ''}`
+      <div className="muted">{s.source === 'monday' ? `Repris de ${ORIGINE(s)}${s.reference ? ' · ' + s.reference : ''} · ${s.clos ? 'Clos' : 'En cours'}${s.statut_monday ? ' (' + ORIGINE(s) + ' : ' + s.statut_monday + ')' : ''}`
         : `Incident n°${s.numero} · ${ST_INC[s.statut] || s.statut}`}</div>
       <h2>{s.titre}</h2>
       {s.situation && <div className={'mini-alerte ' + s.situation.gravite}><b>Situation du bien : {s.situation.libelle}</b>
         <div>{s.situation.detail}{s.situation.bail ? ' Bail ' + s.situation.bail + '.' : ''}</div>
         {s.mandat_statut && <div className="muted">{s.mandat_statut}</div>}</div>}
       {(s.source !== 'monday' || !s.clos) && <ResumeIA key={s.id + ':' + (s.nb_notes || 0)} type="sinistre" id={s.id} />}
-      {s.source === 'monday' && !s.bail && <div className="mini-alerte haute">{s.lot ? 'Rattaché au lot seulement : le locataire du dossier Monday n’a pas de bail dans Rivage.'
-        : s.mandat ? 'Rattaché au mandat seulement : ni bail ni lot retrouvé dans Rivage.' : 'Non rattaché : aucun bail, lot ou mandat Rivage retrouvé pour ce dossier Monday.'}</div>}
-      {s.description && <p>{s.description}</p>}
+      {s.source === 'monday' && !s.bail && <div className="mini-alerte haute">{s.lot ? `Rattaché au lot seulement : pas de bail Rivage retrouvé pour le locataire du dossier ${ORIGINE(s)}.`
+        : s.mandat ? 'Rattaché au mandat seulement : ni bail ni lot précis retrouvé dans Rivage.' : `Non rattaché : aucun bail, lot ou mandat Rivage retrouvé pour ce dossier ${ORIGINE(s)}.`}</div>}
+      {s.description && <p style={{ whiteSpace: 'pre-line' }}>{s.description}</p>}
       <Champs items={[['Type', TYPE_INC[s.type] || s.type], ['Urgence', (URG[s.urgence] || [s.urgence])[0]], ['Lot', s.adresse ? `${s.adresse} (${s.lot})` : 'Immeuble, pas de lot précis'],
         ['Bailleur', s.bailleur], ['Locataire', s.locataires], ['Bail', s.bail], ['Mandat', s.mandat], ['Déclaré le', date(s.declare_le)],
         ['Ancienneté', s.jours + ' jours'], ['Résolu le', s.resolu_le ? date(s.resolu_le) : null], ['À la charge de', CHARGE[s.a_charge] || s.a_charge],
         ['Montant estimé', euro(s.montant_estime)], ['Prestataires', s.prestataires ? ((s.prestataires_noms || []).join(', ') || String(s.prestataires)) : 'Aucun désigné'],
-        s.source === 'monday' && ['Bail dans Monday', s.monday_bail], s.source === 'monday' && ['Rattachement', s.rattachement],
-        s.source === 'monday' && ['Gestionnaire Monday', s.gestionnaire]]} />
+        s.source === 'monday' && s.monday_bail && ['Bail dans Monday', s.monday_bail], s.source === 'monday' && ['Rattachement', s.rattachement],
+        s.source === 'monday' && ['Gestionnaire (' + ORIGINE(s) + ')', s.gestionnaire]]} />
       <Parties titre="Entreprises" liste={s.parties?.entreprises} max={9} />
       <Parties titre="Locataires" liste={s.parties?.locataires} max={9} />
       <Parties titre="Bailleurs" liste={s.parties?.bailleurs} max={9} />
@@ -905,7 +908,7 @@ function Sinistres() {
       {!s.clos && s.jours > 15 && <div className="mini-alerte critique">Ouvert depuis plus de 15 jours.</div>}
       <Historique items={s.historique} libStatut={ST_INC} />
       <SuiviSinistre key={s.id} dossier={s} recharger={recharger} />
-      <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={s.lien} target="_blank" rel="noreferrer">{s.source === 'monday' ? 'Ouvrir dans Monday' : 'Ouvrir dans Rivage'}</a></div>
+      {s.lien && <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={s.lien} target="_blank" rel="noreferrer">{s.source === 'monday' ? 'Ouvrir dans Monday' : 'Ouvrir dans Rivage'}</a></div>}
     </>}>
       <div className="kanban">{colonnes.map(([k, l, items]) => { const ferme = !!replie[k] && !q && statut !== k; return <div key={k} className="kcol">
         <button type="button" className="kcol-tete kcol-bouton" aria-expanded={!ferme} onClick={() => setReplie({ ...replie, [k]: !ferme })}>
@@ -913,7 +916,7 @@ function Sinistres() {
         {!ferme && !items.length && <div className="muted" style={{ padding: '8px 4px' }}>Rien ici avec ce filtre.</div>}
         {!ferme && items.map((x) => { const u = URG[x.urgence] || [x.urgence, 'normale'];
           return <Carte key={x.id} className={'kcarte ' + (sel === x.id ? 'sel ' : '') + (!x.clos && x.jours > 15 ? 'critique' : u[1])} onClick={() => setSel(x.id)}>
-            <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">{(x.source === 'monday' ? 'Monday' : '#' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type)) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}</span>
+            <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">{(x.source === 'monday' ? ORIGINE(x) + (x.reference ? ' · ' + x.reference : '') : '#' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type)) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}</span>
               <span className="row" style={{ gap: 4 }}><span className={'statut-inc ' + colonneDe(x)}>{x.clos ? (ST_INC[x.statut] || 'Clos') : x.statut_monday || ST_INC[x.statut] || x.statut}</span>{u[0] && <span className={'sev ' + u[1]}>{u[0]}</span>}</span></div>
             <div className="kcarte-titre">{x.titre}</div>
             <div className="muted">{x.adresse || 'Immeuble, pas de lot précis'}</div>
