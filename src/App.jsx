@@ -1,4 +1,4 @@
-import { nature, Parties } from './cartes.jsx';
+import { nature, Parties, Carte, texteRecherche, correspond, normaliser } from './cartes.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc, ecouterRivage } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
@@ -340,6 +340,9 @@ function Mandats() {
   const [sel, setSel] = useState(null);
   const [nego, setNego] = useState(null);
   const [anciens, setAnciens] = useState(false);
+  const [cherche, setCherche] = useState('');
+  // Sur mobile, colonnes « Dossier complet à louer » et « Loué / retiré » repliées au départ ; un toucher sur l'en-tête les ouvre
+  const [replie, setReplie] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 700 ? { 'Dossier complet validé': true, Loué: true } : {}));
   const [infos, setInfos] = useState({});
   const charger = () => { rpc('pilotage_infos_cartes').then((x) => setInfos(x?.mandats || {})).catch(() => {}); return Promise.all([rpc('pilotage_mandats'), rpc('pilotage_baux_a_valider')]).then(([m, b]) => { setD(m); setBaux(b || []); }).catch((e) => setErr(e.message)); };
   useEffect(() => { charger(); }, []);
@@ -350,7 +353,11 @@ function Mandats() {
   const facturer = async (mid, v, facture, montant) => { setErr(''); try { await rpc('pilotage_commission_facturer', { p_mandat: mid, p_versement: v, p_facture: facture, p_montant: montant }); await charger(); } catch (e) { setErr(e.message); } };
   const suivis = d.mandats.filter((m) => m.suivi_commission);
   // Par défaut on ne montre que les mandats rentrés depuis 2026 (ceux qui donnent lieu à commission)
-  const mandats = anciens ? d.mandats : suivis;
+  const q = normaliser(cherche);
+  // Recherche sur tout : n°, bailleurs, négociateur, locataire, adresses et types des lots, téléphones, e-mails ; elle porte sur tous les mandats, 2026 ou non
+  const mandats = q ? d.mandats.filter((m) => correspond(texteRecherche(m.reference, m.nom, m.bailleur, m.negociateur_prenom, m.bail?.locataires, m.bail?.reference,
+      (infos[m.id]?.lots || []).map((l) => [l.adresse, nature(l.nature)]), infos[m.id]?.parties), q))
+    : anciens ? d.mandats : suivis;
   const negos = d.negociateurs;
   const aValider = suivis.filter((m) => m.statut !== 'Retiré sans location' && (!m.go_le || !m.negociateur)).length + baux.filter((b) => !b.valide_le || !b.loue_par).length;
   const sansGo = mandats.filter((m) => m.bail && !m.go_le && m.suivi_commission);
@@ -362,7 +369,7 @@ function Mandats() {
     lignes.push({ m, v, benef, facture: m.factures?.[v.cle] });
   }));
   const parNego = negos.map((n) => ({ ...n, lignes: lignes.filter((l) => l.benef === n.user_id) })).filter((n) => n.lignes.length || n.role === 'negociateur');
-  const s = mandats.find((m) => m.id === sel);
+  const s = d.mandats.find((m) => m.id === sel);
   return <>
     <div className="entete"><div><h1>Mandats</h1>
       <p className="sub">Avancement de chaque mandat, contrôle d’entrée et GO « dossier complet ». Les commissions des commerciaux sont dans l’onglet Commissions.</p></div></div>
@@ -370,8 +377,12 @@ function Mandats() {
     {sansGo.length > 0 && <div className="banner">⚠ {sansGo.length} mandat{sansGo.length > 1 ? 's' : ''} loué{sansGo.length > 1 ? 's' : ''} sans GO : {sansGo.map((m) => 'n°' + m.reference).join(', ')}</div>}
     <Tuiles items={[[suivis.length, 'Mandats depuis 2026'], [suivis.filter((m) => !m.go_le && m.statut !== 'Retiré sans location').length, 'GO à donner', true],
       [suivis.filter((m) => m.statut === 'Loué').length, 'Loués'], [d.mandats.length, 'Mandats au total']]} />
-    <label className="switch" style={{ float: 'right', marginTop: 6 }}><input type="checkbox" checked={anciens} onChange={(e) => setAnciens(e.target.checked)} /> Afficher aussi les mandats antérieurs à 2026 ({d.mandats.length - suivis.length})</label>
-    <div style={{ clear: 'both', height: 8 }} />
+    <div className="row" style={{ justifyContent: 'space-between', marginTop: 6, gap: 8, flexWrap: 'wrap' }}>
+      <input className="recherche" placeholder="Rechercher : nom, adresse, téléphone, e-mail, n° de mandat" value={cherche} onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un mandat" />
+      <label className="switch"><input type="checkbox" checked={anciens} onChange={(e) => setAnciens(e.target.checked)} /> Afficher aussi les mandats antérieurs à 2026 ({d.mandats.length - suivis.length})</label>
+    </div>
+    {q && <div className="muted" style={{ margin: '6px 0' }}>{mandats.length} mandat(s) trouvé(s) sur tous les mandats.</div>}
+    <div style={{ height: 8 }} />
     {vue === 'pipeline' && s && <section className="panneau" style={{ marginTop: 8 }}>
       <button className="btn" onClick={() => setSel(null)}>← Retour au pipeline</button>
       <div style={{ maxWidth: 980, marginTop: 10 }}><FicheMandat m={s} negos={negos} role={d.mon_role} majMandat={majMandat} majBail={majBail} apres={charger} /></div>
@@ -379,10 +390,12 @@ function Mandats() {
     {vue === 'pipeline' && !s && <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un mandat pour voir le détail, ce qui manque, les versements et le contrôle d’entrée."
       detail={null}>
       <div className="kanban">{COL_MANDAT.map(([k, l]) => { const items = mandats.filter((m) => k === 'Loué' ? ['Loué', 'Retiré sans location'].includes(m.statut) : m.statut === k);
-        return <div key={k} className="kcol"><div className="kcol-tete"><b>{l}</b><span className="pastille">{items.length}</span></div>
-          {!items.length && <div className="muted" style={{ padding: '8px 4px' }}>Aucun.</div>}
-          {items.map((m) => { const et = etapesMandat(m); const alerte = m.suivi_commission && m.bail && !m.go_le;
-            return <button key={m.id} className={'kcarte ' + (sel === m.id ? 'sel ' : '') + (alerte ? 'critique' : m.manques.length ? 'haute' : 'normale')} onClick={() => setSel(m.id)}>
+        const ferme = !!replie[k] && !q;
+        return <div key={k} className="kcol"><button type="button" className="kcol-tete kcol-bouton" aria-expanded={!ferme} onClick={() => setReplie({ ...replie, [k]: !replie[k] })}>
+            <b>{ferme ? '▸' : '▾'} {l}</b><span className="pastille">{items.length}</span></button>
+          {!ferme && !items.length && <div className="muted" style={{ padding: '8px 4px' }}>Aucun.</div>}
+          {!ferme && items.map((m) => { const et = etapesMandat(m); const alerte = m.suivi_commission && m.bail && !m.go_le;
+            return <Carte key={m.id} className={'kcarte ' + (sel === m.id ? 'sel ' : '') + (alerte ? 'critique' : m.manques.length ? 'haute' : 'normale')} onClick={() => setSel(m.id)}>
               {alerte && <div className="carte-alerte">⚠ Loué sans GO</div>}
               <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">Mandat n°{m.reference}{m.nom ? ' · ' + m.nom : ''}</span>
                 {!m.suivi_commission && <span className="muted" style={{ fontSize: 11 }}>avant 2026</span>}</div>
@@ -397,7 +410,7 @@ function Mandats() {
               <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}>
                 <span className={m.manques.length ? '' : 'muted'} style={{ color: m.manques.length ? 'var(--amber)' : undefined }}>{m.manques.length ? m.manques.length + ' point(s) à compléter' : 'Complet'}</span>
               </div>
-            </button>; })}
+            </Carte>; })}
         </div>; })}</div>
     </AvecDetail>}
 
