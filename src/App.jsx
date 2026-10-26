@@ -819,7 +819,7 @@ function SuiviSinistre({ dossier, recharger }) {
         {monday && <button className="btn gris" onClick={() => agir(() => rpc('pilotage_travaux_clore', { p_monday: id, p_clos: !dossier.clos }))}>{dossier.clos ? 'Rouvrir le dossier' : 'Clore le dossier'}</button>}</div>
       {!monday && <div className="muted" style={{ marginTop: 4 }}>Commentaires internes au pilotage : le statut et les prestataires se gèrent dans Rivage.</div>}</div>
     {vues.map((n) => <div key={n.id} className="note">
-      <div className="muted"><b>{n.auteur || '—'}</b> · {dateHeure(n.le)}{an(n.le)}{n.monday ? ' · Monday' : ''}</div>
+      <div className="muted"><b>{n.auteur || '—'}</b> · {dateHeure(n.le)}{an(n.le)}{n.origine ? ' · ' + n.origine : n.monday ? ' · Monday' : ''}</div>
       <div className="note-texte"><TexteLiens texte={n.contenu} /></div>
       {n.tronque && <div className="muted">Message coupé à 2 000 caractères à la reprise : texte complet dans Monday.</div>}
       {reponses(n).map((r) => <div key={r.id} className="note reponse"><div className="muted"><b>{r.auteur || '—'}</b> · {dateHeure(r.le)}{an(r.le)}</div><div className="note-texte"><TexteLiens texte={r.contenu} /></div></div>)}
@@ -827,6 +827,8 @@ function SuiviSinistre({ dossier, recharger }) {
     {racines.length > 3 && <button className="btn gris" style={{ marginTop: 8 }} onClick={() => setTout(!tout)}>{tout ? 'Ne garder que les 3 dernières' : `Voir les ${racines.length - 3} mises à jour plus anciennes`}</button>}
     {!notes.length && <p className="muted">Aucune mise à jour.</p>}
     {monday && <p className="muted" style={{ marginTop: 8 }}>Pièces jointes et photos restées dans {ORIGINE(dossier)}.</p>}
+    {dossier.repris && <p className="muted" style={{ marginTop: 8 }}>Historique repris de {ORIGINE(dossier.repris)}{dossier.repris.reference ? ' (' + dossier.repris.reference + ')' : ''} :
+      pièces jointes et photos restées dans {ORIGINE(dossier.repris)}{dossier.repris.lien ? <> · <a href={dossier.repris.lien} target="_blank" rel="noreferrer">ouvrir le dossier d'origine</a></> : ''}.</p>}
   </>;
 }
 
@@ -852,7 +854,7 @@ function Sinistres() {
   const q = normaliser(cherche);
   // Recherche sur tout : titre, adresse, lot, bail, locataires, bailleur, mandat, entreprises, téléphones, e-mails, bail Monday
   const trouve = (x) => !q || correspond(texteRecherche(x.titre, x.numero, x.adresse, x.lot, x.bail, x.locataires, x.bailleur, x.mandat,
-    x.prestataires_noms, x.monday_bail, x.statut_monday, x.reference, x.description, x.parties), q);
+    x.prestataires_noms, x.monday_bail, x.statut_monday, x.reference, x.description, x.parties, x.repris?.reference), q);
   // Colonne (et filtre) de statut d'un incident, avec les libellés de Rivage
   const colonneDe = (x) => (x.clos ? 'clos' : ['in_progress', 'on_hold'].includes(x.statut) ? x.statut : 'open');
   const STATUTS = [['open', 'Nouveau'], ['in_progress', 'En cours'], ['on_hold', 'En attente'], ['clos', 'Clos']];
@@ -869,7 +871,8 @@ function Sinistres() {
   return <>
     <div className="entete">
       <div><h1>Sinistres et incidents techniques</h1><p className="sub">Au {date(auj())} · {d.filter((x) => x.source !== 'monday').length} incidents reçus de Rivage
-        · {d.filter((x) => x.source === 'monday' && x.origine !== 'weroof').length} repris de Monday · {d.filter((x) => x.origine === 'weroof').length} repris de WeRoof</p></div>
+        · {d.filter((x) => x.source === 'monday' && x.origine !== 'weroof').length} repris de Monday · {d.filter((x) => x.origine === 'weroof').length} repris de WeRoof
+        · {d.filter((x) => x.repris).length} dossiers repris devenus incidents Rivage</p></div>
       <div className="objectif"><div className="row" style={{ justifyContent: 'space-between' }}><span className="muted">Objectif : aucun incident ouvert depuis plus de 15 jours</span><b>{aJour}/{ouverts.length}</b></div>
         <div className="jauge"><div style={{ width: (ouverts.length ? (aJour / ouverts.length) * 100 : 100) + '%' }} /></div></div>
     </div>
@@ -886,7 +889,7 @@ function Sinistres() {
     <div style={{ height: 8 }} />
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un incident pour voir le détail." detail={s && <>
       <div className="muted">{s.source === 'monday' ? `Repris de ${ORIGINE(s)}${s.reference ? ' · ' + s.reference : ''} · ${s.clos ? 'Clos' : 'En cours'}${s.statut_monday ? ' (' + ORIGINE(s) + ' : ' + s.statut_monday + ')' : ''}`
-        : `Incident n°${s.numero} · ${ST_INC[s.statut] || s.statut}`}</div>
+        : `Incident n°${s.numero} · ${ST_INC[s.statut] || s.statut}${s.repris ? ` · repris de ${ORIGINE(s.repris)}${s.repris.reference ? ' ' + s.repris.reference : ''} (ouvert le ${date(s.repris.ouvert_le)})` : ''}`}</div>
       <h2>{s.titre}</h2>
       {s.situation && <div className={'mini-alerte ' + s.situation.gravite}><b>Situation du bien : {s.situation.libelle}</b>
         <div>{s.situation.detail}{s.situation.bail ? ' Bail ' + s.situation.bail + '.' : ''}</div>
