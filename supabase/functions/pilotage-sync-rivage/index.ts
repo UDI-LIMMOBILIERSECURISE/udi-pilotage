@@ -218,6 +218,11 @@ Deno.serve(async (req) => {
       while (page <= total) {
         if (Date.now() - DEBUT > BUDGET) { suite = { modele, page }; break }
         const r = await fetch(`${RIVAGE}${chemin}?page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
+        if (r.status === 429) {
+          // Limite Rivage (100 requêtes par minute) : on attend une minute si le temps le permet, sinon le passage suivant reprend ici
+          if (Date.now() - DEBUT < BUDGET - 65000) { await new Promise((ok) => setTimeout(ok, 61000)); continue }
+          suite = { modele, page }; break
+        }
         if (!r.ok) {
           if (modele === 'Upload') { n = -r.status; break }
           throw new Error(`${modele} page ${page} : HTTP ${r.status}`)
