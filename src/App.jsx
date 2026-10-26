@@ -829,6 +829,8 @@ function Sinistres() {
         ['Bailleur', s.bailleur], ['Locataire', s.locataires], ['Bail', s.bail], ['Mandat', s.mandat], ['Déclaré le', date(s.declare_le)],
         ['Ancienneté', s.jours + ' jours'], ['Résolu le', s.resolu_le ? date(s.resolu_le) : null], ['À la charge de', CHARGE[s.a_charge] || s.a_charge],
         ['Montant estimé', euro(s.montant_estime)], ['Prestataires', s.prestataires ? ((s.prestataires_noms || []).join(', ') || String(s.prestataires)) : 'Aucun désigné']]} />
+      <Parties titre="Locataires" liste={s.parties?.locataires} max={9} />
+      <Parties titre="Bailleurs" liste={s.parties?.bailleurs} max={9} />
       {!s.clos && !s.prestataires && <div className="mini-alerte haute">Aucun prestataire désigné dans Rivage.</div>}
       {!s.clos && s.jours > 15 && <div className="mini-alerte critique">Ouvert depuis plus de 15 jours.</div>}
       <Historique items={s.historique} libStatut={ST_INC} />
@@ -838,7 +840,7 @@ function Sinistres() {
         <div className="kcol-tete"><b>{l}</b><span className="pastille">{items.length}</span></div>
         {!items.length && <div className="muted" style={{ padding: '8px 4px' }}>Rien ici avec ce filtre.</div>}
         {items.map((x) => { const u = URG[x.urgence] || [x.urgence, 'normale'];
-          return <button key={x.id} className={'kcarte ' + (sel === x.id ? 'sel ' : '') + (!x.clos && x.jours > 15 ? 'critique' : u[1])} onClick={() => setSel(x.id)}>
+          return <Carte key={x.id} className={'kcarte ' + (sel === x.id ? 'sel ' : '') + (!x.clos && x.jours > 15 ? 'critique' : u[1])} onClick={() => setSel(x.id)}>
             <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">#{x.numero} · {TYPE_INC[x.type] || x.type}</span>
               <span className="row" style={{ gap: 4 }}><span className={'statut-inc ' + colonneDe(x)}>{x.clos ? (ST_INC[x.statut] || 'Clos') : ST_INC[x.statut] || x.statut}</span><span className={'sev ' + u[1]}>{u[0]}</span></span></div>
             <div className="kcarte-titre">{x.titre}</div>
@@ -849,7 +851,9 @@ function Sinistres() {
             <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
               <span style={{ fontSize: 12, color: x.prestataires || x.clos ? 'var(--ink2)' : 'var(--red)' }}>{x.prestataires ? ((x.prestataires_noms || []).join(', ') || x.prestataires + ' prestataire(s)') : x.clos ? 'Clos le ' + date(x.resolu_le) : 'Sans prestataire'}</span>
               <span className="mono" style={{ fontSize: 12 }}>{x.clos ? 'clos' : x.jours + ' j'}</span></div>
-          </button>; })}
+            <Parties titre="Locataires" liste={x.parties?.locataires} />
+            <Parties titre="Bailleurs" liste={x.parties?.bailleurs} max={1} />
+          </Carte>; })}
       </div>)}</div>
     </AvecDetail>
   </>;
@@ -903,6 +907,8 @@ function SortiesDG() {
         <h2>{s.locataires}</h2>
         <div className="muted">{s.adresse} ({s.lot}) · {s.mandat}</div>
         <div className="muted">Bailleur : {s.bailleur || '—'}</div>
+        <Parties titre="Locataires" liste={s.parties?.locataires} max={9} />
+        <Parties titre="Bailleurs" liste={s.parties?.bailleurs} max={9} />
         <ResumeIA type="dg" id={s.bail_id} />
         <div className="echeance"><div><b>{s.parti ? 'Restitution au plus tard' : 'Départ prévu'}</b>
           <div className="muted">{s.parti ? 'le ' + date(s.limite_1_mois) + ' si EDL conforme, le ' + date(s.limite_2_mois) + ' sinon' : 'fin du bail'}</div></div>
@@ -926,7 +932,7 @@ function SortiesDG() {
         <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={s.lien} target="_blank" rel="noreferrer">Ouvrir le bail dans Rivage</a></div>
       </>; })()}>
       <div className="grille-cartes">{vus.map((x) => { const e = etatDG(x); const et = etapesDG(x);
-        return <button key={x.bail_id} className={'kcarte ' + (sel === x.bail_id ? 'sel ' : '') + e[1]} onClick={() => setSel(x.bail_id)}>
+        return <Carte key={x.bail_id} className={'kcarte ' + (sel === x.bail_id ? 'sel ' : '') + e[1]} onClick={() => setSel(x.bail_id)}>
           <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">Bail {x.reference}</span><span className={'sev ' + e[1]}>{e[0]}</span></div>
           <div className="kcarte-titre">{x.locataires}</div>
           <div className="muted">{x.adresse}</div>
@@ -935,7 +941,9 @@ function SortiesDG() {
           <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}><span>DG {euro(x.depot)}</span><span className="mono">{x.parti ? 'limite ' + date(x.limite_1_mois) : 'préavis'}</span></div>
           {(x.alertes.length > 0 || x.incidents.some((i) => i.a_charge === 'tenant')) && <div className="muted" style={{ color: 'var(--amber)', marginTop: 4 }}>
             {[x.alertes.length && x.alertes.length + ' contrôle(s) en alerte', x.incidents.filter((i) => i.a_charge === 'tenant').length && 'incident à la charge du locataire'].filter(Boolean).join(' · ')}</div>}
-        </button>; })}</div>
+          <Parties titre="Locataires" liste={x.parties?.locataires} />
+          <Parties titre="Bailleurs" liste={x.parties?.bailleurs} max={1} />
+        </Carte>; })}</div>
       {!vus.length && <div className="card">Aucun dossier avec ce filtre.</div>}
     </AvecDetail>
     <p className="muted" style={{ marginTop: 16 }}>Délais : restitution sous 1 mois après la remise des clés si l’état des lieux de sortie est conforme à celui d’entrée, 2 mois sinon (loi du 6 juillet 1989, art. 22) ; au-delà, majoration de 10 % du loyer mensuel hors charges par mois de retard commencé. Rivage n’expose ni la date de remise des clés ni la conformité de l’EDL : le calcul part de la date de fin du bail.</p>
