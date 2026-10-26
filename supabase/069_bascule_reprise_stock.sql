@@ -8,12 +8,19 @@
 -- « pas de circuit bloquant pour le stock repris ». On les date donc comme le stock (même convention que 058 : -infinity).
 -- Ce qui arrivera ensuite par webhook ou par synchronisation gardera sa vraie date d'arrivée.
 -- Les mandats signés et les baux commencés depuis controle_entree_depuis restent contrôlés (critère de date propre).
+--
+-- GED pas encore chargée dans Rivage (décision du 26/10) : les pièces du stock arriveront plus tard, par webhook, avec
+-- la date du jour. La lecture IA les prendrait pour des pièces nouvelles et lirait tout le stock. Les quatre tâches de
+-- lecture IA (baux, mandats, EDL, justificatifs) restent donc en pause jusqu'au chargement complet de la GED ;
+-- un script suivant datera alors ces pièces comme stock et relancera la lecture.
 
 begin;
 
 update pilotage.objets set recu_le = '-infinity' where recu_le > '-infinity';
 
-select jobname, cron.alter_job(jobid, active := true) from cron.job where jobname like 'pilotage-%';
+select jobname, cron.alter_job(jobid, active := true) from cron.job
+where jobname like 'pilotage-%'
+  and jobname not in ('pilotage-lecture-baux', 'pilotage-lecture-mandats', 'pilotage-lecture-edl', 'pilotage-lecture-justificatifs');
 
 commit;
 
@@ -21,6 +28,9 @@ commit;
 select type, count(*) n, count(*) filter (where recu_le > '-infinity') recus_apres_reprise
 from pilotage.objets where supprime_le is null group by type order by type;
 
--- Lecture IA qui partira d'office au fil des passages (à surveiller pour le coût)
+-- Tâches encore en pause (4 lectures IA attendues)
+select jobname from cron.job where jobname like 'pilotage-%' and not active order by jobname;
+
+-- Lecture IA qui partirait d'office si on la relançait aujourd'hui (pour information)
 select jsonb_array_length(public.pilotage_baux_a_lire(1000)) baux_a_lire,
        jsonb_array_length(public.pilotage_mandats_a_lire(1000)) mandats_a_lire;
