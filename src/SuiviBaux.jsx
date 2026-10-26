@@ -47,7 +47,8 @@ export default function SuiviBaux({ moi }) {
   const baux = d.baux;
   const aFaire = (b) => !!b.echeance?.action || b.obligations.some((o) => o.a_faire || o.en_retard);
   const grave = (b) => b.echeance?.gravite === 'critique' || b.obligations.some((o) => o.gravite === 'critique') || !!b.echeance?.alerte_derogatoire;
-  const aValider = (b) => !b.controle?.go_le;
+  // Seuls les baux nouveaux (après la date de référence de la reprise) passent par le contrôle d'entrée ; le stock va à l'audit (Reprise)
+  const aValider = (b) => !!b.controle?.soumis && !b.controle?.go_le;
   const commercial = (b) => ['commercial', 'derogatoire', 'professionnel'].includes(b.echeance?.type);
   const dans12 = (b) => { const j = jours(b.echeance?.echeance); return j != null && j <= 365; };
   const tests = { traiter: (b) => aFaire(b) || grave(b), valider: aValider, douze: dans12, commerciaux: commercial, tous: () => true };
@@ -76,7 +77,7 @@ export default function SuiviBaux({ moi }) {
         return <button key={b.bail_id} className={'kcarte ' + (sel === b.bail_id ? 'sel ' : '') + g} onClick={() => { setSel(b.bail_id); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span className="mono muted">Bail {b.reference} · {TYPES_BAIL[e.type] || 'type ?'}{e.type && !e.type_confirme ? ' (suggéré)' : ''}</span>
-            {b.controle?.go_le ? <span className="sev normale">GO</span> : <span className="sev haute">À valider</span>}
+            {b.controle?.go_le ? <span className="sev normale">GO</span> : b.controle?.soumis ? <span className="sev haute">À valider</span> : <span className="muted" title="Bail repris : contrôlé par l’audit (onglet Reprise)">Reprise</span>}
           </div>
           <div className="kcarte-titre">{b.locataires || '—'}</div>
           <div className="muted">{b.adresse}</div>
