@@ -119,7 +119,8 @@ Deno.serve(async (req) => {
   const aujourdhui = new Date().toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })
   // Résumé conservé tant que les données du dossier ne changent pas (le jour n'entre plus dans l'empreinte) :
   // l'IA n'est rappelée qu'après une mise à jour (webhook Rivage, saisie dans le pilotage) ou sur « Actualiser ».
-  const emp = await empreinte(contenu)
+  // v2 (26/10) : les résumés de sinistres produits avec 900 jetons pouvaient être coupés ; le préfixe les écarte du cache
+  const emp = await empreinte((corps.type === 'sinistre' ? 'v2:' : '') + contenu)
   const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   if (!corps.forcer) {
@@ -137,10 +138,12 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
       // Les modèles récents refusent le paramètre temperature : il n'est envoyé qu'au modèle de secours
-      body: JSON.stringify({ model: m, max_tokens: 900, system: SYSTEME, messages: [{ role: 'user', content: message }], ...(m.includes('haiku') ? { temperature: 0 } : {}) }),
+      body: JSON.stringify({ model: m, max_tokens: 4000, system: SYSTEME, messages: [{ role: 'user', content: message }], ...(m.includes('haiku') ? { temperature: 0 } : {}) }),
     })
     if (r.ok) {
       const j = await r.json()
+      // Réponse incomplète (limite de longueur atteinte, refus) : rien n'est mis en cache, on essaie le modèle suivant
+      if (j.stop_reason !== 'end_turn') { console.error('[pilotage-resume]', m, 'réponse incomplète', j.stop_reason); continue }
       texte = (j.content || []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('\n').trim()
       modele = m
       break
