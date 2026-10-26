@@ -1,3 +1,4 @@
+import { nature, Parties } from './cartes.jsx';
 // Suivi des baux et obligations : contrôle d'entrée, échéances et congés, suivis récurrents, paliers, actes.
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
@@ -34,12 +35,13 @@ function useEmail() {
 }
 
 export default function SuiviBaux({ moi }) {
+  const [infos, setInfos] = useState({});
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [filtre, setFiltre] = useState('traiter');
   const [sel, setSel] = useState(null);
   const [cherche, setCherche] = useState('');
-  const charger = () => rpc('pilotage_baux').then(setD).catch((e) => setErr(e.message));
+  const charger = () => { rpc('pilotage_infos_cartes').then((x) => setInfos(x?.baux || {})).catch(() => {}); return rpc('pilotage_baux').then(setD).catch((e) => setErr(e.message)); };
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
@@ -80,7 +82,9 @@ export default function SuiviBaux({ moi }) {
             {b.controle?.go_le ? <span className="sev normale">GO</span> : b.controle?.soumis ? <span className="sev haute">À valider</span> : <span className="muted" title="Bail repris : contrôlé par l’audit (onglet Reprise)">Reprise</span>}
           </div>
           <div className="kcarte-titre">{b.locataires || '—'}</div>
-          <div className="muted">{b.adresse}</div>
+          <div className="muted">{nature(infos[b.bail_id]?.nature)}{infos[b.bail_id]?.surface ? ` · ${infos[b.bail_id].surface} m²` : ''} · {infos[b.bail_id]?.adresse || b.adresse}</div>
+          <Parties titre="Locataires" liste={infos[b.bail_id]?.parties?.locataires} />
+          <Parties titre="Bailleurs" liste={infos[b.bail_id]?.parties?.bailleurs} max={1} />
           <div className="grid2" style={{ marginTop: 6 }}>
             <span className="muted">Bailleur</span><span>{b.bailleur || '—'}</span>
             <span className="muted">Échéance</span><span>{e.echeance ? date(e.echeance) + (e.mode === 'prolongation' ? ' (prolongation)' : '') : '—'}</span>
