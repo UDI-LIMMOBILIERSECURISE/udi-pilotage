@@ -1,3 +1,4 @@
+import { nature, Parties } from './cartes.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc, ecouterRivage } from './supabase.js';
 import { lireExportMonday } from './importMonday.js';
@@ -318,7 +319,7 @@ function MailAlerte({ a }) {
 
 // ===== Mandats et commissions (direction, superviseur) =====
 
-const COL_MANDAT = [['En cours', 'En cours · GO à donner'], ['Dossier complet validé', 'Dossier complet validé'], ['Loué', 'Loué / retiré']];
+const COL_MANDAT = [['En cours', 'En cours · GO à donner'], ['Dossier complet validé', 'Dossier complet à louer'], ['Loué', 'Loué / retiré']];
 
 function etapesMandat(m) {
   const ko = m.statut === 'Retiré sans location';
@@ -339,7 +340,8 @@ function Mandats() {
   const [sel, setSel] = useState(null);
   const [nego, setNego] = useState(null);
   const [anciens, setAnciens] = useState(false);
-  const charger = () => Promise.all([rpc('pilotage_mandats'), rpc('pilotage_baux_a_valider')]).then(([m, b]) => { setD(m); setBaux(b || []); }).catch((e) => setErr(e.message));
+  const [infos, setInfos] = useState({});
+  const charger = () => { rpc('pilotage_infos_cartes').then((x) => setInfos(x?.mandats || {})).catch(() => {}); return Promise.all([rpc('pilotage_mandats'), rpc('pilotage_baux_a_valider')]).then(([m, b]) => { setD(m); setBaux(b || []); }).catch((e) => setErr(e.message)); };
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
@@ -385,6 +387,9 @@ function Mandats() {
               <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">Mandat n°{m.reference}{m.nom ? ' · ' + m.nom : ''}</span>
                 {!m.suivi_commission && <span className="muted" style={{ fontSize: 11 }}>avant 2026</span>}</div>
               <div className="kcarte-titre">{m.bailleur || '—'}</div>
+              {(infos[m.id]?.lots || []).slice(0, 2).map((l, i) => <div key={i} className="muted" style={{ fontSize: 12 }}>{nature(l.nature)}{l.surface ? ` · ${l.surface} m²` : ''} · {l.adresse || 'adresse ?'}</div>)}
+              {(infos[m.id]?.lots || []).length > 2 && <div className="muted" style={{ fontSize: 12 }}>+ {infos[m.id].lots.length - 2} autre(s) lot(s)</div>}
+              <Parties titre="Bailleurs" liste={infos[m.id]?.parties?.bailleurs} />
               <div className="grid2" style={{ marginTop: 6 }}><span className="muted">Négo</span><span>{m.negociateur_prenom || <span style={{ color: 'var(--red)' }}>à attribuer</span>}</span>
                 <span className="muted">Locataire</span><span>{m.bail?.locataires || 'pas encore loué'}</span>
                 <span className="muted">Loyer</span><span>{m.loyer_reel != null ? euro(m.loyer_reel) + ' CC' : m.loyer_prev != null ? euro(m.loyer_prev) + ' prévu' : 'à saisir'}</span></div>
@@ -402,7 +407,7 @@ function Mandats() {
 function FicheMandat({ m, negos, role, majMandat, majBail, apres }) {
   const et = etapesMandat(m);
   return <>
-    <div className="muted">Mandat n°{m.reference}{m.nom ? ' · ' + m.nom : ''} · {m.statut}{m.apport_direction ? ' · apport direction' : ''}</div>
+    <div className="muted">Mandat n°{m.reference}{m.nom ? ' · ' + m.nom : ''} · {m.statut === 'Dossier complet validé' ? 'Dossier complet à louer' : m.statut}{m.apport_direction ? ' · apport direction' : ''}</div>
     <h2>{m.bailleur || 'Bailleur'}</h2>
     <div className="muted">Locataire : {m.bail?.locataires || 'pas encore loué'}</div>
     {m.suivi_commission && m.bail && !m.go_le && <div className="mini-alerte critique"><b>Anomalie : bien loué sans GO.</b> Le bail a été signé le {date(m.bail.signe_le || m.bail.debut)} alors que le dossier complet n’a pas été validé.</div>}
