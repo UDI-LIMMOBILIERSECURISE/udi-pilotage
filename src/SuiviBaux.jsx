@@ -1,4 +1,4 @@
-import { nature, Parties } from './cartes.jsx';
+import { nature, Parties, Carte, texteRecherche, correspond, normaliser } from './cartes.jsx';
 // Suivi des baux et obligations : contrôle d'entrée, échéances et congés, suivis récurrents, paliers, actes.
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
@@ -54,8 +54,10 @@ export default function SuiviBaux({ moi }) {
   const commercial = (b) => ['commercial', 'derogatoire', 'professionnel'].includes(b.echeance?.type);
   const dans12 = (b) => { const j = jours(b.echeance?.echeance); return j != null && j <= 365; };
   const tests = { traiter: (b) => aFaire(b) || grave(b), valider: aValider, douze: dans12, commerciaux: commercial, tous: () => true };
-  const q = cherche.trim().toLowerCase();
-  const vus = baux.filter(tests[filtre]).filter((b) => !q || [b.reference, b.locataires, b.adresse, b.bailleur, b.mandat].join(' ').toLowerCase().includes(q));
+  const q = normaliser(cherche);
+  // Recherche sur tout : n° de bail et de mandat, locataires, bailleurs, adresse, type de bien, téléphones, e-mails ; elle porte sur tous les baux, quel que soit le filtre
+  const vus = (q ? baux : baux.filter(tests[filtre])).filter((b) => !q || correspond(texteRecherche(b.reference, b.locataires, b.adresse, b.bailleur, b.mandat,
+    infos[b.bail_id]?.adresse, nature(infos[b.bail_id]?.nature), infos[b.bail_id]?.parties), q));
   const s = baux.find((b) => b.bail_id === sel);
 
   return <>
@@ -67,7 +69,7 @@ export default function SuiviBaux({ moi }) {
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <Filtres val={filtre} set={setFiltre} items={[['traiter', 'À traiter', baux.filter(tests.traiter).length], ['valider', 'Contrôle à valider', baux.filter(aValider).length],
         ['douze', 'Échéance < 12 mois', baux.filter(dans12).length], ['commerciaux', 'Commerciaux', baux.filter(commercial).length], ['tous', 'Tous', baux.length]]} />
-      <input className="recherche" placeholder="Rechercher (bail, locataire, adresse, bailleur)" value={cherche} onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un bail" />
+      <input className="recherche" placeholder="Rechercher : nom, adresse, téléphone, e-mail, n° de bail" value={cherche} onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un bail" />
     </div>
     {s ? <section className="panneau" style={{ marginTop: 8 }}>
       <button className="btn" onClick={() => setSel(null)}>← Retour à la liste</button>
@@ -76,7 +78,7 @@ export default function SuiviBaux({ moi }) {
       <div className="grille-cartes grille-baux">{vus.map((b) => {
         const e = b.echeance || {}; const g = grave(b) ? 'critique' : aFaire(b) ? 'haute' : 'normale';
         const prochaine = e.action_libelle || b.obligations.find((o) => o.a_faire)?.a_faire?.libelle;
-        return <button key={b.bail_id} className={'kcarte ' + (sel === b.bail_id ? 'sel ' : '') + g} onClick={() => { setSel(b.bail_id); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+        return <Carte key={b.bail_id} className={'kcarte ' + (sel === b.bail_id ? 'sel ' : '') + g} onClick={() => { setSel(b.bail_id); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span className="mono muted">Bail {b.reference} · {TYPES_BAIL[e.type] || 'type ?'}{e.type && !e.type_confirme ? ' (suggéré)' : ''}</span>
             {b.controle?.go_le ? <span className="sev normale">GO</span> : b.controle?.soumis ? <span className="sev haute">À valider</span> : <span className="muted" title="Bail repris : contrôlé par l’audit (onglet Reprise)">Reprise</span>}
@@ -92,7 +94,8 @@ export default function SuiviBaux({ moi }) {
           </div>
           {prochaine && <div style={{ marginTop: 6, fontSize: 13, color: g === 'critique' ? 'var(--red)' : 'var(--amber)' }}>→ {prochaine}</div>}
           {!b.controle?.go_le && b.controle?.restant > 0 && <div className="muted" style={{ marginTop: 4 }}>{b.controle.restant} point(s) de contrôle à traiter</div>}
-        </button>; })}</div>
+        </Carte>; })}</div>
+      {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} bail(s) trouvé(s) sur tous les baux.</div>}
       {!vus.length && <div className="card">Aucun bail avec ce filtre.</div>}
     </>}
   </>;
