@@ -61,7 +61,10 @@ Deno.serve(async (req) => {
   const url = Deno.env.get('SUPABASE_URL')!
   const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   // Corps : {} ou {"mode": "mensuel" | "impayes"} pour la tâche planifiée ; {"extrait": "lc_…"} pour un extrait de compte (039)
-  let corps: { mode?: string; extrait?: string } = {}
+  // {"depuis": {"modele": "Upload", "page": 12}} : suite d'une relecture complète interrompue (068-070), appel interne seulement
+  const DEBUT = Date.now()
+  const BUDGET = 120000 // la fonction est arrêtée vers 150-200 s : on s'arrête proprement avant et on enchaîne la suite
+  let corps: { mode?: string; extrait?: string; depuis?: { modele: string; page: number } } = {}
   try { corps = await req.json() } catch { /* corps vide */ }
 
   // Qui appelle : la tâche planifiée (secret partagé) ou un membre de la direction
@@ -183,14 +186,20 @@ Deno.serve(async (req) => {
   // Tâche planifiée : relecture hebdomadaire (corps vide) ou mensuelle ({"mode":"mensuel"}) ; à la demande : tout
   let mode = 'complet'
   if (cronValide) mode = corps.mode === 'mensuel' ? 'mensuel' : 'hebdo'
-  const aLire = MODELES.filter(([, , f]) => mode !== 'hebdo' || f === 'hebdo')
+  if (cronValide && corps.depuis?.modele) mode = corps.mode === 'hebdo' ? 'hebdo' : 'complet'
+  let aLire = MODELES.filter(([, , f]) => mode !== 'hebdo' || f === 'hebdo')
+  let premierePage = 1
+  if (cronValide && corps.depuis?.modele) {
+    const i = aLire.findIndex(([m]) => m === corps.depuis!.modele)
+    if (i >= 0) { aLire = aLire.slice(i); premierePage = Math.max(1, Number(corps.depuis.page) || 1) }
+  }
 
   const debutDetails = Date.now()
   const details = async (liste: Record<string, unknown>[]) => {
     const ordre = liste.map((o, i) => ({ o, i, k: Math.random() })).sort((x, y) => x.k - y.k)
     const sortie = [...liste]
     for (const { o, i } of ordre) {
-      if (Date.now() - debutDetails > 60000) break
+      if (Date.now() - debutDetails > 60000 || Date.now() - DEBUT > BUDGET - 15000) break
       const r = await fetch(`${RIVAGE}/api/v1/assets/${encodeURIComponent(String(o.id))}`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
       if (r.status === 429) break
       if (r.ok) { const j = await r.json(); sortie[i] = { ...o, ...((j.data && typeof j.data === 'object') ? j.data : j) } }
@@ -199,12 +208,15 @@ Deno.serve(async (req) => {
     return sortie
   }
 
-  const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur + (mode === 'complet' ? '' : ' (' + mode + ')') })
+  const suiteDe = corps.depuis?.modele ? ' (suite ' + corps.depuis.modele + ')' : ''
+  const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur + (mode === 'complet' ? '' : ' (' + mode + ')') + suiteDe })
   const compteurs: Record<string, number> = {}
+  let suite: { modele: string; page: number } | null = null
   try {
-    for (const [modele, chemin] of aLire) {
-      let page = 1, total = 1, n = 0
+    for (const [idx, [modele, chemin]] of aLire.entries()) {
+      let page = idx === 0 ? premierePage : 1, total = page, n = 0
       while (page <= total) {
+        if (Date.now() - DEBUT > BUDGET) { suite = { modele, page }; break }
         const r = await fetch(`${RIVAGE}${chemin}?page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
         if (!r.ok) {
           if (modele === 'Upload') { n = -r.status; break }
@@ -225,6 +237,13 @@ Deno.serve(async (req) => {
         page++
       }
       compteurs[modele] = n
+      if (suite) break
+    }
+    if (suite) {
+      // Limite de temps : on clôt ce passage et on demande la suite à la base (pg_net, script 070), qui rappelle la fonction
+      await service.rpc('pilotage_sync_fin', { p_id: syncId, p_compteurs: compteurs, p_erreur: `Partielle : suite à ${suite.modele} page ${suite.page}` })
+      const { error: eSuite } = await service.rpc('pilotage_sync_suite', { p_depuis: { ...suite, mode } })
+      return rep(200, { ok: true, partielle: true, suite, enchainee: !eSuite, compteurs })
     }
     await service.rpc('pilotage_sync_fin', { p_id: syncId, p_compteurs: compteurs, p_erreur: null })
     return rep(200, { ok: true, compteurs })
