@@ -1473,10 +1473,8 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     <ResumeIA type="impaye" id={d.id} />
     <SuggestionsBail d={d} peut={peut} recharger={recharger} />
     <div className="row" style={{ margin: '6px 0' }}>
-      <label className="champ-imp" style={{ minWidth: 200 }}><span>Organisme (garantie ou avocat)</span>
-        {peut ? <select value={d.organisme || ''} onChange={async (e) => { try { await rpc('pilotage_impaye_organisme', { p_dossier: d.id, p_organisme: e.target.value }); recharger(); } catch (x) { setErr(x.message); } }}>
-          <option value="">À renseigner</option>{Object.entries(ORGANISMES).filter(([k]) => k !== 'avocats').map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-          : <span>{ORGANISMES[d.organisme] || '—'}</span>}</label>
+      {/* Organisme déduit de la garantie (089) : plus de double saisie */}
+      <span className="etq">Organisme : {ORGANISMES[d.organisme] || (d.garantie ? d.garantie : 'garantie à renseigner')}</span>
       {d.cycle?.libelle && <span className="etq" title={d.cycle.jours != null ? `Ouvert depuis ${d.cycle.jours} jour(s)` : ''}>Rivage : {d.cycle.libelle}</span>}
       {d.bail_id && <button className="btn" onClick={() => setExtrait(!extrait)}>Extrait de compte</button>}
     </div>
@@ -1505,7 +1503,7 @@ function DossierImpaye({ d, membres, peut, recharger }) {
         : <label className="champ-imp"><span>Responsable</span><span>{d.responsable_prenom || '—'}</span></label>}
       {champ('notif_bailleur', 'Notification bailleur')}
       {champ('declaration_le', 'Déclaré le', 'date')}
-      {champ('garantie', 'Garantie')}
+      {champ('garantie', 'Garantie (donne l’organisme)')}
       {champ('maj_assureur_le', 'MAJ dossier chez l’assureur', 'date')}
       {champ('prise_en_charge', 'Prise en charge')}
       {champ('montant_impaye', 'Montant de l’impayé', 'montant')}
