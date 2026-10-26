@@ -17,10 +17,11 @@ const SOURCES: Record<string, { rpc: string; cle: string; liste?: string }> = {
 }
 
 const CONSIGNES: Record<string, string> = {
-  sinistre: "Il s'agit d'un incident technique (sinistre) déclaré dans le logiciel de gestion Rivage. Le champ situation décrit l'état locatif actuel du lot (occupé, libre, congé en cours, libre en attente de restitution du dépôt de garantie, avec les délais) : mentionne-le, car il conditionne l'intervention (accès au logement, imputation au locataire sortant sur son dépôt). mandat_statut indique si le mandat de gestion est actif.",
+  sinistre: "Il s'agit d'un incident technique (sinistre) déclaré dans le logiciel de gestion Rivage. Le champ situation décrit l'état locatif actuel du lot (occupé, libre, congé en cours, libre en attente de restitution du dépôt de garantie, avec les délais) : mentionne-le, car il conditionne l'intervention (accès au logement, imputation au locataire sortant sur son dépôt). mandat_statut indique si le mandat de gestion est actif. echanges, s'il est présent, contient les commentaires internes de l'équipe sur l'incident, du plus récent au plus ancien : tiens-en compte et synthétise-les.",
   dg: "Il s'agit d'un dossier de sortie de locataire et de restitution du dépôt de garantie. Rappel légal : restitution sous 1 mois après remise des clés si l'état des lieux de sortie est conforme à celui d'entrée, 2 mois sinon (loi du 6 juillet 1989, art. 22), majoration de 10 % du loyer HC par mois de retard commencé. Signification des champs : fin = date de fin du bail (sert de date de référence, la date réelle de remise des clés n'est pas connue) ; restitution_creee = une restitution du dépôt a été créée dans Rivage ; validee = cette restitution a été validée dans Rivage (cela ne dit RIEN de l'état des lieux) ; remboursee = le dépôt a été remboursé ; incidents = incidents techniques liés au bail, a_charge = qui les paie. La conformité de l'état des lieux de sortie n'est pas connue : ne la déduis jamais, cite les deux échéances possibles (limite_1_mois et limite_2_mois).",
   compta: "Il s'agit de la situation comptable d'un locataire sur une période de loyer (montants en euros). solde = reçu − dû : négatif = impayé, positif = trop-perçu.",
   alerte: "Il s'agit d'une alerte de contrôle automatique sur un dossier de gestion locative.",
+  travaux: "Il s'agit d'un dossier de travaux ou de sinistre en cours, repris de l'ancien tableau de suivi Monday de l'agence (« Suivi des travaux »). titre décrit le problème ; cree_le est la date d'ouverture du dossier ; statut_monday est l'étape notée dans Monday (En cours, Ordre de mission) ; prestataires_noms les entreprises désignées ; situation l'état locatif actuel du lot (occupé, libre, congé en cours) ; rattachement indique comment le dossier a été relié au bail Rivage. echanges contient le fil des mises à jour de la gestionnaire et de l'équipe, du plus récent au plus ancien : ce sont souvent des notes brèves suivies de liens vers des mails (à ignorer) et de copies de mails. Résume en 4 à 6 phrases : la nature du problème et la date d'ouverture, les étapes marquantes avec leurs dates (devis, accord du bailleur, intervention, assurance, syndic, expert), ce qui est en attente et de qui (bailleur, locataire, entreprise, syndic, assurance), et la date de la dernière mise à jour. Si la dernière mise à jour date de plus d'un mois par rapport à la date du jour, signale-le en donnant cette date. Ne recopie pas les échanges, synthétise-les, et ne cite aucun lien.",
   impaye: "Il s'agit d'un dossier de suivi d'impayé locatif (garantie loyers impayés GLI Zelok ou Mila, caution, huissier, avocat). Les champs du dossier viennent du tableau de suivi de l'agence ; echanges contient le fil des mises à jour de l'équipe (repris de Monday puis saisis dans le pilotage), du plus récent au plus ancien ; rivage contient les données du bail si le dossier y est rattaché. Résume en 4 à 6 phrases : où en est le dossier (garantie, prise en charge, indemnisation, procédure, audience), les montants connus, ce qui s'est passé de marquant dans les échanges (avec les dates), ce qui est en attente et qui doit agir. Ne recopie pas les échanges, synthétise-les. Signification des champs (vocabulaire du tableau de l'agence) : garantie = dispositif qui couvre l'impayé ; prise_en_charge = réponse de l'assureur sur la prise en charge du sinistre (OUI, En cours, NON REFUS = refusé, DECOMPTE MAJ OK = décompte à jour, VOIE HUISSIER, LOC REGUL DETTE = le locataire a régularisé) ; indemnisation_recue = indemnisation versée par l'assureur à l'agence (OK RECUE = reçue par l'agence, QUITTANCE SUBRO FINALE = quittance subrogative finale) ; indemnite_versee_bailleur = reversement de cette indemnité au propriétaire par l'agence (OK FAIT = reversée) ; dette_remb_loc = le locataire a-t-il remboursé sa dette ; solde_a_rembourser_assureur et indemnisation_a_rembourser = ce que l'agence doit rendre à l'assureur quand le locataire a payé après indemnisation ; intervenants = membres de l'équipe qui suivent le dossier ; declaration_le = date de déclaration du sinistre à l'assureur ; maj_assureur_le = dernière mise à jour du dossier chez l'assureur. Un champ vide signifie seulement que l'information n'a pas été saisie : ne le présente pas comme un manque dans le dossier sauf s'il est utile au suivi.",
   bail: "Il s'agit du suivi d'un bail géré par l'agence : échéance et procédure d'information du bailleur (echeance : type de bail, date d'échéance, date limite du congé, étape en cours, décision du bailleur, blocages), contrôle d'entrée (controle : points restant à traiter, anomalies, GO), suivis récurrents (obligations : assurance, entretien, compteurs, garanties, taxes, avec l'étape de relance à faire), paliers de loyer, actes (demandes de renouvellement, congés) et lecture du bail par l'IA si elle existe. Résume en 3 à 5 phrases : où en est le bail, ce qui est urgent (dates limites), ce qui reste à contrôler, et la prochaine action. Ne donne aucun avis juridique au-delà des règles rappelées dans les données.",
   mandat: "Il s'agit d'un mandat de gestion suivi de sa signature jusqu'à la mise en location : statut, négociateur, GO de la direction (dossier complet validé après le contrôle d'entrée), bail de mise en location. manques liste ce qui reste à faire. Un bien loué sans GO est une anomalie à signaler. Les commissions sont suivies ailleurs : n'en parle pas. Résume en 3 à 5 phrases où en est le mandat, ce qui bloque et la prochaine action.",
@@ -77,6 +78,23 @@ Deno.serve(async (req) => {
   const liste = (src.liste ? data?.[src.liste] : data) || []
   const dossier = liste.find((x: Record<string, unknown>) => String(x[src.cle]) === String(corps.id))
   if (!dossier) return rep(404, { error: 'Dossier introuvable ou non visible' })
+  let consigne = corps.type!
+  if (corps.type === 'sinistre') {
+    // Fil des mises à jour : dossiers repris de Monday (résumé réservé à ceux en cours) ou commentaires du pilotage sur un incident Rivage
+    const monday = dossier.source === 'monday'
+    if (monday && dossier.clos) return rep(400, { error: 'Résumé réservé aux dossiers en cours' })
+    const { data: notes } = monday
+      ? await utilisateur.rpc('pilotage_travaux_notes', { p_monday: Number(dossier.monday_id) })
+      : await utilisateur.rpc('pilotage_sinistre_notes', { p_incident: String(corps.id) })
+    let total = 0
+    const echanges = (notes || []).filter((n: { contenu: string }) => { total += (n.contenu || '').length; return total < 30000 })
+      .map((n: { le: string; auteur: string; contenu: string; parent_id: number | null }) => ({ le: n.le, auteur: n.auteur, reponse: !!n.parent_id,
+        texte: (n.contenu || '').replace(/https?:\/\/\S+/g, '[lien]') }))
+    if (echanges.length) dossier.echanges = echanges
+    // Champs qui changent chaque jour ou sans intérêt pour le résumé : hors empreinte, le résumé reste en cache tant que le dossier ne bouge pas
+    delete dossier.jours; delete dossier.lien; delete dossier.parties; delete dossier.nb_notes; delete dossier.derniere_note
+    if (monday) consigne = 'travaux'
+  }
   if (corps.type === 'impaye') {
     const { data: notes } = await utilisateur.rpc('pilotage_impaye_notes', { p_impaye: Number(corps.id) })
     // Fil des échanges, du plus récent au plus ancien, limité pour rester lisible par l'IA
@@ -111,7 +129,7 @@ Deno.serve(async (req) => {
 
   const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
   if (!cleApi) return rep(500, { error: 'Service IA non configuré' })
-  const message = `${CONSIGNES[corps.type!]}\nDate du jour : ${aujourdhui}.\n\nDonnées du dossier :\n${contenu}`
+  const message = `${CONSIGNES[consigne]}\nDate du jour : ${aujourdhui}.\n\nDonnées du dossier :\n${contenu}`
 
   let texte = '', modele = ''
   for (const m of MODELES) {

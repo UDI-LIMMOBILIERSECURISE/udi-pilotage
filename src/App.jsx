@@ -777,17 +777,32 @@ function AlertesLiees({ items }) {
     <div key={i} className={'mini-alerte ' + a.gravite}><b>{SEV[a.gravite]}</b> · {a.libelle}<div className="muted">{a.detail}</div></div>)}</>;
 }
 
-// Fil des mises à jour d'un dossier repris du suivi des travaux Monday (081) : lecture, ajout, clôture / réouverture
-function SuiviTravaux({ dossier, recharger }) {
+// Texte d'une mise à jour avec liens cliquables ; les liens Gmail sont abrégés en « mail envoyé / reçu » (085)
+const URL_RE = /(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]])/g;
+function libelleLien(u) {
+  if (u.includes('mail.google.com')) return u.includes('#sent') ? '✉ mail envoyé' : u.includes('#inbox') ? '✉ mail reçu' : '✉ mail';
+  if (u.includes('monday.com/protected_static')) return '📎 pièce jointe Monday';
+  try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; }
+}
+function TexteLiens({ texte }) {
+  const morceaux = String(texte || '').split(URL_RE);
+  return <>{morceaux.map((m, i) => (i % 2 ? <a key={i} href={m} target="_blank" rel="noreferrer" title={m} onClick={(e) => e.stopPropagation()}>{libelleLien(m)}</a> : m))}</>;
+}
+
+// Fil des mises à jour d'un sinistre : dossiers repris de Monday (081, avec clôture / réouverture) et incidents Rivage (084)
+function SuiviSinistre({ dossier, recharger }) {
   const [notes, setNotes] = useState(null);
   const [texte, setTexte] = useState('');
   const [err, setErr] = useState('');
   const [tout, setTout] = useState(false);
-  const id = dossier.monday_id;
-  const lire = () => rpc('pilotage_travaux_notes', { p_monday: id }).then(setNotes).catch((e) => setErr(e.message));
+  const monday = dossier.source === 'monday';
+  const id = monday ? dossier.monday_id : dossier.id;
+  const lire = () => rpc(monday ? 'pilotage_travaux_notes' : 'pilotage_sinistre_notes', monday ? { p_monday: id } : { p_incident: id })
+    .then(setNotes).catch((e) => setErr(e.message));
   useEffect(() => { lire(); }, [id]);
   const agir = async (f) => { try { setErr(''); await f(); lire(); recharger(); } catch (e) { setErr(e.message); } };
-  const envoyer = () => texte.trim() && agir(async () => { await rpc('pilotage_travaux_note', { p_monday: id, p_contenu: texte }); setTexte(''); });
+  const envoyer = () => texte.trim() && agir(async () => {
+    await rpc(monday ? 'pilotage_travaux_note' : 'pilotage_sinistre_note', monday ? { p_monday: id, p_contenu: texte } : { p_incident: id, p_contenu: texte }); setTexte(''); });
   if (!notes) return <p className="muted">Chargement des mises à jour…</p>;
   const racines = notes.filter((n) => !n.parent_id);
   const vues = tout ? racines : racines.slice(0, 3);
@@ -798,16 +813,17 @@ function SuiviTravaux({ dossier, recharger }) {
     {err && <div className="err">{err}</div>}
     <div style={{ marginBottom: 10 }}><textarea className="saisie-note" rows="3" placeholder="Écrire une mise à jour…" value={texte} onChange={(e) => setTexte(e.target.value)} />
       <div className="row" style={{ marginTop: 6, gap: 8 }}><button className="btn plein" onClick={envoyer}>Publier</button>
-        <button className="btn gris" onClick={() => agir(() => rpc('pilotage_travaux_clore', { p_monday: id, p_clos: !dossier.clos }))}>{dossier.clos ? 'Rouvrir le dossier' : 'Clore le dossier'}</button></div></div>
+        {monday && <button className="btn gris" onClick={() => agir(() => rpc('pilotage_travaux_clore', { p_monday: id, p_clos: !dossier.clos }))}>{dossier.clos ? 'Rouvrir le dossier' : 'Clore le dossier'}</button>}</div>
+      {!monday && <div className="muted" style={{ marginTop: 4 }}>Commentaires internes au pilotage : le statut et les prestataires se gèrent dans Rivage.</div>}</div>
     {vues.map((n) => <div key={n.id} className="note">
       <div className="muted"><b>{n.auteur || '—'}</b> · {dateHeure(n.le)}{an(n.le)}{n.monday ? ' · Monday' : ''}</div>
-      <div className="note-texte">{n.contenu}</div>
+      <div className="note-texte"><TexteLiens texte={n.contenu} /></div>
       {n.tronque && <div className="muted">Message coupé à 2 000 caractères à la reprise : texte complet dans Monday.</div>}
-      {reponses(n).map((r) => <div key={r.id} className="note reponse"><div className="muted"><b>{r.auteur || '—'}</b> · {dateHeure(r.le)}{an(r.le)}</div><div className="note-texte">{r.contenu}</div></div>)}
+      {reponses(n).map((r) => <div key={r.id} className="note reponse"><div className="muted"><b>{r.auteur || '—'}</b> · {dateHeure(r.le)}{an(r.le)}</div><div className="note-texte"><TexteLiens texte={r.contenu} /></div></div>)}
     </div>)}
     {racines.length > 3 && <button className="btn gris" style={{ marginTop: 8 }} onClick={() => setTout(!tout)}>{tout ? 'Ne garder que les 3 dernières' : `Voir les ${racines.length - 3} mises à jour plus anciennes`}</button>}
     {!notes.length && <p className="muted">Aucune mise à jour.</p>}
-    <p className="muted" style={{ marginTop: 8 }}>Pièces jointes et photos restées dans Monday.</p>
+    {monday && <p className="muted" style={{ marginTop: 8 }}>Pièces jointes et photos restées dans Monday.</p>}
   </>;
 }
 
@@ -824,9 +840,16 @@ function Sinistres() {
   const [filtre, setFiltre] = useState('tous');
   const [statut, setStatut] = useState('tous');
   const [sel, setSel] = useState(null);
+  const [cherche, setCherche] = useState('');
+  // Colonne « Clos » repliée au départ (190 dossiers repris de Monday) ; un clic sur l'en-tête replie ou ouvre une colonne
+  const [replie, setReplie] = useState({ clos: true });
   if (err) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
   const ouverts = d.filter((x) => !x.clos);
+  const q = normaliser(cherche);
+  // Recherche sur tout : titre, adresse, lot, bail, locataires, bailleur, mandat, entreprises, téléphones, e-mails, bail Monday
+  const trouve = (x) => !q || correspond(texteRecherche(x.titre, x.numero, x.adresse, x.lot, x.bail, x.locataires, x.bailleur, x.mandat,
+    x.prestataires_noms, x.monday_bail, x.statut_monday, x.parties), q);
   // Colonne (et filtre) de statut d'un incident, avec les libellés de Rivage
   const colonneDe = (x) => (x.clos ? 'clos' : ['in_progress', 'on_hold'].includes(x.statut) ? x.statut : 'open');
   const STATUTS = [['open', 'Nouveau'], ['in_progress', 'En cours'], ['on_hold', 'En attente'], ['clos', 'Clos']];
@@ -837,7 +860,7 @@ function Sinistres() {
     vieux: (x) => !x.clos && x.jours > 15,
     sans: (x) => !x.clos && !x.prestataires,
   };
-  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut);
+  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut).filter(trouve);
   const colonnes = STATUTS.filter(([k]) => statut === 'tous' || k === statut).map(([k, l]) => [k, l, vus.filter((x) => colonneDe(x) === k)]);
   const s = d.find((x) => x.id === sel);
   return <>
@@ -854,6 +877,10 @@ function Sinistres() {
       ['vieux', '+ de 15 jours', d.filter(tests.vieux).length], ['sans', 'Sans prestataire', d.filter(tests.sans).length]]} />
     <Filtres val={statut} set={setStatut} items={[['tous', 'Tous les statuts', d.filter(tests[filtre]).length],
       ...STATUTS.map(([k, l]) => [k, l, d.filter(tests[filtre]).filter((x) => colonneDe(x) === k).length])]} />
+    <input className="recherche" placeholder="Rechercher : titre, adresse, locataire, bailleur, entreprise, téléphone, e-mail, n° de bail" value={cherche}
+      onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un sinistre" />
+    {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) avec les filtres choisis.</div>}
+    <div style={{ height: 8 }} />
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un incident pour voir le détail." detail={s && <>
       <div className="muted">{s.source === 'monday' ? `Suivi des travaux repris de Monday · ${s.clos ? 'Clos' : 'En cours'}${s.statut_monday ? ' (Monday : ' + s.statut_monday + ')' : ''}`
         : `Incident n°${s.numero} · ${ST_INC[s.statut] || s.statut}`}</div>
@@ -861,7 +888,7 @@ function Sinistres() {
       {s.situation && <div className={'mini-alerte ' + s.situation.gravite}><b>Situation du bien : {s.situation.libelle}</b>
         <div>{s.situation.detail}{s.situation.bail ? ' Bail ' + s.situation.bail + '.' : ''}</div>
         {s.mandat_statut && <div className="muted">{s.mandat_statut}</div>}</div>}
-      {s.source !== 'monday' && <ResumeIA type="sinistre" id={s.id} />}
+      {(s.source !== 'monday' || !s.clos) && <ResumeIA key={s.id + ':' + (s.nb_notes || 0)} type="sinistre" id={s.id} />}
       {s.source === 'monday' && !s.bail && <div className="mini-alerte haute">{s.lot ? 'Rattaché au lot seulement : le locataire du dossier Monday n’a pas de bail dans Rivage.'
         : s.mandat ? 'Rattaché au mandat seulement : ni bail ni lot retrouvé dans Rivage.' : 'Non rattaché : aucun bail, lot ou mandat Rivage retrouvé pour ce dossier Monday.'}</div>}
       {s.description && <p>{s.description}</p>}
@@ -877,15 +904,16 @@ function Sinistres() {
       {!s.clos && !s.prestataires && <div className="mini-alerte haute">{s.source === 'monday' ? 'Aucune entreprise renseignée sur le dossier.' : 'Aucun prestataire désigné dans Rivage.'}</div>}
       {!s.clos && s.jours > 15 && <div className="mini-alerte critique">Ouvert depuis plus de 15 jours.</div>}
       <Historique items={s.historique} libStatut={ST_INC} />
-      {s.source === 'monday' && <SuiviTravaux key={s.monday_id} dossier={s} recharger={recharger} />}
+      <SuiviSinistre key={s.id} dossier={s} recharger={recharger} />
       <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={s.lien} target="_blank" rel="noreferrer">{s.source === 'monday' ? 'Ouvrir dans Monday' : 'Ouvrir dans Rivage'}</a></div>
     </>}>
-      <div className="kanban">{colonnes.map(([k, l, items]) => <div key={k} className="kcol">
-        <div className="kcol-tete"><b>{l}</b><span className="pastille">{items.length}</span></div>
-        {!items.length && <div className="muted" style={{ padding: '8px 4px' }}>Rien ici avec ce filtre.</div>}
-        {items.map((x) => { const u = URG[x.urgence] || [x.urgence, 'normale'];
+      <div className="kanban">{colonnes.map(([k, l, items]) => { const ferme = !!replie[k] && !q && statut !== k; return <div key={k} className="kcol">
+        <button type="button" className="kcol-tete kcol-bouton" aria-expanded={!ferme} onClick={() => setReplie({ ...replie, [k]: !ferme })}>
+          <b>{ferme ? '▸' : '▾'} {l}</b><span className="pastille">{items.length}</span></button>
+        {!ferme && !items.length && <div className="muted" style={{ padding: '8px 4px' }}>Rien ici avec ce filtre.</div>}
+        {!ferme && items.map((x) => { const u = URG[x.urgence] || [x.urgence, 'normale'];
           return <Carte key={x.id} className={'kcarte ' + (sel === x.id ? 'sel ' : '') + (!x.clos && x.jours > 15 ? 'critique' : u[1])} onClick={() => setSel(x.id)}>
-            <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">{x.source === 'monday' ? 'Monday' + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '') : '#' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type)}</span>
+            <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">{(x.source === 'monday' ? 'Monday' : '#' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type)) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}</span>
               <span className="row" style={{ gap: 4 }}><span className={'statut-inc ' + colonneDe(x)}>{x.clos ? (ST_INC[x.statut] || 'Clos') : x.statut_monday || ST_INC[x.statut] || x.statut}</span>{u[0] && <span className={'sev ' + u[1]}>{u[0]}</span>}</span></div>
             <div className="kcarte-titre">{x.titre}</div>
             <div className="muted">{x.adresse || 'Immeuble, pas de lot précis'}</div>
@@ -899,7 +927,7 @@ function Sinistres() {
             <Parties titre="Locataires" liste={x.parties?.locataires} />
             <Parties titre="Bailleurs" liste={x.parties?.bailleurs} max={1} />
           </Carte>; })}
-      </div>)}</div>
+      </div>; })}</div>
     </AvecDetail>
   </>;
 }
