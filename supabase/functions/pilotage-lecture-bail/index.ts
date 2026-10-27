@@ -32,6 +32,8 @@ Règles strictes :
 - "page" : numéro de la page du PDF où se trouve l'information (1 = première page), sinon null.
 - "extrait" : citation exacte et courte (200 caractères au plus) du passage qui fonde la réponse, sinon null.
 - Pour les clés de dates et durée (c_rv_dates, h_rv_dates), ajoute "signature" (AAAA-MM-JJ, date de signature du bail en cours), "debut" (AAAA-MM-JJ, date de prise d'effet du bail en cours) et "duree_mois" (entier).
+- Date de signature : c'est UNIQUEMENT la date écrite à côté des signatures des parties, en général sur la dernière page (« Fait à …, le … », « Signé le … », date des signatures électroniques ; s'il y en a plusieurs, la dernière). Cite ce passage dans "extrait" et sa page dans "page".
+  Ne prends JAMAIS pour date de signature une date citée dans le corps du bail à propos du loyer ou d'un bail antérieur : montant et date du dernier loyer acquitté par le précédent locataire, date de la dernière révision, loyer de référence, ancien bail, bail renouvelé, avenant précédent. Si aucune date n'est écrite près des signatures, mets "signature": null et ajoute-le aux "anomalies".
 - Pour les clés de dépôt de garantie (c_rv_dg, h_rv_dg), ajoute "montant" (nombre, en euros).
 - Pour les clés de loyer (c_rv_loyer, h_rv_loyer), ajoute "montant_mensuel" (loyer mensuel hors charges et hors taxes, nombre ; loyer annuel divisé par 12 s'il est exprimé à l'année).
 - Pour les clés de charges (c_rv_charges, h_rv_charges), ajoute "montant_mensuel" (provision ou forfait mensuel, nombre ; 0 s'il n'y en a pas).
@@ -51,6 +53,7 @@ Règles strictes :
 - "valeur" : réponse courte en français (une phrase au plus), dates au format jj/mm/aaaa, montants avec le symbole €.
 - "page" : numéro de la page du PDF (1 = première page), sinon null. "extrait" : citation exacte et courte (200 caractères au plus), sinon null.
 - m_rv_dates : ajoute "signature" (AAAA-MM-JJ), "debut" (AAAA-MM-JJ, prise d'effet) et "duree_mois" (durée initiale, entier).
+  La signature est UNIQUEMENT la date écrite à côté des signatures (en général dernière page : « Fait à …, le … », signatures électroniques : la dernière) ; jamais une date citée dans le corps du mandat. Absente : "signature": null et une anomalie.
 - m_rv_reconduction : ajoute "code" parmi tacite, expresse, aucune, et "annees" (durée de chaque reconduction, entier).
 - m_rv_registre : ajoute "numero" (entier, numéro d'inscription au registre des mandats).
 - m_rv_gestion : ajoute "taux" (nombre : taux des honoraires de gestion en % TTC ; s'il n'est donné qu'en HT, multiplie par 1,2).
