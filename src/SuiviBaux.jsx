@@ -6,7 +6,7 @@ import { ResumeIA, Tuiles, Filtres } from './App.jsx';
 import { Compteurs } from './SuiviMandat.jsx';
 import { Circuit } from './Circuit.jsx';
 import { preparer, SMS, nomSms, smsFactures, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
-import { chargerModeles, texteSmsGestion } from './messages.js';
+import { chargerModeles, texteSmsGestion, MOYEN as MOYEN_MSG } from './messages.js';
 import MessagesDossier from './MessagesDossier.jsx';
 import FicheConge from './FicheConge.jsx';
 
@@ -113,6 +113,8 @@ export function DossierBail({ b, peut, moi, apres }) {
   const [parametrer, setParametrer] = useState(false);
   const [modeles, setModeles] = useState([]); // textes des SMS de la gestion, modifiables dans « Modèles de messages » (091)
   const [rev, setRev] = useState(0); // fiche du congé enregistrée : les messages sont recalculés (date de l'EDL)
+  const refMail = React.useRef(null); // 099 : le mail préparé s'affiche en haut de la fiche ; on l'amène à l'écran
+  useEffect(() => { if (mail && refMail.current) refMail.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [mail]);
   const email = useEmail();
   const charger = () => rpc('pilotage_bail_dossier', { p_bail: b.bail_id }).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { chargerModeles().then((x) => setModeles(x?.modeles || [])).catch(() => {}); }, []);
@@ -131,7 +133,10 @@ export function DossierBail({ b, peut, moi, apres }) {
     if (m) setMail({ m, etape });
   };
   // Journal : étapes de suivi + écarts bail / Rivage justifiés (cause et justificatif).
-  const journal = [...(d.journal || []), ...((d.controle?.items) || [])
+  // 099 : mails et SMS préparés depuis le pilotage (bloc Messages) repris au journal
+  const journal = [...(d.journal || []),
+    ...(d.messages || []).map((m) => ({ le: m.le, detail: `${m.libelle} · ${MOYEN_MSG[m.moyen] || m.moyen}${m.a ? ' · ' + m.a : ''}`, par: m.par })),
+    ...((d.controle?.items) || [])
     .filter((i) => i.repondu && i.auto === 'anomalie' && i.statut === 'ok' && i.commentaire)
     .map((i) => ({ le: i.le, detail: `Écart justifié · ${i.libelle} : ${i.detail} · justification : ${i.commentaire}`, par: i.par }))]
     .sort((x, y) => new Date(y.le) - new Date(x.le));
@@ -176,7 +181,7 @@ export function DossierBail({ b, peut, moi, apres }) {
         {a.ob && <Realise ob={a.ob} agir={agir} />}
       </div>}
     </div>)}
-    {mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={gere} />}
+    <div ref={refMail}>{mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={gere} />}</div>
     <FicheConge bail={b.bail_id} apres={() => { setRev((n) => n + 1); apres && apres(); }} />
     <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} />
 
@@ -194,7 +199,7 @@ export function DossierBail({ b, peut, moi, apres }) {
       <Paliers d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
       <Actes d={d} b={b} peut={gere} agir={agir} />
       {journal.length > 0 && <details className="replie" style={{ marginTop: 10 }}>
-        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Journal ({journal.length})</summary>
+        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Journal : messages, relances et écarts ({journal.length})</summary>
         <ol className="histo">{journal.slice(0, 30).map((j, i) =>
           <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol>
       </details>}
@@ -403,7 +408,6 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
   const piecesManquantes = c.items.filter((i) => i.bloc === 'pieces' && !regle(i));
   const piecesFaites = c.items.filter((i) => i.bloc === 'pieces' && regle(i));
   const rivageOuverts = c.items.filter((i) => i.bloc === 'rivage' && !regle(i));
-  const rivageFaits = c.items.filter((i) => i.bloc === 'rivage' && regle(i));
   const repondrePiece = async (i, statut) => {
     await agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: statut, p_suivi: statut ? (i.mode === 'document' || i.bloc === 'rivage' ? 'rivage' : 'backoffice') : null, p_valeur: null, p_commentaire: null });
   };
@@ -416,7 +420,9 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
       body = { ...body, pdf: btoa(bin), nom: fichier.name };
     }
     const { data, error } = await supabase.functions.invoke('pilotage-lecture-bail', { body });
-    if (error || data?.error) setLecture({ charge: false, err: data?.error || 'Lecture impossible pour le moment.' });
+    let msg = data?.error;
+    if (error && !msg && error.context?.json) { try { msg = (await error.context.json()).error; } catch { /* réponse illisible */ } }
+    if (error || data?.error) setLecture({ charge: false, err: msg || 'Lecture impossible pour le moment.' });
     else { setLecture({ charge: false, err: '' }); await recharger(); }
   };
   return <>
@@ -432,7 +438,7 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
         {c.go_le && <button className="btn gris" onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })}>Retirer le GO</button>}
         {/* Bail lu une seule fois : plus de bouton de lecture une fois la lecture enregistrée */}
         {!d.lecture && <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le bail déposé dans Rivage (IA)'}</button>}
-        {!d.lecture && <label className="btn">Lire un PDF (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>}
+        {!d.lecture && <label className="btn" title="Bail absent de Rivage : choisir le PDF sur l’ordinateur pour que l’IA le lise">Lire un PDF depuis l’ordinateur (IA)<input type="file" accept="application/pdf" hidden onChange={(e) => e.target.files[0] && lire(e.target.files[0])} /></label>}
         {manqBailleur.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes', { manquants: manqBailleur }, { cle: 'e:' + b.bail_id + ':pieces', etape: auj(), detail: 'Pièces demandées au bailleur' })}>Demander les pièces au bailleur ({manqBailleur.length})</button>}
         {manqLocataire.length > 0 && <button className="btn" onClick={() => ouvrirMail('pieces_manquantes_locataire', { manquants: manqLocataire }, { cle: 'e:' + b.bail_id + ':pieces_locataire', etape: auj(), detail: 'Pièces demandées au locataire' })}>Demander les pièces au locataire ({manqLocataire.length})</button>}
       </div>}
@@ -477,17 +483,9 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
           {peut && i.repondu && <button className="lien" style={{ marginLeft: 8 }} onClick={() => repondrePiece(i, null)}>Revenir</button>}</li>)}</ul></details>}
       {piecesFaites.some((i) => i.auto === 'ok' && i.piece?.par_nom && !i.repondu) && <div className="muted" style={{ fontSize: 12 }}>Pièces reconnues par leur nom : en cas de doute, « Vérifier avec l’IA » lit le document et confirme le dépôt.</div>}
 
-      <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.rivage}</b></div>
-      {rivageOuverts.length === 0 && <div style={{ color: 'var(--teal)', fontSize: 13, padding: '6px 0' }}>✓ Aucun point à traiter.</div>}
+      {/* 099 : croisement avec Rivage affiché seulement s'il reste un écart (champ vide, différence avec le bail lu, incohérence légale) */}
+      {rivageOuverts.length > 0 && <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.rivage}</b></div>}
       {rivageOuverts.sort((x, y) => (y.auto === 'anomalie') - (x.auto === 'anomalie')).map((i) => <Question key={i.cle} i={i} d={d} b={b} peut={peut} agir={agir} />)}
-      {rivageFaits.length > 0 && <details style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
-        <summary style={{ cursor: 'pointer', color: 'var(--teal)', fontSize: 13 }}>✓ {rivageFaits.length} point(s) conforme(s)</summary>
-        <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 13 }}>{rivageFaits.map((i) => <li key={i.cle}>{i.libelle} · {i.detail}
-          {i.repondu && <span className="muted"> · {i.statut === 'sans_objet' ? 'sans objet' : i.auto === 'anomalie' ? 'écart justifié : ' + (i.commentaire || '—') : 'validé'} ({i.par || '—'}, {date(i.le)})</span>}
-          {peut && (i.repondu
-            ? <button className="lien" style={{ marginLeft: 8 }} onClick={() => repondrePiece(i, null)}>Revenir</button>
-            : <button className="lien" style={{ marginLeft: 8 }} onClick={() => { const m = window.prompt('Qu’est-ce qui ne va pas ? (obligatoire)'); if (m && m.trim()) agir('pilotage_bail_repondre', { p_bail: b.bail_id, p_cle: i.cle, p_statut: 'anomalie', p_suivi: 'rivage', p_valeur: null, p_commentaire: m.trim() }); }}>Contester</button>)}</li>)}</ul></details>}
-
       <div className="groupe-tete" style={{ marginTop: 10 }}><b>{BLOCS.clauses}</b></div>
       {/* Clauses : seules celles à traiter restent ouvertes ; les réponses données sont résumées sur une ligne chacune */}
       {c.items.filter((i) => i.bloc === 'clauses' && !i.repondu && !(i.auto === 'ok' && i.mode !== 'fiche') && i.auto !== 'sans_objet')
