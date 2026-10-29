@@ -1,6 +1,7 @@
 // Fiche du congé (096) : ce que Rivage ne donne pas pour la sortie d'un locataire, saisi par la gestionnaire.
 // Réception du congé, nouvelle adresse, pré-visite (décidée à la réception), état des lieux de sortie (interne ou prestataire,
 // commandé le, date, heure), suite voulue par le bailleur. La date de l'EDL remplit les messages de confirmation et de rappel.
+// 097 : date du congé préremplie depuis Rivage (document « Préavis », à défaut passage du bail en sortie) ; fin du bail affichée.
 import React, { useEffect, useState } from 'react';
 import { rpc } from './supabase.js';
 
@@ -14,7 +15,11 @@ export default function FicheConge({ bail, apres }) {
   const [f, setF] = useState(VIDE);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
-  const appliquer = (x) => { setD(x); const v = { ...VIDE }; Object.keys(VIDE).forEach((k) => { if (x?.fiche && x.fiche[k] != null) v[k] = x.fiche[k]; }); setF(v); };
+  const appliquer = (x) => {
+    setD(x); const v = { ...VIDE }; Object.keys(VIDE).forEach((k) => { if (x?.fiche && x.fiche[k] != null) v[k] = x.fiche[k]; });
+    if (!v.recu_le && x?.rivage?.date_conge) v.recu_le = x.rivage.date_conge; // prérempli depuis Rivage, enregistré avec la fiche
+    setF(v);
+  };
   useEffect(() => { setD(null); setErr(''); setOk(''); rpc('pilotage_fiche_conge', { p_bail: bail }).then(appliquer).catch(() => setD(false)); }, [bail]);
   if (!d || (d.statut !== 'move_out' && !d.fiche)) return null;
   const ch = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
@@ -25,11 +30,20 @@ export default function FicheConge({ bail, apres }) {
   };
   const lecture = !d.peut;
   const dg = d.dg || {};
+  const rv = d.rivage || {};
+  const recuDeRivage = rv.date_conge && f.recu_le === rv.date_conge && !d.fiche?.recu_le;
   return (
     <div className="card" style={{ margin: '12px 0', borderLeft: '4px solid var(--teal)' }}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h3 style={{ margin: 0 }}>Fiche du congé</h3>
         <span className="muted">Départ le {date(d.sortie)}{d.fiche?.maj_le ? ` · mise à jour le ${date(d.fiche.maj_le)}${d.fiche.maj_par_prenom ? ' par ' + d.fiche.maj_par_prenom : ''}` : ''}</span>
+      </div>
+      <div className="grid2" style={{ fontSize: 13, margin: '6px 0 4px', gridTemplateColumns: 'minmax(120px, 170px) 1fr' }}>
+        <span className="muted">Congé (Rivage)</span>
+        <span>{rv.date_conge ? date(rv.date_conge) + (rv.source_conge === 'preavis' ? ' · préavis déposé dans Rivage' : ' · jour du passage en sortie dans Rivage') : 'pas de date dans Rivage (préavis non déposé) : à saisir'}</span>
+        <span className="muted">Fin du bail (Rivage)</span>
+        <span>{date(rv.fin_bail)}{rv.sortie_locataires && rv.sortie_locataires !== rv.fin_bail ? ` · sortie des locataires saisie au ${date(rv.sortie_locataires)}` : ''}</span>
+        {rv.edl_rivage && <><span className="muted">EDL de sortie (Rivage)</span><span>{date(rv.edl_rivage)}{!f.edl_le ? ' · à reporter ci-dessous si c’est bien la date du rendez-vous' : ''}</span></>}
       </div>
       <div className="muted" style={{ fontSize: 13, margin: '4px 0 8px' }}>
         Dépôt de garantie : {dg.detenteur === 'bailleur' ? 'détenu par le bailleur' : dg.detenteur === 'agence' ? 'détenu par l’agence' : 'détenteur à préciser (Sorties et DG)'}
@@ -37,7 +51,7 @@ export default function FicheConge({ bail, apres }) {
       </div>
       <fieldset disabled={lecture} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="grille-champs">
-          <label>Congé reçu le <input type="date" value={f.recu_le} onChange={ch('recu_le')} /></label>
+          <label>Congé reçu le <input type="date" value={f.recu_le} onChange={ch('recu_le')} />{recuDeRivage && <span className="muted" style={{ fontSize: 12 }}> repris de Rivage, à enregistrer</span>}</label>
           <label>Nouvelle adresse du locataire <input value={f.nouvelle_adresse} onChange={ch('nouvelle_adresse')} placeholder="pour le solde du dépôt" /></label>
         </div>
         <div className="row" style={{ marginTop: 8, gap: 10 }}>
