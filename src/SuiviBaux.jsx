@@ -432,7 +432,8 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
     </div>
     <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
       {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}{c.anomalies ? ` · ${c.anomalies} anomalie(s) acceptée(s)` : ''}</>
-        : <>{c.restant} point(s) à traiter · {c.anomalies} anomalie(s){d.lecture ? ` · bail lu par l’IA le ${date(d.lecture.le)}` : ''}</>}
+        : <>{c.restant} point(s) à traiter{(() => { const r = c.items.filter((i) => i.a_traiter); const g = r.filter((i) => i.qui === 'gestion').length;
+            return r.some((i) => i.qui) ? ` (${r.length - g} pour le commercial, ${g} pour la gestion)` : ''; })()} · {c.anomalies} anomalie(s){d.lecture ? ` · bail lu par l’IA le ${date(d.lecture.le)}` : ''}</>}
       {peut && <div className="row" style={{ marginTop: 6 }}>
         {!c.go_le && <button className="btn plein" disabled={c.restant > 0} onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: true })}>Donner le GO</button>}
         {c.go_le && <button className="btn gris" onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })}>Retirer le GO</button>}
