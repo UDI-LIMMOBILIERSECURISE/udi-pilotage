@@ -600,7 +600,7 @@ function RegleEditable({ g, r, apres, setErr }) {
       <td><span className={'sev ' + g.gravite}>{SEV[g.gravite]}</span></td>
       <td><select value={g.destinataire || 'gestion'} onClick={(e) => e.stopPropagation()} aria-label="Destinataire des alertes"
         onChange={async (e) => { try { await rpc('pilotage_regle_destinataire', { p_cle: g.cle, p_destinataire: e.target.value }); apres(); } catch (x) { setErr(x.message); } }}>
-        <option value="gestion">Gestion</option><option value="compta">Comptabilité</option><option value="direction">Direction</option></select></td>
+        <option value="gestion">Gestion</option><option value="compta">Comptabilité</option><option value="direction">Direction</option><option value="commercial">Commercial du dossier</option></select></td>
       <td className="muted" style={{ fontSize: 12 }}>{resume}</td><td>{g.ouvertes}</td>
       <td><label className="switch" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={g.actif} onChange={() => envoyer(!g.actif)} /> {g.actif ? 'Oui' : 'Non'}</label></td></tr>
     {ouvert && <tr><td colSpan={7} style={{ background: 'var(--fond-2, rgba(0,0,0,0.03))' }}>
