@@ -58,6 +58,7 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
   };
   const [depot, setDepot] = useState({ ouvert: false, le: auj(), numero: '' });
   const [pieces, setPieces] = useState(false);
+  const [obtenu, setObtenu] = useState({ ouvert: false, le: '', numero: '' }); // permis déjà obtenu par le bailleur (095)
   const enCours = (l.demandes || []).find((d) => !d.close_le);
   const soumis = ['autorisation', 'declaration', 'a_verifier'].includes(p.regime);
   return <div style={{ borderTop: '1px solid var(--line)', padding: '8px 0', fontSize: 13 }}>
@@ -83,6 +84,14 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
       {l.choix !== 'agence' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_agence', p_le: null, p_numero: null, p_notes: null })}>L’agence dépose (90 € TTC)</button>}
       {l.choix !== 'bailleur' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_bailleur', p_le: null, p_numero: null, p_notes: null })}>Le bailleur dépose</button>}
     </div>}
+    {['autorisation', 'a_verifier'].includes(p.regime) && !enCours && (obtenu.ouvert
+      ? <div className="row" style={{ marginTop: 4 }}>
+          <label className="muted">Permis obtenu le <input type="date" value={obtenu.le} max={auj()} onChange={(e) => setObtenu({ ...obtenu, le: e.target.value })} /></label>
+          <input placeholder="N° du permis (facultatif)" value={obtenu.numero} onChange={(e) => setObtenu({ ...obtenu, numero: e.target.value })} style={{ width: 170 }} />
+          <button className="btn plein" disabled={!obtenu.le} onClick={async () => { await agir({ p_asset: l.asset_id, p_demande: null, p_action: 'deja_obtenu', p_le: obtenu.le, p_numero: obtenu.numero, p_notes: null }); setObtenu({ ouvert: false, le: '', numero: '' }); }}>Enregistrer</button>
+          <button className="lien" onClick={() => setObtenu({ ouvert: false, le: '', numero: '' })}>Annuler</button>
+        </div>
+      : <div className="row" style={{ marginTop: 4 }}><button className="btn" onClick={() => setObtenu({ ...obtenu, ouvert: true })}>Permis déjà obtenu</button></div>)}
     {soumis && !enCours && (depot.ouvert ? <div className="row" style={{ marginTop: 4 }}>
       <label className="muted">Déposée le <input type="date" value={depot.le} onChange={(e) => setDepot({ ...depot, le: e.target.value })} /></label>
       <input placeholder="N° de dossier (facultatif)" value={depot.numero} onChange={(e) => setDepot({ ...depot, numero: e.target.value })} style={{ width: 170 }} />
