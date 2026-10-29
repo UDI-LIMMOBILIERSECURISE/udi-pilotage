@@ -1,4 +1,4 @@
-// Messages d'un mandat ou d'un bail (090) : les modèles de l'étape en cours, remplis depuis Rivage pour la personne connectée.
+// Messages d'un mandat ou d'un bail (091) : les modèles de l'étape en cours, remplis depuis Rivage pour la personne connectée.
 // Mail : brouillon Gmail à relire et envoyer. SMS : lien qui ouvre les Messages du portable, ou QR code à scanner depuis
 // l'ordinateur (repris d'UDI Pilot). Chaque message préparé est noté au journal du dossier ; « Pas nécessaire » le retire de Ma journée.
 import React, { useEffect, useState } from 'react';
@@ -144,7 +144,7 @@ function FormSms({ m, noter }) {
   );
 }
 
-// Ma journée (090) : dossiers dont l'étape en cours a des messages pas encore faits (commercial du dossier, à défaut la gestionnaire)
+// Ma journée (091) : dossiers dont l'étape en cours a des messages pas encore faits (commercial du dossier, à défaut la gestionnaire)
 export function MessagesAEnvoyer() {
   const [liste, setListe] = useState(null);
   const [err, setErr] = useState('');

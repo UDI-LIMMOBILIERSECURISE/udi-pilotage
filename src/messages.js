@@ -1,4 +1,4 @@
-// Modèles de mails et de SMS modifiables dans l'appli (090), repris du module d'UDI Pilot.
+// Modèles de mails et de SMS modifiables dans l'appli (091), repris du module d'UDI Pilot.
 // Le pilotage n'envoie rien lui-même pour le commercial : le mail s'ouvre en brouillon Gmail, le SMS s'ouvre dans les Messages
 // du portable (lien sms:) ou se scanne en QR code depuis l'ordinateur. Les SMS de la gestion restent envoyés par Twilio (066).
 import { rpc } from './supabase.js';

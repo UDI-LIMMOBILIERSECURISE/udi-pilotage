@@ -110,7 +110,7 @@ export function DossierBail({ b, peut, moi, apres }) {
   const [err, setErr] = useState('');
   const [mail, setMail] = useState(null); // { m, etape: { cle, etape, detail } }
   const [parametrer, setParametrer] = useState(false);
-  const [modeles, setModeles] = useState([]); // textes des SMS de la gestion, modifiables dans « Modèles de messages » (090)
+  const [modeles, setModeles] = useState([]); // textes des SMS de la gestion, modifiables dans « Modèles de messages » (091)
   const email = useEmail();
   const charger = () => rpc('pilotage_bail_dossier', { p_bail: b.bail_id }).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { chargerModeles().then((x) => setModeles(x?.modeles || [])).catch(() => {}); }, []);

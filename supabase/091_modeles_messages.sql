@@ -1,4 +1,4 @@
--- 090 — Modèles de mails et de SMS modifiables dans l'appli, proposés selon l'avancement du mandat et du bail (Nicolas, 29/10/2026).
+-- 091 — Modèles de mails et de SMS modifiables dans l'appli, proposés selon l'avancement du mandat et du bail (Nicolas, 29/10/2026).
 -- Repris du module d'UDI Pilot (scripts 026-027 du nouvel UDI PILOT) :
 --   1. Catégories : nouveau mandat, mise en location, nouveau bail, EDL d'entrée, congé reçu, EDL de sortie, relances de la gestion.
 --      Chaque catégorie a sa fenêtre de proposition (en jours), modifiable sans code.

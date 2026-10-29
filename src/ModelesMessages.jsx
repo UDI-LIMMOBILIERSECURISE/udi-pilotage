@@ -1,4 +1,4 @@
-// Écran « Modèles de messages » (090) : tous les mails et SMS proposés selon l'avancement du mandat et du bail, classés par étape.
+// Écran « Modèles de messages » (091) : tous les mails et SMS proposés selon l'avancement du mandat et du bail, classés par étape.
 // Lecture pour toute l'équipe ; modification par Nicolas et Romain (droits vérifiés dans la base, chaque modification historisée).
 import React, { useEffect, useState } from 'react';
 import { rpc } from './supabase.js';
