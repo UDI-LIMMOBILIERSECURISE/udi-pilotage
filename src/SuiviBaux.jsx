@@ -6,6 +6,8 @@ import { ResumeIA, Tuiles, Filtres } from './App.jsx';
 import { Compteurs } from './SuiviMandat.jsx';
 import { Circuit } from './Circuit.jsx';
 import { preparer, SMS, nomSms, smsFactures, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
+import { chargerModeles, texteSmsGestion } from './messages.js';
+import MessagesDossier from './MessagesDossier.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const auj = () => new Date().toISOString().slice(0, 10);
@@ -108,8 +110,10 @@ export function DossierBail({ b, peut, moi, apres }) {
   const [err, setErr] = useState('');
   const [mail, setMail] = useState(null); // { m, etape: { cle, etape, detail } }
   const [parametrer, setParametrer] = useState(false);
+  const [modeles, setModeles] = useState([]); // textes des SMS de la gestion, modifiables dans « Modèles de messages » (090)
   const email = useEmail();
   const charger = () => rpc('pilotage_bail_dossier', { p_bail: b.bail_id }).then(setD).catch((e) => setErr(e.message));
+  useEffect(() => { chargerModeles().then((x) => setModeles(x?.modeles || [])).catch(() => {}); }, []);
   useEffect(() => { setD(null); setMail(null); setParametrer(false); charger(); }, [b.bail_id]);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
@@ -162,7 +166,7 @@ export function DossierBail({ b, peut, moi, apres }) {
         {a.ech && ['fin_auto', 'verifier_contrat'].includes(ech.action) && <button className="btn" onClick={() => etapeFaite(ech.cle, 'vu', 'Vu')}>C’est noté</button>}
         {a.ob && a.ob.a_faire.modele && !['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <button className="btn plein" onClick={() => ouvrirMail(a.ob.a_faire.modele, { ob: a.ob }, { cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle })}>
           {a.ob.a_faire.canal === 'lrar' ? 'Préparer le recommandé' : 'Préparer le mail'}</button>}
-        {a.ob && ['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <SmsRivage texte={SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} tels={(d.contacts?.locataires || []).map((l) => l.telephone).filter(Boolean)} noms={(d.contacts?.locataires || []).filter((l) => l.telephone).map((l) => nomSms(l.nom))}
+        {a.ob && ['sms', 'sms_rivage'].includes(a.ob.a_faire.canal) && <SmsRivage texte={texteSmsGestion(modeles, a.ob.a_faire.modele, { '{date_echeance}': date(a.ob.prochaine) }) ?? SMS[a.ob.a_faire.modele]?.({ ...ctx, ob: a.ob })} tels={(d.contacts?.locataires || []).map((l) => l.telephone).filter(Boolean)} noms={(d.contacts?.locataires || []).filter((l) => l.telephone).map((l) => nomSms(l.nom))}
           envoi={{ bail: b.bail_id, cle: a.ob.cle, etape: String(a.ob.a_faire.ordre), detail: a.ob.a_faire.libelle }} apres={async () => { await charger(); apres(); }}
           fait={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), 'SMS envoyé au locataire')} />}
         {a.ob && <button className="btn" onClick={() => etapeFaite(a.ob.cle, String(a.ob.a_faire.ordre), a.ob.a_faire.libelle)}>Marquer fait</button>}
@@ -171,6 +175,7 @@ export function DossierBail({ b, peut, moi, apres }) {
       </div>}
     </div>)}
     {mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={gere} />}
+    <MessagesDossier objet="bail" id={b.bail_id} apres={apres} />
 
     {synthese ? <>
       {/* Mode synthèse (même présentation que le mandat) : la fiche d'abord, le détail replié en dessous */}

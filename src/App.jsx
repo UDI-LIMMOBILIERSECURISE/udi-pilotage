@@ -7,6 +7,8 @@ import { preparer, MODELES } from './mails.js';
 import DossierMandat, { NATURES_MANDAT } from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
 import MesDossiers, { RecapRemuneration } from './Circuit.jsx';
+import ModelesMessages from './ModelesMessages.jsx';
+import { MessagesAEnvoyer } from './MessagesDossier.jsx';
 import ALouer from './ALouer.jsx';
 import Reprise from './Reprise.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
@@ -59,7 +61,7 @@ const MENU = [
   ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['alouer', 'À louer', '⌂']]],
   ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['sinistres', 'Sinistres', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
   ['Commercial', [['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
-  ['Réglages', [['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['equipe', 'Équipe', '☺']]],
+  ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['equipe', 'Équipe', '☺']]],
 ];
 const lireHash = () => (typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '') || 'jour';
 
@@ -93,7 +95,7 @@ function Espace() {
   );
   const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true,
     mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
-    obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages };
+    obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true };
   const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
   const page = droit[onglet] ? onglet : 'jour';
   const titre = MENU.flatMap(([, items]) => items).find(([k]) => k === page)?.[1] || '';
@@ -137,6 +139,7 @@ function Espace() {
         {page === 'obligations' && <Obligations />}
         {page === 'regles' && <Regles />}
         {page === 'equipe' && <Equipe moi={moi} />}
+        {page === 'messages' && <ModelesMessages />}
       </main>
     </div>
   );
@@ -188,6 +191,7 @@ function Journee({ moi }) {
       </div>
       {err && <div className="banner">{err}</div>}
       {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
+      {cible === moi.user_id && ['gestionnaire', 'negociateur'].includes(moi.role) && <MessagesAEnvoyer />}
       {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
       {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
       {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}

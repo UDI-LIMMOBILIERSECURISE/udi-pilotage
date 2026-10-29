@@ -6,6 +6,7 @@ import { supabase, rpc } from './supabase.js';
 import { preparer } from './mails.js';
 import { EditeurMail, useFournisseurs, FOURNI_PAR } from './SuiviBaux.jsx';
 import { Circuit } from './Circuit.jsx';
+import MessagesDossier from './MessagesDossier.jsx';
 import PermisMandat from './Permis.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
@@ -64,6 +65,7 @@ export default function DossierMandat({ m, apres }) {
     {err && <div className="banner">{err}</div>}
     {c.soumis && <Circuit objet="mandat" id={m.id} apres={async () => { await charger(); apres && apres(); }} />}
     <DeposerRivage cible_type="ManagementContract" cible_id={m.id} apres={async () => { await charger(); apres && apres(); }} />
+    <MessagesDossier objet="mandat" id={m.id} apres={apres} />
     {synthese ? <Synthese {...ctx} parametrer={() => setParametrer(true)} /> : <>
       <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
         {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}</> : <>{c.restant} point(s) à traiter avant la validation{c.lecture_le ? ` · mandat lu par l’IA le ${date(c.lecture_le)}` : lecture.charge ? ' · lecture du mandat par l’IA en cours…' : ''}</>}
