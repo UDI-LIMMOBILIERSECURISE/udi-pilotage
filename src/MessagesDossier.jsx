@@ -60,6 +60,7 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
                   <button className={'btn' + (m.fait ? ' gris' : ' plein')} onClick={() => setOuvert(ouvert === cle ? null : cle)}>{ouvert === cle ? 'Fermer' : m.fait ? 'Revoir' : 'Préparer'}</button>
                 </span>
               </div>
+              {m.avertissement && !m.fait && <div className="err" style={{ margin: '4px 0 0' }}>⚠ {m.avertissement}</div>}
               {ouvert === cle && (m.canal === 'email'
                 ? <FormMail m={m} email={email} noter={(moyen, x) => { noter(m, moyen, x); if (moyen === 'inutile') setOuvert(null); }} />
                 : <FormSms m={m} noter={(moyen, x) => { noter(m, moyen, x); if (moyen === 'inutile') setOuvert(null); }} />)}
