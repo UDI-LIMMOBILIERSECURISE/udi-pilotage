@@ -8,7 +8,6 @@ import DossierMandat, { NATURES_MANDAT } from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
 import MesDossiers, { RecapRemuneration } from './Circuit.jsx';
 import ModelesMessages from './ModelesMessages.jsx';
-import RapprochementWeroof from './RapprochementWeroof.jsx';
 import { MessagesAEnvoyer } from './MessagesDossier.jsx';
 import ALouer from './ALouer.jsx';
 import Reprise from './Reprise.jsx';
@@ -60,7 +59,7 @@ function Connexion() {
 // Menu de navigation : rubriques regroupées, page courante gardée dans l'adresse (#regles) pour le retour arrière et le rechargement
 const MENU = [
   ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['alouer', 'À louer', '⌂']]],
-  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['sinistres', 'Sinistres', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑'], ['weroof', 'Rapprochement WeRoof', '⇄']]],
+  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['sinistres', 'Sinistres', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
   ['Commercial', [['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
   ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['equipe', 'Équipe', '☺']]],
 ];
@@ -96,8 +95,7 @@ function Espace() {
   );
   const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true,
     mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
-    obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true,
-    weroof: ['direction', 'superviseur', 'gestionnaire'].includes(moi.role) };
+    obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true };
   const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
   const page = droit[onglet] ? onglet : 'jour';
   const titre = MENU.flatMap(([, items]) => items).find(([k]) => k === page)?.[1] || '';
@@ -142,7 +140,6 @@ function Espace() {
         {page === 'regles' && <Regles />}
         {page === 'equipe' && <Equipe moi={moi} />}
         {page === 'messages' && <ModelesMessages />}
-        {page === 'weroof' && <RapprochementWeroof />}
       </main>
     </div>
   );
