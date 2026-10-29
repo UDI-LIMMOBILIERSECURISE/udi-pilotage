@@ -1225,6 +1225,7 @@ const GROUPES_IMP = [
   ['HUISSIER', 'Huissier · commandement de payer', '#A25DDC'],
   ['AVOCAT', 'Dossier en cours chez l’avocat (procédure d’expulsion)', '#E2445C'],
   ['VISALE', 'Dossiers suivi impayés · garantie Visale', '#0086C0'],
+  ['SANS GARANTIE', 'Sans garantie · relances amiables puis huissier', '#6B7280'],
   ['LIQUIDATION', 'Liquidation judiciaire', '#784BD1'],
   ['Clôturé', 'Dossier clôturé', '#9DA3AE'],
 ];
@@ -1304,10 +1305,18 @@ function Impayes() {
     {d.peut_saisir && <Rapprochement apres={charger} />}
     {d.candidats.length > 0 && <div className="mini-alerte haute" style={{ marginBottom: 14 }}>
       <b>{d.candidats.length} bail{d.candidats.length > 1 ? 'x' : ''} en impayé dans Rivage sans dossier de suivi</b>
+      <div className="muted">Un dossier s'ouvre tout seul chaque matin dès que Rivage ouvre un cycle d'impayé ; ici, les baux en dette sans cycle ouvert.</div>
       {d.candidats.map((c) => <div key={c.bail_id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
         <span>{(c.locataires || []).map((l) => l.nom).join(', ')} · {c.adresse} · impayé {euro(c.impaye)}{c.assureur_gli ? ' · GLI ' + c.assureur_gli : ''}</span>
         {d.peut_saisir && <button className="btn" onClick={() => ouvrir(c.bail_id)}>Ouvrir un dossier</button>}</div>)}
     </div>}
+    {d.dossiers.some((x) => x.ecart_garantie) && <details className="mini-alerte haute" style={{ marginBottom: 14 }}>
+      <summary style={{ cursor: 'pointer' }}><b>{d.dossiers.filter((x) => x.ecart_garantie).length} dossier(s) dont la garantie ne concorde pas avec la GLI du bail dans Rivage</b>
+        {' '}({d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé').length} en cours)</summary>
+      {d.dossiers.filter((x) => x.ecart_garantie).map((x) => <div key={x.id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+        <span>{parties(x).titre}{x.groupe === 'Clôturé' ? ' (clôturé)' : ''} · {x.ecart_garantie}</span>
+        <button className="btn" onClick={() => setSel(x.id)}>Ouvrir</button></div>)}
+    </details>}
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un dossier pour voir et modifier le suivi." detail={s && <DossierImpaye key={s.id} d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} />}>
       {[...GROUPES_IMP, ...autres].map(([g, titre, couleur]) => {
         if (section === 'en_cours' ? g === 'Clôturé' : section !== 'tous' && section !== g) return null;
@@ -1475,6 +1484,7 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     <div className="row" style={{ margin: '6px 0' }}>
       {/* Organisme déduit de la garantie (089) : plus de double saisie */}
       <span className="etq">Organisme : {ORGANISMES[d.organisme] || (d.garantie ? d.garantie : 'garantie à renseigner')}</span>
+      {d.ecart_garantie && <span className="mini-alerte haute" style={{ margin: 0 }}>Garantie à vérifier : {d.ecart_garantie}</span>}
       {d.cycle?.libelle && <span className="etq" title={d.cycle.jours != null ? `Ouvert depuis ${d.cycle.jours} jour(s)` : ''}>Rivage : {d.cycle.libelle}</span>}
       {d.bail_id && <button className="btn" onClick={() => setExtrait(!extrait)}>Extrait de compte</button>}
     </div>
@@ -1565,6 +1575,7 @@ function CarteImpaye({ x, couleur, sel, choisir }) {
       {x.montant_impaye != null && <span className="carte-imp-montant">{euro(x.montant_impaye)}</span>}
     </div>
     <div className="muted">{[p.adresse, x.cause].filter(Boolean).join(' · ') || '—'}</div>
+    {x.ecart_garantie && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 4 }}>⚠ Garantie différente de Rivage</div>}
     <div className="carte-imp-statuts">{statuts.map(([l, v]) => <div key={l}><span className="muted">{l}</span><Etiquette v={v} /></div>)}</div>
     <div className="carte-imp-pied">
       <span>{x.intervenants || x.responsable_prenom || 'Personne'}</span>
