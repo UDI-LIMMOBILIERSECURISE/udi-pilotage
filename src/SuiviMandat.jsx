@@ -7,6 +7,7 @@ import { preparer } from './mails.js';
 import { EditeurMail, useFournisseurs, FOURNI_PAR } from './SuiviBaux.jsx';
 import { Circuit } from './Circuit.jsx';
 import MessagesDossier from './MessagesDossier.jsx';
+import OrduresLots, { useOrdures } from './Ordures.jsx';
 import PermisMandat from './Permis.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
@@ -245,11 +246,12 @@ function PointRivage({ i, repondre, lien }) {
 // ----- Clauses : équipements et compteurs par lot, puis questions simples -----
 function Clauses({ m, d, c, agir, repondre, recharger, onErreur }) {
   const it = (cle) => c.items.find((i) => i.cle === cle);
-  const autres = c.items.filter((i) => i.bloc === 'clauses' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack'].includes(i.cle));
+  const autres = c.items.filter((i) => i.bloc === 'clauses' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack', 'm_cl_ordures'].includes(i.cle));
   return <>
     <div className="groupe-tete" style={{ marginTop: 10 }}><b>Équipements du bien et clauses</b></div>
     {it('m_cl_pack') && <ClauseSimple i={it('m_cl_pack')} repondre={repondre} />}
     {['m_cl_equipements', 'm_cl_compteurs'].map((cle) => it(cle) && <Equipements key={cle} i={it(cle)} d={d} agir={agir} repondre={repondre} recharger={recharger} onErreur={onErreur} />)}
+    {it('m_cl_ordures') && <OrduresLots i={it('m_cl_ordures')} lots={d.lots} repondre={repondre} onErreur={onErreur} regle={regle(it('m_cl_ordures'))} />}
     {autres.map((i) => <ClauseSimple key={i.cle} i={i} repondre={repondre} />)}
   </>;
 }
@@ -476,7 +478,9 @@ function Synthese({ d, c, lien, parametrer }) {
   const aRevoir = c.items.filter((i) => i.bloc === 'rivage' && !regle(i) && i.auto === 'anomalie');
   const pieces = c.items.filter((i) => i.bloc === 'pieces' && !regle(i));
   const conditions = c.items.filter((i) => i.bloc === 'rivage' && i.statut !== 'sans_objet' && i.detail);
-  const clauses = c.items.filter((i) => i.bloc === 'clauses' && i.repondu && i.statut !== 'sans_objet' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack'].includes(i.cle));
+  const clauses = c.items.filter((i) => i.bloc === 'clauses' && i.repondu && i.statut !== 'sans_objet' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack', 'm_cl_ordures'].includes(i.cle));
+  const [ord] = useOrdures(d.lots.map((l) => l.id));
+  const ordures = (l) => { const r = ord?.lots?.[l.id]?.reponse; return r ? ' · ordures : ' + (r.mode === 'taxe_fonciere' ? 'taxe foncière' : (r.organisme?.nom || 'organisme externe')) : ''; };
   return <>
     <div className="muted" style={{ fontSize: 12 }}>{c.go_le ? `Dossier complet validé (GO) le ${date(c.go_le)} par ${c.go_par || '—'}.` : 'Mandat antérieur à 2026 : contrôle d’entrée non requis. « Modifier le paramétrage » permet de le compléter.'}</div>
     {(aRevoir.length > 0 || pieces.length > 0) && <div className="mini-alerte haute">
@@ -490,7 +494,7 @@ function Synthese({ d, c, lien, parametrer }) {
       {d.lots.map((l) => { const eq = l.equipements.filter((e) => e.nature === 'equipement'); const co = l.equipements.filter((e) => e.nature === 'compteur');
         return <div key={l.id} style={ligne}><b>Lot {l.reference || l.id}</b><span>
           {eq.length ? eq.map((e) => e.libelle + (e.contrat_entretien ? ` (contrat${e.prestataire ? ' ' + e.prestataire : ''})` : '')).join(', ') : 'Aucun équipement saisi'}
-          {co.length ? ' · compteurs divisionnaires : ' + co.map((e) => e.libelle).join(', ') : ''}</span></div>; })}
+          {co.length ? ' · compteurs divisionnaires : ' + co.map((e) => e.libelle).join(', ') : ''}{ordures(l)}</span></div>; })}
     </div>
   </>;
 }
