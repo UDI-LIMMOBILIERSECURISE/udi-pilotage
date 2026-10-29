@@ -8,6 +8,7 @@ import { Circuit } from './Circuit.jsx';
 import { preparer, SMS, nomSms, smsFactures, lienGmail, TYPES_BAIL, DECISIONS, CONSEQUENCES } from './mails.js';
 import { chargerModeles, texteSmsGestion } from './messages.js';
 import MessagesDossier from './MessagesDossier.jsx';
+import FicheConge from './FicheConge.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const auj = () => new Date().toISOString().slice(0, 10);
@@ -111,6 +112,7 @@ export function DossierBail({ b, peut, moi, apres }) {
   const [mail, setMail] = useState(null); // { m, etape: { cle, etape, detail } }
   const [parametrer, setParametrer] = useState(false);
   const [modeles, setModeles] = useState([]); // textes des SMS de la gestion, modifiables dans « Modèles de messages » (091)
+  const [rev, setRev] = useState(0); // fiche du congé enregistrée : les messages sont recalculés (date de l'EDL)
   const email = useEmail();
   const charger = () => rpc('pilotage_bail_dossier', { p_bail: b.bail_id }).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { chargerModeles().then((x) => setModeles(x?.modeles || [])).catch(() => {}); }, []);
@@ -175,7 +177,8 @@ export function DossierBail({ b, peut, moi, apres }) {
       </div>}
     </div>)}
     {mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={gere} />}
-    <MessagesDossier objet="bail" id={b.bail_id} apres={apres} />
+    <FicheConge bail={b.bail_id} apres={() => { setRev((n) => n + 1); apres && apres(); }} />
+    <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} />
 
     {synthese ? <>
       {/* Mode synthèse (même présentation que le mandat) : la fiche d'abord, le détail replié en dessous */}
