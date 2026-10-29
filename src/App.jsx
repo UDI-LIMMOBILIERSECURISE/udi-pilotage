@@ -248,7 +248,7 @@ function Journee({ moi }) {
                 {d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'))
                   ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
                   : d.bail_id
-                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
+                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse, bailleur: d.bailleur, mandat: d.mandat }}
                       peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
                   : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
               </Fiche>}

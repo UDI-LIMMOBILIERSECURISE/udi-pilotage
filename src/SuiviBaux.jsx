@@ -149,7 +149,7 @@ export function DossierBail({ b, peut, moi, apres }) {
   return <>
     <div className="muted">Bail {b.reference} · {TYPES_BAIL[ech.type] || 'type à préciser'}{ech.type && !ech.type_confirme ? ' (suggéré, à confirmer)' : ''}</div>
     <h2>{b.locataires}</h2>
-    <div className="muted">{b.adresse} · {b.mandat} · Bailleur : {b.bailleur || '—'}</div>
+    <div className="muted">{[b.adresse, b.mandat, 'Bailleur : ' + (b.bailleur || '—')].filter(Boolean).join(' · ')}</div>
     {err && <div className="banner">{err}</div>}
     <ResumeIA type="bail" id={b.bail_id} />
     {soumis && <Circuit objet="bail" id={b.bail_id} apres={async () => { await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await charger(); apres && apres(); }} />}
