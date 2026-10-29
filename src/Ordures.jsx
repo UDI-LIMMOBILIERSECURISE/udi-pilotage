@@ -49,7 +49,7 @@ function LotOrdures({ l, x, organismes, enregistrer, fige }) {
     <b>Lot {l.reference || l.id}</b><span className="muted"> · {l.adresse}</span>
     {r ? <div className="row" style={{ gap: 8 }}>
         <span className="etq ok">✓ {MODE_ORDURES[r.mode]}{r.organisme ? ' : ' + r.organisme.nom : ''}</span>
-        <span className="muted">{r.source === 'weroof' ? 'repris de WeRoof' : 'saisi'} par {r.par || '—'} le {date(r.le)}</span>
+        <span className="muted">{r.source === 'weroof' ? 'repris de WeRoof' : 'saisi'}{r.par ? ' par ' + r.par : ''} le {date(r.le)}</span>
         {r.organisme && !r.organisme.email && <span style={{ color: 'var(--amber)' }}>e-mail de l’organisme à compléter</span>}
         {!fige && <button className="lien" onClick={() => enregistrer(l, null)}>Modifier</button>}
       </div>
