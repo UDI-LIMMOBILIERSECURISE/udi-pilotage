@@ -8,7 +8,9 @@ import DossierMandat, { NATURES_MANDAT } from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
 import MesDossiers, { RecapRemuneration } from './Circuit.jsx';
 import ModelesMessages from './ModelesMessages.jsx';
-import { MessagesAEnvoyer } from './MessagesDossier.jsx';
+import MessagesDossier, { MessagesAEnvoyer } from './MessagesDossier.jsx';
+import Fiche from './Fiche.jsx';
+import FicheConge from './FicheConge.jsx';
 import ALouer from './ALouer.jsx';
 import Reprise from './Reprise.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
@@ -241,16 +243,15 @@ function Journee({ moi }) {
                   </div>
                 ))}
               </div>
-              {fiche === d.cle && <section className="panneau" style={{ marginTop: 12 }}>
-                <button className="fermer" onClick={() => setFiche(null)} aria-label="Fermer la fiche">×</button>
+              {fiche === d.cle && <Fiche fermer={() => setFiche(null)}
+                titre={(d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? 'Impayés' : d.mandat || 'Dossier') + (d.dossier?.adresse ? ` · ${d.dossier.adresse}` : '')}>
                 {d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'))
                   ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
                   : d.bail_id
                   ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse }}
                       peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
                   : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
-                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}><button className="btn" onClick={() => setFiche(null)}>Fermer la fiche</button></div>
-              </section>}
+              </Fiche>}
             </article>
           ))}
         </div>
@@ -720,19 +721,13 @@ function Filtres({ items, val, set }) {
 }
 
 // Mise en page : cartes à gauche, panneau de détail à droite (sous les cartes sur téléphone)
-function AvecDetail({ children, detail, fermer, vide, cle }) {
-  const ref = React.useRef(null);
-  const ouvert = !!detail;
-  useEffect(() => { if (ouvert && window.innerWidth < 900 && ref.current) ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [cle]);
-  return <div className="avec-detail">
-    <div className="zone-cartes">{children}</div>
-    <aside className="zone-detail" ref={ref}>
-      {detail ? <section className="panneau">
-        <button className="fermer" onClick={fermer} aria-label="Fermer le détail">×</button>
-        {detail}
-      </section> : <div className="panneau vide">{vide}</div>}
-    </aside>
-  </div>;
+// Liste de cartes en pleine largeur ; le détail de la carte choisie s'ouvre en grand par-dessus (096, avant : colonne de droite)
+function AvecDetail({ children, detail, fermer, vide, titre }) {
+  return <>
+    {vide && <p className="muted" style={{ margin: '0 0 8px', fontSize: 13 }}>{vide}</p>}
+    {children}
+    {detail && <Fiche titre={titre} fermer={fermer}>{detail}</Fiche>}
+  </>;
 }
 
 function ResumeIA({ type, id }) {
@@ -968,12 +963,16 @@ function SortiesDG() {
   const [d, err] = useCharge('pilotage_dg', ['LeasingContract', 'BailSituation', 'AccountingEventGroup', 'Incident']);
   const [filtre, setFiltre] = useState('tous');
   const [sel, setSel] = useState(null);
+  const [cherche, setCherche] = useState('');
+  const [rev, setRev] = useState(0);
   if (err) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
   const a = auj();
   const partis = d.filter((x) => x.parti && !x.remboursee);
   const tests = { tous: () => true, preavis: (x) => !x.parti, partis: (x) => x.parti && !x.remboursee, retard: (x) => x.parti && !x.remboursee && a > x.limite_1_mois };
-  const vus = d.filter(tests[filtre]);
+  // Recherche (096) : n° de bail, locataires, bailleur, adresse, lot, mandat, téléphones et e-mails ; elle porte sur tous les dossiers, quel que soit le filtre
+  const q = normaliser(cherche);
+  const vus = (q ? d : d.filter(tests[filtre])).filter((x) => !q || correspond(texteRecherche(x.reference, x.locataires, x.bailleur, x.adresse, x.lot, x.mandat, x.parties), q));
   const s = d.find((x) => x.bail_id === sel);
   const jours = (x) => Math.round((new Date(x.limite_1_mois) - new Date(a)) / 86400000);
   return <>
@@ -981,9 +980,13 @@ function SortiesDG() {
       <p className="sub">Au {date(a)} · baux en sortie dans Rivage, suivis de la fin du bail jusqu’au remboursement du dépôt.</p></div></div>
     <Tuiles items={[[d.filter(tests.preavis).length, 'Préavis en cours'], [partis.length, 'Partis, DG non restitué', true],
       [d.filter(tests.retard).length, 'Au-delà d’un mois', true], [partis.filter((x) => !x.restitution_creee).length, 'Restitution non créée', true]]} />
-    <Filtres val={filtre} set={setFiltre} items={[['tous', 'Tous', d.length], ['preavis', 'Préavis', d.filter(tests.preavis).length],
-      ['partis', 'À restituer', partis.length], ['retard', 'En retard', d.filter(tests.retard).length]]} />
-    <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un dossier pour voir le détail." detail={s && (() => {
+    <div className="row" style={{ justifyContent: 'space-between' }}>
+      <Filtres val={filtre} set={setFiltre} items={[['tous', 'Tous', d.length], ['preavis', 'Préavis', d.filter(tests.preavis).length],
+        ['partis', 'À restituer', partis.length], ['retard', 'En retard', d.filter(tests.retard).length]]} />
+      <input className="recherche" placeholder="Rechercher : nom, adresse, téléphone, e-mail, n° de bail" value={cherche} onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un congé" />
+    </div>
+    {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) sur tous les congés.</div>}
+    <AvecDetail cle={sel} fermer={() => setSel(null)} titre={s ? `Bail ${s.reference} · ${s.adresse || ''}` : ''} vide="Clique sur un dossier pour ouvrir sa fiche." detail={s && (() => {
       const e = etatDG(s); const aCharge = s.incidents.filter((i) => i.a_charge === 'tenant' && i.statut !== 'cancelled');
       return <>
         <div className="muted">Bail {s.reference} · <span className={'sev ' + e[1]}>{e[0]}</span></div>
@@ -1006,6 +1009,10 @@ function SortiesDG() {
         {aCharge.length > 0 && <div className="mini-alerte haute"><b>À regarder avant restitution</b> · {aCharge.length} incident(s) à la charge du locataire :
           {aCharge.map((i) => <div key={i.numero}><a href={i.lien} target="_blank" rel="noreferrer">n°{i.numero} {i.titre}</a> · {ST_INC[i.statut] || i.statut} · estimé {euro(i.montant_estime)}</div>)}</div>}
         <SuiviReversement s={s} />
+        {s.statut === 'move_out' && <>
+          <FicheConge bail={s.bail_id} apres={() => setRev((n) => n + 1)} />
+          <MessagesDossier key={s.bail_id + rev} objet="bail" id={s.bail_id} />
+        </>}
         <h3>Étapes</h3>
         <ol className="etapes">{etapesDG(s).map((st) => <li key={st.l} className={st.fait ? 'fait' : st.retard ? 'retard' : ''}>
           <span className="puce">{st.fait ? '✓' : ''}</span><span>{st.l}{st.info ? <span className="muted"> · {st.info}</span> : null}</span></li>)}</ol>

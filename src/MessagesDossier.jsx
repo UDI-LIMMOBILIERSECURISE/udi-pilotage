@@ -1,6 +1,8 @@
 // Messages d'un mandat ou d'un bail (091) : les modèles de l'étape en cours, remplis depuis Rivage pour la personne connectée.
 // Mail : brouillon Gmail à relire et envoyer. SMS : lien qui ouvre les Messages du portable, ou QR code à scanner depuis
 // l'ordinateur (repris d'UDI Pilot). Chaque message préparé est noté au journal du dossier ; « Pas nécessaire » le retire de Ma journée.
+// 096 : la gestion peut envoyer un SMS au locataire par UDI GESTION (Twilio, à tous les locataires du bail) ; un message qui attend
+// une information de la fiche du congé (date de l'EDL) est signalé et ne compte pas dans les messages à faire.
 import React, { useEffect, useState } from 'react';
 import { rpc, supabase } from './supabase.js';
 import { lienGmail, smsFactures } from './mails.js';
@@ -9,6 +11,9 @@ import QrSms from './QrSms.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const libelleChamp = (c) => c.replace(/[{}]/g, '').replace(/_/g, ' ');
+let roleCache = null;
+const monRole = () => (roleCache = roleCache || rpc('pilotage_moi').then((x) => x?.role || null).catch(() => { roleCache = null; return null; }));
+const GESTION = ['direction', 'superviseur', 'gestionnaire', 'comptable'];
 
 export default function MessagesDossier({ objet, id, apres, titre = true }) {
   const [d, setD] = useState(null);
@@ -16,15 +21,16 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
   const [etape, setEtape] = useState(null);
   const [ouvert, setOuvert] = useState(null);
   const [email, setEmail] = useState('');
+  const [role, setRole] = useState(null);
   const charger = () => rpc('pilotage_messages_dossier', { p_objet: objet, p_id: id }).then((x) => {
     setD(x); setEtape((e) => e || (x.actives || [])[0] || null);
   }).catch((e) => setErr(e.message));
   useEffect(() => { setD(null); setEtape(null); setOuvert(null); charger(); }, [objet, id]);
-  useEffect(() => { supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || '')); }, []);
+  useEffect(() => { supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || '')); monRole().then(setRole); }, []);
   if (err && !d) return <div className="err">{err}</div>;
   if (!d) return null;
   const actives = d.actives || [];
-  const restants = (cle) => d.messages.filter((m) => m.categorie === cle && !m.fait).length;
+  const restants = (cle) => d.messages.filter((m) => m.categorie === cle && !m.fait && !m.attente).length;
   const liste = d.messages.filter((m) => m.categorie === etape);
   const noter = async (m, moyen, x) => {
     setErr('');
@@ -60,10 +66,12 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
                   <button className={'btn' + (m.fait ? ' gris' : ' plein')} onClick={() => setOuvert(ouvert === cle ? null : cle)}>{ouvert === cle ? 'Fermer' : m.fait ? 'Revoir' : 'Préparer'}</button>
                 </span>
               </div>
+              {m.attente && !m.fait && <div className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>⏳ {m.attente}</div>}
               {m.avertissement && !m.fait && <div className="err" style={{ margin: '4px 0 0' }}>⚠ {m.avertissement}</div>}
               {ouvert === cle && (m.canal === 'email'
                 ? <FormMail m={m} email={email} noter={(moyen, x) => { noter(m, moyen, x); if (moyen === 'inutile') setOuvert(null); }} />
-                : <FormSms m={m} noter={(moyen, x) => { noter(m, moyen, x); if (moyen === 'inutile') setOuvert(null); }} />)}
+                : <FormSms m={m} bail={objet === 'bail' ? id : null} gestion={GESTION.includes(role)}
+                    noter={(moyen, x) => { noter(m, moyen, x); if (moyen === 'inutile' || moyen === 'twilio') setOuvert(null); }} />)}
             </div>
           );
         })}
@@ -111,7 +119,7 @@ function FormMail({ m, email, noter }) {
   );
 }
 
-function FormSms({ m, noter }) {
+function FormSms({ m, noter, bail, gestion }) {
   const [a, setA] = useState(m.a || '');
   const [texte, setTexte] = useState(m.texte || '');
   const [valeurs, setValeurs] = useState({});
@@ -126,8 +134,9 @@ function FormSms({ m, noter }) {
   // Journal : noté au premier geste (ouvrir sur le portable, copier, ou « Fait » après le QR code)
   const noterUneFois = (moyen) => { if (note) return; setNote(true); noter(moyen, { a, texte: texteFinal }); };
   const copier = async () => { try { await navigator.clipboard.writeText(texteFinal); setCopie(true); noterUneFois('copie'); } catch { setCopie(false); } };
-  return (
-    <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+  const twilio = gestion && bail && m.texte_twilio;
+  const portable = (
+    <>
       <Champs champs={champs} valeurs={valeurs} setValeurs={setValeurs} />
       <label style={{ fontSize: 13 }}>Numéro<input value={a} onChange={(e) => setA(e.target.value)} placeholder="portable" /></label>
       <label style={{ fontSize: 13 }}>Texte<textarea rows={4} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texte} onChange={(e) => setTexte(e.target.value)} /></label>
@@ -141,8 +150,51 @@ function FormSms({ m, noter }) {
         <button className="btn gris" onClick={() => noter('inutile', { a, texte: texteFinal })}>Pas nécessaire</button>
       </div>
       <p className="muted">Le SMS part de votre portable{telephone ? ' : ouvrez-le dans Messages' : ' : scannez le QR code'}, puis envoyez-le.</p>
+    </>
+  );
+  return (
+    <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+      {twilio ? <>
+        <SmsGestion m={m} bail={bail} noter={noter} />
+        <details><summary className="muted" style={{ cursor: 'pointer' }}>Ou depuis votre portable</summary><div className="stack" style={{ gap: 6, marginTop: 6 }}>{portable}</div></details>
+      </> : portable}
     </div>
   );
+}
+
+// SMS de la gestion au locataire (096) : envoyé par le pilotage (Zapier → Twilio, expéditeur UDI GESTION) à tous les locataires
+// du bail qui ont un portable dans Rivage, « {nom} » remplacé pour chacun.
+function SmsGestion({ m, bail, noter }) {
+  const [texte, setTexte] = useState(m.texte_twilio || '');
+  const [valeurs, setValeurs] = useState({});
+  const [etat, setEtat] = useState({ charge: false, err: '' });
+  const champs = champsRestants(m.texte_twilio || '').filter((c) => c !== '{nom}');
+  const texteFinal = remplirChamps(texte, valeurs);
+  const manque = champsRestants(texteFinal).filter((c) => c !== '{nom}');
+  const f = smsFactures(texteFinal.split('{nom}').join('Prénom NOM'));
+  const envoyer = async () => {
+    setEtat({ charge: true, err: '' });
+    const { data, error } = await supabase.functions.invoke('pilotage-sms', { body: { bail, texte: texteFinal, detail: m.libelle } });
+    if (error || !data?.ok) {
+      let msg = data?.error;
+      if (!msg && error?.context?.json) { try { msg = (await error.context.json()).error; } catch { /* réponse illisible */ } }
+      setEtat({ charge: false, err: msg || 'SMS non envoyé' }); return;
+    }
+    setEtat({ charge: false, err: '' });
+    noter('twilio', { a: null, texte: texteFinal });
+  };
+  return <>
+    <Champs champs={champs} valeurs={valeurs} setValeurs={setValeurs} />
+    <label style={{ fontSize: 13 }}>Texte<textarea rows={4} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texte} onChange={(e) => setTexte(e.target.value)} /></label>
+    <div className="muted" style={{ color: f.n > 1 ? 'var(--red)' : undefined }}>{f.longueur} caractères · {f.n} SMS{texte.includes('{nom}') ? ' · « {nom} » remplacé par le nom de chaque locataire' : ''}</div>
+    {manque.length > 0 && <div className="err">À compléter avant l’envoi : {manque.join(' ')}</div>}
+    {etat.err && <div className="err">{etat.err}</div>}
+    <div className="row">
+      <button className="btn plein" disabled={etat.charge || manque.length > 0 || !texteFinal.trim()} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer par SMS UDI GESTION'}</button>
+      <button className="btn gris" onClick={() => noter('inutile', { a: null, texte: texteFinal })}>Pas nécessaire</button>
+    </div>
+    <p className="muted">Envoyé à tous les locataires du bail qui ont un portable dans Rivage.</p>
+  </>;
 }
 
 // Ma journée (091) : dossiers dont l'étape en cours a des messages pas encore faits (commercial du dossier, à défaut la gestionnaire)
