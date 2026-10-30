@@ -240,10 +240,12 @@ function Journee({ moi }) {
                       <span className="row"><span className={'tag ' + a.categorie}>{CAT[a.categorie]}</span><strong style={{ fontSize: 14 }}>{a.titre}</strong></span>
                       <span className="muted">depuis le {date(a.depuis)}</span>
                     </button>
+                    {/* 103 : facture fournisseur, à qui elle incombe et notes Rivage qui en parlent, visibles sans ouvrir l'alerte */}
+                    {a.regle === 'facture_a_traiter' && a.detail?.includes('\n') && <div style={{ padding: '0 12px 8px', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{a.detail.split('\n')[0]}</div>}
                     {ouvert === a.id && (
                       <div className="detail">
-                        {a.detail && <p style={{ margin: '0 0 6px' }}>{a.detail}</p>}
-                        <p style={{ margin: '0 0 6px' }}><strong>Règle :</strong> {a.explication}</p>
+                        {a.detail && <p style={{ margin: '0 0 6px' }}>{a.regle === 'facture_a_traiter' && a.detail.includes('\n') ? a.detail.split('\n').slice(1).join(' ') : a.detail}</p>}
+                        {a.regle !== 'facture_a_traiter' && <p style={{ margin: '0 0 6px' }}><strong>Règle :</strong> {a.explication}</p>}
                         <div className="row">
                           {a.lien && <a className="btn" href={a.lien} target="_blank" rel="noopener">Voir dans Rivage</a>}
                           <button className="btn plein" onClick={() => traiter(a, true)}>Traité</button>
