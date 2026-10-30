@@ -152,6 +152,7 @@ function Journee({ moi }) {
   const [cible, setCible] = useState(moi.user_id);
   const [alertes, setAlertes] = useState(null);
   const [cat, setCat] = useState('toutes');
+  const [type, setType] = useState('tous'); // 102 : filtre par type d'alerte (règle), ex. « Facture fournisseur à traiter »
   const [ouvert, setOuvert] = useState(null);
   const [fiche, setFiche] = useState(null);
   const [err, setErr] = useState('');
@@ -162,7 +163,12 @@ function Journee({ moi }) {
 
   const ouvertes = (alertes || []).filter((a) => a.statut === 'ouverte');
   const traitees = (alertes || []).filter((a) => a.statut === 'traitee');
-  const visibles = ouvertes.filter((a) => cat === 'toutes' || a.categorie === cat);
+  const dansCat = ouvertes.filter((a) => cat === 'toutes' || a.categorie === cat);
+  // Types d'alerte présents dans la catégorie choisie, du plus fréquent au moins fréquent
+  const types = Object.values(dansCat.reduce((m, a) => { (m[a.regle] = m[a.regle] || { regle: a.regle, libelle: a.libelle || a.regle, n: 0 }).n += 1; return m; }, {}))
+    .sort((x, y) => y.n - x.n || x.libelle.localeCompare(y.libelle));
+  const typeActif = types.some((t) => t.regle === type) ? type : 'tous';
+  const visibles = dansCat.filter((a) => typeActif === 'tous' || a.regle === typeActif);
   const dossiers = useMemo(() => {
     const m = new Map();
     visibles.forEach((a) => {
@@ -174,7 +180,7 @@ function Journee({ moi }) {
     const rang = { critique: 0, haute: 1, normale: 2 };
     return [...m.values()].map((d) => ({ ...d, pire: d.alertes.reduce((p, a) => Math.min(p, rang[a.gravite]), 2) }))
       .sort((x, y) => x.pire - y.pire || y.alertes.length - x.alertes.length);
-  }, [alertes, cat]);
+  }, [alertes, cat, typeActif]);
   const nomCible = cible === moi.user_id ? moi.prenom : (membres.find((m) => m.user_id === cible)?.prenom || '');
   const gravNom = ['critique', 'haute', 'normale'];
 
@@ -199,9 +205,14 @@ function Journee({ moi }) {
       {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}
       <div className="row" style={{ marginBottom: 14 }}>
         {[['toutes', 'Toutes']].concat(Object.entries(CAT)).map(([k, l]) => (
-          <button key={k} className={'chip' + (cat === k ? ' on' : '')} onClick={() => setCat(k)}>{l}<span className="n">{k === 'toutes' ? ouvertes.length : ouvertes.filter((a) => a.categorie === k).length}</span></button>
+          <button key={k} className={'chip' + (cat === k ? ' on' : '')} onClick={() => { setCat(k); setType('tous'); }}>{l}<span className="n">{k === 'toutes' ? ouvertes.length : ouvertes.filter((a) => a.categorie === k).length}</span></button>
         ))}
       </div>
+      {types.length > 1 && <div className="row" role="group" aria-label="Type d’alerte" style={{ marginTop: -6, marginBottom: 14, gap: 6 }}>
+        <span className="muted" style={{ fontSize: 12 }}>Type :</span>
+        <button className={'chip' + (typeActif === 'tous' ? ' on' : '')} onClick={() => setType('tous')}>Tous<span className="n">{dansCat.length}</span></button>
+        {types.map((t) => <button key={t.regle} className={'chip' + (typeActif === t.regle ? ' on' : '')} onClick={() => setType(t.regle)}>{t.libelle}<span className="n">{t.n}</span></button>)}
+      </div>}
       {alertes === null ? <p className="sub">Chargement…</p> : dossiers.length === 0 ? <div className="card">Rien à traiter pour {nomCible}.</div> : (
         <div className="stack">
           {dossiers.map((d) => (
@@ -209,7 +220,7 @@ function Journee({ moi }) {
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
-                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
+                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.dossier?.type === 'invoice' ? 'Facture fournisseur' : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
                   <div className="grid2">
                     {d.bailleur && <><span>Bailleur</span><span>{d.bailleur}</span></>}
                     {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
