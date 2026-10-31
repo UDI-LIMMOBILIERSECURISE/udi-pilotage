@@ -3,9 +3,12 @@
 // l'ordinateur (repris d'UDI Pilot). Chaque message préparé est noté au journal du dossier ; « Pas nécessaire » le retire de Ma journée.
 // 096 : la gestion peut envoyer un SMS au locataire par UDI GESTION (Twilio, à tous les locataires du bail) ; un message qui attend
 // une information de la fiche du congé (date de l'EDL) est signalé et ne compte pas dans les messages à faire.
+// 109 : EDL d'entrée le jour de l'entrée (date de début du bail), seule l'heure est à fixer, en haut des étapes « Nouveau bail » et
+// « État des lieux d'entrée ». Les champs date à saisir s'ouvrent en calendrier ; ce qui est saisi apparaît aussitôt dans le texte.
+// La mention sur les données personnelles (RGPD) est ajoutée au bas de chaque mail préparé (mails.js, lienGmail).
 import React, { useEffect, useState } from 'react';
 import { rpc, supabase } from './supabase.js';
-import { lienGmail, smsFactures } from './mails.js';
+import { lienGmail, smsFactures, MENTION_RGPD } from './mails.js';
 import { lienSms, surTelephone, champsRestants, remplirChamps, CANAL, MOYEN } from './messages.js';
 import QrSms from './QrSms.jsx';
 
@@ -53,6 +56,7 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
       {!etape && <p className="muted" style={{ fontSize: 13 }}>Aucune étape en cours pour ce dossier : choisissez une étape pour voir ses messages.</p>}
       {etape && !actives.includes(etape) && <p className="muted" style={{ fontSize: 13 }}>Cette étape n’est pas en cours pour ce dossier ; les messages restent utilisables.</p>}
       {err && <div className="err">{err}</div>}
+      {d.edl_entree && ['nouveau_bail', 'edl_entree'].includes(etape) && <EdlEntree bail={id} e={d.edl_entree} apres={async () => { await charger(); apres && apres(); }} />}
       <div className="stack" style={{ gap: 6 }}>
         {liste.map((m, i) => {
           const cle = m.code + '|' + i;
@@ -80,12 +84,47 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
   );
 }
 
-// Champs non fournis par Rivage ({date_edl}, {heure_edl}…) : saisis ici, remplacés dans le texte avant l'envoi
+// Rendez-vous de l'EDL d'entrée (109) : le jour de l'entrée par défaut, heure à fixer ; la date ne se change que si l'EDL a lieu un autre jour
+function EdlEntree({ bail, e, apres }) {
+  const [jour, setJour] = useState(e.date || e.debut || '');
+  const [heure, setHeure] = useState(e.heure || '');
+  const [etat, setEtat] = useState({ charge: false, err: '', ok: false });
+  useEffect(() => { setJour(e.date || e.debut || ''); setHeure(e.heure || ''); }, [e.date, e.heure, e.debut]);
+  const modifie = (jour || '') !== (e.date || e.debut || '') || heure.trim() !== (e.heure || '');
+  const enregistrer = async () => {
+    setEtat({ charge: true, err: '', ok: false });
+    try { await rpc('pilotage_edl_entree_maj', { p_bail: bail, p_date: jour || null, p_heure: heure || null }); setEtat({ charge: false, err: '', ok: true }); await apres(); }
+    catch (x) { setEtat({ charge: false, err: x.message, ok: false }); }
+  };
+  return (
+    <div className="card" style={{ padding: '8px 12px', marginBottom: 8, borderLeft: '4px solid var(--teal)' }}>
+      <div className="row" style={{ gap: 10, fontSize: 13 }}>
+        <b>État des lieux d’entrée</b>
+        <label>le <input type="date" value={jour} onChange={(x) => setJour(x.target.value)} /></label>
+        <label>à <input style={{ width: 80 }} value={heure} onChange={(x) => setHeure(x.target.value)} placeholder="10h00" aria-label="Heure de l’état des lieux d’entrée" /></label>
+        <button className="btn plein" disabled={etat.charge || !modifie} onClick={enregistrer}>{etat.charge ? 'Enregistrement…' : 'Enregistrer'}</button>
+        {etat.ok && !modifie && <span className="muted">✓ Enregistré</span>}
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        {e.debut && jour === e.debut ? `Jour de l’entrée (début du bail dans Rivage, le ${date(e.debut)}).` : e.debut ? `Autre jour que l’entrée (début du bail le ${date(e.debut)}).` : 'Date de début absente de Rivage.'}
+        {!e.heure && ' Heure à fixer : la confirmation et le rappel au locataire sont prêts une fois l’heure enregistrée.'}
+      </div>
+      {etat.err && <div className="err">{etat.err}</div>}
+    </div>
+  );
+}
+
+// Champs non fournis par Rivage ({date_edl}, {heure_edl}…) : saisis ici, remplacés dans le texte avant l'envoi.
+// Un champ date s'ouvre en calendrier (valeur AAAA-MM-JJ, écrite JJ/MM/AAAA dans le texte).
+const estDate = (c) => /date/.test(c);
+const enTexte = (valeurs) => Object.fromEntries(Object.entries(valeurs).map(([k, v]) =>
+  [k, estDate(k) && /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v.split('-').reverse().join('/') : v]));
 function Champs({ champs, valeurs, setValeurs }) {
   if (!champs.length) return null;
   return (
     <div className="row" style={{ fontSize: 13 }}>
-      {champs.map((c) => <label key={c}>{libelleChamp(c)} <input value={valeurs[c] || ''} onChange={(e) => setValeurs({ ...valeurs, [c]: e.target.value })} /></label>)}
+      {champs.map((c) => <label key={c}>{libelleChamp(c)} <input type={estDate(c) ? 'date' : 'text'} value={valeurs[c] || ''}
+        onChange={(e) => setValeurs({ ...valeurs, [c]: e.target.value })} /></label>)}
     </div>
   );
 }
@@ -95,17 +134,19 @@ function FormMail({ m, email, noter }) {
   const [objet, setObjet] = useState(m.objet || '');
   const [texte, setTexte] = useState(m.texte || '');
   const [valeurs, setValeurs] = useState({});
-  const champs = champsRestants(m.objet || '', m.texte || '');
-  const objetFinal = remplirChamps(objet, valeurs);
-  const texteFinal = remplirChamps(texte, valeurs);
+  const vt = enTexte(valeurs);
+  const champs = champsRestants(objet, texte);
+  const objetFinal = remplirChamps(objet, vt);
+  const texteFinal = remplirChamps(texte, vt);
   const manque = champsRestants(objetFinal, texteFinal);
   const to = a.split(/[,;]\s*/).map((x) => x.trim()).filter(Boolean);
   return (
     <div className="stack" style={{ gap: 6, marginTop: 8 }}>
       <Champs champs={champs} valeurs={valeurs} setValeurs={setValeurs} />
       <label style={{ fontSize: 13 }}>À<input style={{ width: '100%' }} value={a} onChange={(e) => setA(e.target.value)} placeholder="adresses séparées par une virgule" /></label>
-      <label style={{ fontSize: 13 }}>Objet<input style={{ width: '100%' }} value={objet} onChange={(e) => setObjet(e.target.value)} /></label>
-      <label style={{ fontSize: 13 }}>Texte<textarea rows={12} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texte} onChange={(e) => setTexte(e.target.value)} /></label>
+      <label style={{ fontSize: 13 }}>Objet<input style={{ width: '100%' }} value={objetFinal} onChange={(e) => setObjet(e.target.value)} /></label>
+      <label style={{ fontSize: 13 }}>Texte<textarea rows={12} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texteFinal} onChange={(e) => setTexte(e.target.value)} /></label>
+      <details className="muted" style={{ fontSize: 12 }}><summary style={{ cursor: 'pointer' }}>Mention sur les données personnelles ajoutée au bas du mail</summary><p style={{ whiteSpace: 'pre-wrap' }}>{MENTION_RGPD}</p></details>
       {manque.length > 0 && <div className="err">À compléter avant l’envoi : {manque.join(' ')}</div>}
       <div className="row">
         {manque.length === 0 && to.length > 0
@@ -126,8 +167,8 @@ function FormSms({ m, noter, bail, gestion }) {
   const [copie, setCopie] = useState(false);
   const [note, setNote] = useState(false);
   const telephone = surTelephone();
-  const champs = champsRestants(m.texte || '');
-  const texteFinal = remplirChamps(texte, valeurs);
+  const champs = champsRestants(texte);
+  const texteFinal = remplirChamps(texte, enTexte(valeurs));
   const manque = champsRestants(texteFinal);
   const pret = manque.length === 0 && !!a.trim() && !!texteFinal.trim();
   const f = smsFactures(texteFinal);
@@ -139,7 +180,7 @@ function FormSms({ m, noter, bail, gestion }) {
     <>
       <Champs champs={champs} valeurs={valeurs} setValeurs={setValeurs} />
       <label style={{ fontSize: 13 }}>Numéro<input value={a} onChange={(e) => setA(e.target.value)} placeholder="portable" /></label>
-      <label style={{ fontSize: 13 }}>Texte<textarea rows={4} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texte} onChange={(e) => setTexte(e.target.value)} /></label>
+      <label style={{ fontSize: 13 }}>Texte<textarea rows={4} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texteFinal} onChange={(e) => setTexte(e.target.value)} /></label>
       <div className="muted" style={{ color: f.n > 1 ? 'var(--red)' : undefined }}>{f.longueur} caractères · {f.n} SMS</div>
       {manque.length > 0 && <div className="err">À compléter avant l’envoi : {manque.join(' ')}</div>}
       {pret && !telephone && <QrSms tel={a} texte={texteFinal} />}
@@ -168,8 +209,8 @@ function SmsGestion({ m, bail, noter }) {
   const [texte, setTexte] = useState(m.texte_twilio || '');
   const [valeurs, setValeurs] = useState({});
   const [etat, setEtat] = useState({ charge: false, err: '' });
-  const champs = champsRestants(m.texte_twilio || '').filter((c) => c !== '{nom}');
-  const texteFinal = remplirChamps(texte, valeurs);
+  const champs = champsRestants(texte).filter((c) => c !== '{nom}');
+  const texteFinal = remplirChamps(texte, enTexte(valeurs));
   const manque = champsRestants(texteFinal).filter((c) => c !== '{nom}');
   const f = smsFactures(texteFinal.split('{nom}').join('Prénom NOM'));
   const envoyer = async () => {
@@ -185,7 +226,7 @@ function SmsGestion({ m, bail, noter }) {
   };
   return <>
     <Champs champs={champs} valeurs={valeurs} setValeurs={setValeurs} />
-    <label style={{ fontSize: 13 }}>Texte<textarea rows={4} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texte} onChange={(e) => setTexte(e.target.value)} /></label>
+    <label style={{ fontSize: 13 }}>Texte<textarea rows={4} style={{ width: '100%', fontFamily: 'inherit', fontSize: 14 }} value={texteFinal} onChange={(e) => setTexte(e.target.value)} /></label>
     <div className="muted" style={{ color: f.n > 1 ? 'var(--red)' : undefined }}>{f.longueur} caractères · {f.n} SMS{texte.includes('{nom}') ? ' · « {nom} » remplacé par le nom de chaque locataire' : ''}</div>
     {manque.length > 0 && <div className="err">À compléter avant l’envoi : {manque.join(' ')}</div>}
     {etat.err && <div className="err">{etat.err}</div>}
