@@ -106,7 +106,7 @@ export default function SuiviBaux({ moi }) {
 
 // ===== Détail d'un bail =====
 
-export function DossierBail({ b, peut, moi, apres }) {
+export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [mail, setMail] = useState(null); // { m, etape: { cle, etape, detail } }
@@ -183,7 +183,7 @@ export function DossierBail({ b, peut, moi, apres }) {
     </div>)}
     <div ref={refMail}>{mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={gere} />}</div>
     <FicheConge bail={b.bail_id} apres={() => { setRev((n) => n + 1); apres && apres(); }} />
-    <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} />
+    <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} etapes={etapesMessages} />
 
     {synthese ? <>
       {/* Mode synthèse (même présentation que le mandat) : la fiche d'abord, le détail replié en dessous */}
@@ -206,7 +206,7 @@ export function DossierBail({ b, peut, moi, apres }) {
     </> : <>
       <Echeance d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
       {(d.controle?.go_le || !soumis) && <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}><button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse du bail</button></div>}
-      <Controle d={d} b={b} peut={peut} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} />
+      <Controle d={d} b={b} peut={peut} circuit={soumis} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} />
       <Suivis d={d} b={b} peut={gere} agir={agir} />
       <Paliers d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
       <Actes d={d} b={b} peut={gere} agir={agir} />
@@ -391,7 +391,7 @@ export function useFournisseurs() {
 export const FOURNI_PAR = { bailleur: 'à fournir par le bailleur', locataire: 'à fournir par le locataire', agence: 'à établir par l’agence' };
 
 // ----- Contrôle d'entrée -----
-function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
+function Controle({ d, b, peut, circuit, agir, ouvrirMail, recharger }) {
   const fourn = useFournisseurs();
   const c = d.controle || { items: [] };
   const [ouvert, setOuvert] = useState(true); // après le GO, on n'arrive ici que par « Modifier le paramétrage »
@@ -435,7 +435,9 @@ function Controle({ d, b, peut, agir, ouvrirMail, recharger }) {
         : <>{c.restant} point(s) à traiter{(() => { const r = c.items.filter((i) => i.a_traiter); const g = r.filter((i) => i.qui === 'gestion').length;
             return r.some((i) => i.qui) ? ` (${r.length - g} pour le commercial, ${g} pour la gestion)` : ''; })()} · {c.anomalies} anomalie(s){d.lecture ? ` · bail lu par l’IA le ${date(d.lecture.le)}` : ''}</>}
       {peut && <div className="row" style={{ marginTop: 6 }}>
-        {!c.go_le && <button className="btn plein" disabled={c.restant > 0} onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: true })}>Donner le GO</button>}
+        {/* Bail dans le circuit : le GO se donne par « Valider le dossier » du bandeau (même fonction pilotage_bail_go), pas de second bouton */}
+        {!c.go_le && !circuit && <button className="btn plein" disabled={c.restant > 0} onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: true })}>Donner le GO</button>}
+        {!c.go_le && circuit && <span className="muted" style={{ fontSize: 12 }}>Le GO se donne avec « Valider le dossier », en haut de la fiche.</span>}
         {c.go_le && <button className="btn gris" onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })}>Retirer le GO</button>}
         {/* Bail lu une seule fois : plus de bouton de lecture une fois la lecture enregistrée */}
         {!d.lecture && <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le bail déposé dans Rivage (IA)'}</button>}

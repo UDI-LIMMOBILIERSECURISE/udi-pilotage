@@ -17,7 +17,7 @@ const EQUIPEMENTS = ['Chaudière gaz', 'Chaudière fioul', 'Pompe à chaleur', '
 const COMPTEURS = ['Eau froide', 'Eau chaude', 'Chauffage', 'Électricité', 'Gaz'];
 const ligne = { display: 'grid', gridTemplateColumns: 'minmax(160px, 34%) 1fr', gap: 10, padding: '4px 0', borderTop: '1px solid var(--line)', fontSize: 13 };
 
-export default function DossierMandat({ m, apres }) {
+export default function DossierMandat({ m, apres, etapesMessages }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [parametrer, setParametrer] = useState(false);
@@ -66,7 +66,7 @@ export default function DossierMandat({ m, apres }) {
     {err && <div className="banner">{err}</div>}
     {c.soumis && <Circuit objet="mandat" id={m.id} apres={async () => { await charger(); apres && apres(); }} />}
     <DeposerRivage cible_type="ManagementContract" cible_id={m.id} apres={async () => { await charger(); apres && apres(); }} />
-    <MessagesDossier objet="mandat" id={m.id} apres={apres} />
+    <MessagesDossier objet="mandat" id={m.id} apres={apres} etapes={etapesMessages} />
     {synthese ? <Synthese {...ctx} parametrer={() => setParametrer(true)} /> : <>
       <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
         {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}</> : <>{c.restant} point(s) à traiter avant la validation{c.lecture_le ? ` · mandat lu par l’IA le ${date(c.lecture_le)}` : lecture.charge ? ' · lecture du mandat par l’IA en cours…' : ''}</>}
