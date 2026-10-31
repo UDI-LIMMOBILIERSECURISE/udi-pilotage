@@ -133,7 +133,7 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
 }
 
 // Lecture de la seule identité des locataires (110), pour un bail déjà lu avant l'ajout de la clé « occupants »
-async function lireOccupants(service: ReturnType<typeof createClient>, bail: string, user: string) {
+async function lireOccupants(service: ReturnType<typeof createClient>, bail: string, user: string | null) {
   const { data: src } = await service.rpc('pilotage_lecture_source', { p_bail: bail })
   if (!src?.url) return { status: 404, body: { error: 'Aucun bail déposé dans Rivage pour ce bail : déposez le bail signé dans Rivage.' } }
   const r = await fetch(src.url)
@@ -357,7 +357,7 @@ Deno.serve(async (req) => {
   if (enteteCron) {
     const ok = (await service.rpc('pilotage_cron_valide', { p_secret: enteteCron })).data === true
     if (!ok) return rep(401, { error: 'Non autorisé' })
-    let c: { justificatifs?: boolean; mandats?: boolean; edl?: boolean; communes?: boolean; audit?: boolean } = {}
+    let c: { justificatifs?: boolean; mandats?: boolean; edl?: boolean; communes?: boolean; audit?: boolean; occupants?: boolean } = {}
     try { c = await req.json() } catch { /* corps vide : lecture des baux */ }
     // Audit du stock (040) : tous les baux en cours et mandats actifs pas encore lus, 3 + 3 par passage (toutes les 10 minutes)
     if (c.audit) {
@@ -367,6 +367,17 @@ Deno.serve(async (req) => {
         const r = await lire(service, x.id, null, null, null, x.type === 'mandat')
         if (r.status !== 200) await echec(service, x.id, x.type, r.body)
         faits.push({ ...x, ...r.body })
+      }
+      return rep(200, { ok: true, faits })
+    }
+    // Identité des locataires des baux en entrée ou en sortie, lus avant la clé « occupants » (112) : toutes les 5 minutes, 3 au plus
+    if (c.occupants) {
+      const { data: liste } = await service.rpc('pilotage_occupants_a_lire', { p_max: 3 })
+      const faits: unknown[] = []
+      for (const id of (liste || []) as string[]) {
+        const r = await lireOccupants(service, id, null)
+        if (r.status !== 200) await echec(service, 'occ:' + id, 'occupants', r.body)
+        faits.push({ bail: id, ...r.body })
       }
       return rep(200, { ok: true, faits })
     }
