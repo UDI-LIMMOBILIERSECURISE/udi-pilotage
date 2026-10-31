@@ -351,12 +351,13 @@ function Lot({ l, nature, agir, choix, titre, props }) {
 
 function ClauseSimple({ i, repondre }) {
   const [v, setV] = useState('');
-  // Pack de gestion (045) : un clic, le taux Rivage est ensuite contrôlé contre le barème
+  // Pack de gestion (045) : un clic, le taux Rivage est ensuite contrôlé contre le barème ; 107 : lu dans Rivage quand l'offre est connue
   if (i.cle === 'm_cl_pack') return <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', padding: '8px 0' }}>
     <div style={{ flex: 1, minWidth: 220 }}><span style={{ color: i.repondu ? 'var(--teal)' : 'var(--amber)', fontWeight: 700 }}>{i.repondu ? '✓' : '○'}</span> {i.libelle}
       {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
-      {i.repondu && <div style={{ fontSize: 13 }}>Pack {i.commentaire} <span className="muted">({i.par}, {date(i.le)})</span></div>}</div>
-    <div className="row">{i.repondu ? <button className="lien" onClick={() => repondre(i, null)}>Revenir</button>
+      {i.repondu && <div style={{ fontSize: 13 }}>Pack {i.commentaire} <span className="muted">({i.par}, {date(i.le)})</span></div>}
+      {!i.repondu && i.detail && <div style={{ fontSize: 13 }}>{i.detail}</div>}</div>
+    <div className="row">{!i.repondu && i.statut === 'ok' ? <span className="etq ok">lu dans Rivage</span> : i.repondu ? <button className="lien" onClick={() => repondre(i, null)}>Revenir</button>
       : ['Essentiel', 'Confort', 'Pro'].map((p) => <button key={p} className="btn" onClick={() => repondre(i, 'ok', p)}>{p}</button>)}</div>
   </div>;
   // Garantie des loyers impayés (045) : option du barème, souscrite ou non, en un clic
