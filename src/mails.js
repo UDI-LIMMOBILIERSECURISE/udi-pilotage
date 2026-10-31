@@ -286,9 +286,18 @@ export function smsFactures(t) {
 // Nom affiché dans un SMS : sans la civilité enregistrée dans Rivage (mr, mrs, M., Mme…)
 export const nomSms = (nom) => (nom || '').replace(/^\s*(mr|mrs|ms|miss|m\.|mme|mlle|monsieur|madame|mademoiselle)\s+/i, '').trim();
 
-// Brouillon Gmail dans la boîte de l'utilisateur connecté (authuser = son adresse)
+// Mention sur les données personnelles (RGPD), ajoutée au bas de chaque mail préparé depuis le pilotage (109)
+export const MENTION_RGPD = "Protection des données personnelles : UDI Gestion traite les données vous concernant pour la gestion de votre dossier "
+  + "(location, gestion du bien), sur la base du contrat qui nous lie et de nos obligations légales. Elles ne sont communiquées qu'aux "
+  + "personnes qui interviennent dans le dossier et sont conservées pendant la durée de notre relation, puis pendant les durées de "
+  + "prescription légales. Vous pouvez y accéder, les faire rectifier ou effacer, en demander la limitation ou vous opposer à leur "
+  + "traitement en écrivant à votregestionnaire@udi-immo.com. Vous pouvez également adresser une réclamation à la CNIL (www.cnil.fr).";
+export const avecMentionRgpd = (corps) => ((corps || '').includes('Protection des données personnelles')
+  ? corps || '' : (corps || '').replace(/\s+$/, '') + '\n\n--\n' + MENTION_RGPD);
+
+// Brouillon Gmail dans la boîte de l'utilisateur connecté (authuser = son adresse), mention RGPD en bas
 export function lienGmail(m, moiEmail) {
-  const p = new URLSearchParams({ view: 'cm', fs: '1', to: (m.to || []).join(','), su: m.objet || '', body: m.corps || '' });
+  const p = new URLSearchParams({ view: 'cm', fs: '1', to: (m.to || []).join(','), su: m.objet || '', body: avecMentionRgpd(m.corps) });
   if (moiEmail) p.set('authuser', moiEmail);
   return 'https://mail.google.com/mail/?' + p.toString();
 }
