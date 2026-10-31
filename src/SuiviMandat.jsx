@@ -595,8 +595,7 @@ export function DeposerRivage({ cible_type, cible_id, apres }) {
   };
   useEffect(() => { rpc('pilotage_peut_ecrire_rivage').then((x) => { setPeut(x === true); if (x === true) charger(); }).catch(() => setPeut(false)); }, [cible_id]);
   if (!peut) return null;
-  // Dépôt dans un mandat suspendu le 17/10 : l'API Rivage crée la pièce sans la rattacher (question posée à Rivage)
-  if (cible_type === 'ManagementContract') return <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>Dépôt de pièces dans Rivage depuis le pilotage : en pause, en attente de Rivage (l’API crée la pièce sans la rattacher au mandat).{weroof.length ? ` ${weroof.length} pièce(s) WeRoof rapprochée(s) de ce mandat, prêtes à envoyer dès la reprise.` : ''}</div>;
+  // 106 : dépôt sur un mandat repris le 31/10 (format de rattachement donné par Rivage) ; la pièce va sur le lot du mandat
   const appeler = async (body) => {
     const { data, error } = await supabase.functions.invoke('pilotage-ecriture-rivage', { body });
     let msg = data?.error;
@@ -629,7 +628,7 @@ export function DeposerRivage({ cible_type, cible_id, apres }) {
       <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setF({ ...f, fichier: e.target.files[0] || null })} />
       <button className="btn plein" disabled={!f.fichier || etat.charge} onClick={envoyer}>{etat.charge ? 'Envoi…' : 'Envoyer dans Rivage'}</button>
     </div>
-    <div className="muted" style={{ fontSize: 12 }}>La pièce est créée dans la GED Rivage et rattachée à ce dossier. Chaque dépôt est tracé.</div>
+    <div className="muted" style={{ fontSize: 12 }}>La pièce est créée dans la GED Rivage et rattachée {cible_type === 'ManagementContract' ? 'au lot du mandat' : 'à ce dossier'}. Chaque dépôt est tracé.</div>
     {cible_type === 'ManagementContract' && <div style={{ marginTop: 8 }}>
       <b style={{ fontSize: 13 }}>Pièces trouvées dans WeRoof ({weroof.length})</b>
       <div className="muted" style={{ fontSize: 12 }}>Rapprochées par l’adresse du lot et le nom du propriétaire. Vérifier chaque pièce avant l’envoi (date, bon propriétaire).</div>

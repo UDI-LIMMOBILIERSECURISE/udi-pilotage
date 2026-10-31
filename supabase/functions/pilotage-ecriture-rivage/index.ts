@@ -1,4 +1,4 @@
-// Écriture dans Rivage depuis le pilotage (042). Premier usage : déposer une pièce dans un mandat ou un bail Rivage.
+// Écriture dans Rivage depuis le pilotage (042). Premier usage : déposer une pièce dans un mandat, un bail ou un lot Rivage (lot : 106).
 // Réservé à la direction (pilotage_peut_ecrire_rivage). Liste fermée d'actions et de natures ; chaque appel est journalisé
 // dans pilotage.rivage_ecritures avec la réponse de Rivage. La clé API reste dans les secrets (RIVAGE_API_KEY).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
@@ -6,11 +6,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 const RIVAGE = 'https://rivage.immo'
 const ORIGINES = ['https://udi-pilotage.vercel.app', 'http://localhost:5173', 'http://localhost:4173']
 const MAX_OCTETS = 20 * 1024 * 1024
-const CIBLES = ['ManagementContract', 'LeasingContract']
+const CIBLES = ['ManagementContract', 'LeasingContract', 'Asset']
 // Natures Rivage autorisées pour un dépôt depuis le pilotage (sous-ensemble de l'énumération de l'API)
 const NATURES = ['management_mandate', 'landlord_identity_and_residence_proof', 'identity_document', 'property_title', 'property_ownership_certificate',
   'landlord_bank_details', 'property_insurance_contracts', 'technical_diagnostic_reports', 'lease_contract', 'move_in_inventory',
-  'home_insurance_certificate', 'guarantor_documents', 'security_deposit_proof', 'maintenance_contracts', 'property_tax_declaration']
+  'home_insurance_certificate', 'guarantor_documents', 'security_deposit_proof', 'maintenance_contracts', 'property_tax_declaration', 'work_estimates']
 const TYPES = ['application/pdf', 'image/jpeg', 'image/png']
 
 // Lecture d'une pièce de la GED WeRoof (UDIGESTION), stockée sur Cloudflare R2 : URL présignée (AWS SigV4) avec les secrets R2 du projet
@@ -66,14 +66,15 @@ Deno.serve(async (req) => {
   let c: { action?: string; cible_type?: string; cible_id?: string; nature?: string; titre?: string; nom?: string; type_mime?: string; fichier?: string; document_weroof?: string; test_profil_interne?: string }
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   if (c.action !== 'upload') return rep(400, { error: 'Action non prévue' })
-  if (!c.cible_type || !CIBLES.includes(c.cible_type) || !c.cible_id || !/^(mc|lc)_[A-Za-z0-9]+$/.test(c.cible_id)) return rep(400, { error: 'Mandat ou bail Rivage invalide' })
+  if (!c.cible_type || !CIBLES.includes(c.cible_type) || !c.cible_id || !/^(mc|lc|a)_[A-Za-z0-9]+$/.test(c.cible_id)) return rep(400, { error: 'Mandat, bail ou lot Rivage invalide' })
   // Essais du 17/10 : la pièce est créée dans Rivage mais aucun rattachement n'est pris en compte (mandat, puis lot), quel que soit
   // l'emplacement des paramètres resourceable_*. Chaque essai laissait une pièce orpheline dans la GED : dépôt sur un mandat suspendu
   // tant que Rivage n'a pas indiqué comment rattacher une pièce par l'API.
   // Test du 19/10 : la GED Rivage rattache une pièce au propriétaire avec son numéro interne (formulaire Rivage : resourceable_type=Profile,
   // resourceable_id=62522) et non avec l'identifiant public de l'API. Ce test seul lève la pause, pour la direction.
   const testProfil = c.test_profil_interne && /^\d{1,10}$/.test(c.test_profil_interne) ? c.test_profil_interne : null
-  if (c.cible_type === 'ManagementContract' && !testProfil) return rep(409, { error: 'Dépôt dans un mandat suspendu : l’API Rivage crée la pièce sans la rattacher au dossier (essais du 17/10). En attente de la réponse de Rivage.' })
+  // 31/10 : Rivage a indiqué le format du rattachement à un lot (upload[resourceable_type]=Asset, upload[resourceable_id]=identifiant public
+  // du lot, upload[label], upload[nature], file). Le dépôt sur un mandat reprend : la pièce va sur le lot du mandat.
   let bin: Uint8Array
   if (c.document_weroof) {
     // Pièce de la GED WeRoof : elle doit faire partie des pièces rapprochées de ce mandat (même adresse et même propriétaire)
@@ -110,12 +111,10 @@ Deno.serve(async (req) => {
   // Le fichier est attendu dans « file » selon la documentation ; repli sur « upload[file] » si Rivage refuse.
   const envoyer = async (fichierDansUpload: boolean) => {
     const f = new FormData()
-    f.append('upload[nature]', c.nature!)
-    f.append('upload[title]', titre)
+    // Format indiqué par Rivage le 31/10 : rattachement dans l'objet « upload » seulement (plus de doublon hors « upload »)
     f.append('upload[label]', titre)
+    f.append('upload[nature]', c.nature!)
     if (c.cible_type !== 'LeasingContract') {
-      f.append('resourceable_type', typeRattache)
-      f.append('resourceable_id', rattacheA)
       f.append('upload[resourceable_type]', typeRattache)
       f.append('upload[resourceable_id]', rattacheA)
     }
