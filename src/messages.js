@@ -37,5 +37,5 @@ export function texteSmsGestion(modeles, code, valeurs) {
 }
 
 export const CANAL = { email: 'Mail', sms: 'SMS' };
-export const CIBLE = { bailleur: 'au bailleur', locataire: 'au locataire', garant: 'au garant', prestataire: 'au prestataire' };
+export const CIBLE = { bailleur: 'au bailleur', locataire: 'au locataire', garant: 'au garant', prestataire: 'au prestataire', organisme: 'à l’organisme des ordures' };
 export const MOYEN = { gmail: 'ouvert dans Gmail', telephone: 'ouvert sur le portable', qr: 'envoyé par QR code', copie: 'texte copié', inutile: 'pas nécessaire', twilio: 'envoyé par SMS UDI GESTION' };
