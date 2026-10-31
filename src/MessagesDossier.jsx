@@ -6,6 +6,7 @@
 // 109 : EDL d'entrée le jour de l'entrée (date de début du bail), seule l'heure est à fixer, en haut des étapes « Nouveau bail » et
 // « État des lieux d'entrée ». Les champs date à saisir s'ouvrent en calendrier ; ce qui est saisi apparaît aussitôt dans le texte.
 // La mention sur les données personnelles (RGPD) est ajoutée au bas de chaque mail préparé (mails.js, lienGmail).
+// 110 : identité des locataires lue dans le bail (déclaration aux impôts), affichée sur les étapes d'entrée et de sortie, avec la lecture IA.
 import React, { useEffect, useState } from 'react';
 import { rpc, supabase } from './supabase.js';
 import { lienGmail, smsFactures, MENTION_RGPD } from './mails.js';
@@ -56,6 +57,7 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
       {!etape && <p className="muted" style={{ fontSize: 13 }}>Aucune étape en cours pour ce dossier : choisissez une étape pour voir ses messages.</p>}
       {etape && !actives.includes(etape) && <p className="muted" style={{ fontSize: 13 }}>Cette étape n’est pas en cours pour ce dossier ; les messages restent utilisables.</p>}
       {err && <div className="err">{err}</div>}
+      {d.identite && ['edl_entree', 'edl_sortie'].includes(etape) && <Identite bail={id} x={d.identite} apres={async () => { await charger(); apres && apres(); }} />}
       {d.edl_entree && ['nouveau_bail', 'edl_entree'].includes(etape) && <EdlEntree bail={id} e={d.edl_entree} apres={async () => { await charger(); apres && apres(); }} />}
       <div className="stack" style={{ gap: 6 }}>
         {liste.map((m, i) => {
@@ -80,6 +82,40 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Identité des locataires pour la déclaration aux impôts (110) : lue dans le bail par l'IA, à vérifier sur le bail
+const dateFr = (x) => (x && /^\d{4}-\d{2}-\d{2}$/.test(x) ? x.split('-').reverse().join('/') : x || '?');
+function Identite({ bail, x, apres }) {
+  const [etat, setEtat] = useState({ charge: false, err: '' });
+  const occ = Array.isArray(x.occupants) ? x.occupants : [];
+  const lire = async () => {
+    setEtat({ charge: true, err: '' });
+    const { data, error } = await supabase.functions.invoke('pilotage-lecture-bail', { body: { bail_id: bail, occupants: true } });
+    if (error || !data?.ok) {
+      let msg = data?.error;
+      if (!msg && error?.context?.json) { try { msg = (await error.context.json()).error; } catch { /* réponse illisible */ } }
+      setEtat({ charge: false, err: msg || 'Lecture impossible' }); return;
+    }
+    setEtat({ charge: false, err: '' }); await apres();
+  };
+  return (
+    <div className="card" style={{ padding: '8px 12px', marginBottom: 8, fontSize: 13 }}>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <b>Locataires à déclarer aux impôts</b>
+        <button className="btn" disabled={etat.charge} onClick={lire}>{etat.charge ? 'Lecture…' : occ.length ? 'Relire l’identité dans le bail (IA)' : 'Lire l’identité dans le bail (IA)'}</button>
+      </div>
+      {occ.length > 0 ? <ul style={{ margin: '4px 0', paddingLeft: 18 }}>{occ.map((o, k) => <li key={k}>{o.type === 'societe'
+        ? `${o.denomination || '?'}, SIREN ${o.siren || '?'}`
+        : `${(o.nom || '?').toUpperCase()} ${o.prenoms || ''}, né(e) le ${dateFr(o.date_naissance)} à ${o.lieu_naissance || '?'}`}{o.page ? ` (page ${o.page})` : ''}</li>)}</ul>
+        : <div className="muted">Pas encore lue dans le bail.</div>}
+      <div className="muted" style={{ fontSize: 12 }}>
+        {x.le ? `Lu par l’IA le ${date(x.le)}, à vérifier sur le bail. ` : ''}{x.complet === false && occ.length > 0 ? 'Incomplet : à compléter dans le mail. ' : ''}
+        Identifiant fiscal du logement : {x.id_fiscal || 'absent de Rivage (fiche du lot)'}
+      </div>
+      {etat.err && <div className="err">{etat.err}</div>}
     </div>
   );
 }

@@ -24,6 +24,11 @@ function cors(req: Request) {
   }
 }
 
+// Identité des locataires pour la déclaration d'occupation aux impôts (110) : nom, prénoms, date et lieu de naissance ; société : dénomination, SIREN
+const CONSIGNE_OCCUPANTS_CLE = `- Ajoute une clé "occupants" : liste des locataires (preneurs) désignés par le bail, sans les garants ni les cautions. Pour une personne :
+  {"type": "personne", "nom": "...", "prenoms": "...", "date_naissance": "AAAA-MM-JJ" ou null, "lieu_naissance": "commune (département ou pays)" ou null, "page": n}.
+  Pour une société : {"type": "societe", "denomination": "...", "siren": "9 chiffres" ou null, "page": n}. Recopie exactement ce qui est écrit, null si absent.`
+
 const SYSTEME = `Tu lis un bail (commercial, professionnel ou d'habitation) pour une agence de gestion locative française.
 On te donne le document et une liste de questions identifiées par une clé. Pour chaque clé, réponds à partir du seul document.
 Règles strictes :
@@ -32,6 +37,8 @@ Règles strictes :
 - "page" : numéro de la page du PDF où se trouve l'information (1 = première page), sinon null.
 - "extrait" : citation exacte et courte (200 caractères au plus) du passage qui fonde la réponse, sinon null.
 - Pour les clés de dates et durée (c_rv_dates, h_rv_dates), ajoute "signature" (AAAA-MM-JJ, date de signature du bail en cours), "debut" (AAAA-MM-JJ, date de prise d'effet du bail en cours) et "duree_mois" (entier).
+- Date de signature : c'est UNIQUEMENT la date écrite à côté des signatures des parties, en général sur la dernière page (« Fait à …, le … », « Signé le … », date des signatures électroniques ; s'il y en a plusieurs, la dernière). Cite ce passage dans "extrait" et sa page dans "page".
+  Ne prends JAMAIS pour date de signature une date citée dans le corps du bail à propos du loyer ou d'un bail antérieur : montant et date du dernier loyer acquitté par le précédent locataire, date de la dernière révision, loyer de référence, ancien bail, bail renouvelé, avenant précédent. Si aucune date n'est écrite près des signatures, mets "signature": null et ajoute-le aux "anomalies".
 - Pour les clés de dépôt de garantie (c_rv_dg, h_rv_dg), ajoute "montant" (nombre, en euros).
 - Pour les clés de loyer (c_rv_loyer, h_rv_loyer), ajoute "montant_mensuel" (loyer mensuel hors charges et hors taxes, nombre ; loyer annuel divisé par 12 s'il est exprimé à l'année).
 - Pour les clés de charges (c_rv_charges, h_rv_charges), ajoute "montant_mensuel" (provision ou forfait mensuel, nombre ; 0 s'il n'y en a pas).
@@ -42,6 +49,7 @@ Règles strictes :
 - Ajoute une clé "paliers" : liste des paliers ou franchises de loyer prévus par le bail, chacun {"nature": "palier" ou "franchise", "debut": "AAAA-MM-JJ", "fin": "AAAA-MM-JJ" ou null, "loyer_annuel_ht": nombre ou null, "page": n}. Liste vide s'il n'y en a pas.
 - Ajoute une clé "refacturations" : liste des sommes que le bail permet de refacturer au preneur (taxes, assurances, honoraires, travaux...), chacune {"nature": "...", "article": "...", "page": n}.
 - Ajoute une clé "anomalies" : liste de phrases courtes signalant les incohérences ou blancs du document (montant non rempli, dates contradictoires, document qui n'est pas un bail...).
+${CONSIGNE_OCCUPANTS_CLE}
 Réponds uniquement par un objet JSON valide, sans texte autour.`
 
 const SYSTEME_MANDAT = `Tu lis un mandat de gestion locative (loi Hoguet) pour une agence de gestion française.
@@ -51,6 +59,7 @@ Règles strictes :
 - "valeur" : réponse courte en français (une phrase au plus), dates au format jj/mm/aaaa, montants avec le symbole €.
 - "page" : numéro de la page du PDF (1 = première page), sinon null. "extrait" : citation exacte et courte (200 caractères au plus), sinon null.
 - m_rv_dates : ajoute "signature" (AAAA-MM-JJ), "debut" (AAAA-MM-JJ, prise d'effet) et "duree_mois" (durée initiale, entier).
+  La signature est UNIQUEMENT la date écrite à côté des signatures (en général dernière page : « Fait à …, le … », signatures électroniques : la dernière) ; jamais une date citée dans le corps du mandat. Absente : "signature": null et une anomalie.
 - m_rv_reconduction : ajoute "code" parmi tacite, expresse, aucune, et "annees" (durée de chaque reconduction, entier).
 - m_rv_registre : ajoute "numero" (entier, numéro d'inscription au registre des mandats).
 - m_rv_gestion : ajoute "taux" (nombre : taux des honoraires de gestion en % TTC ; s'il n'est donné qu'en HT, multiplie par 1,2).
@@ -121,6 +130,41 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
 
   await service.rpc('pilotage_lecture_ecrire', { p_bail: bail, p_source: source, p_modele: modele, p_resultat: resultat, p_user: user })
   return { status: 200, body: { ok: true, modele, source } }
+}
+
+// Lecture de la seule identité des locataires (110), pour un bail déjà lu avant l'ajout de la clé « occupants »
+async function lireOccupants(service: ReturnType<typeof createClient>, bail: string, user: string) {
+  const { data: src } = await service.rpc('pilotage_lecture_source', { p_bail: bail })
+  if (!src?.url) return { status: 404, body: { error: 'Aucun bail déposé dans Rivage pour ce bail : déposez le bail signé dans Rivage.' } }
+  const r = await fetch(src.url)
+  if (!r.ok) return { status: 502, body: { error: 'Le lien du document Rivage a expiré : relancez la mise à jour depuis Rivage.' } }
+  const buf = await r.arrayBuffer()
+  if (buf.byteLength > MAX_OCTETS) return { status: 413, body: { error: 'Document trop volumineux (25 Mo au plus).' } }
+  const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!cleApi) return { status: 500, body: { error: 'Service IA non configuré' } }
+  const consigne = `Tu lis un bail pour une agence de gestion locative française. N'invente rien.\n${CONSIGNE_OCCUPANTS_CLE}\nRéponds uniquement par un objet JSON {"occupants": [...]}, sans texte autour.`
+  for (const m of MODELES_SIMPLES) {
+    const rep = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: m, max_tokens: 2000, system: consigne, messages: [{ role: 'user', content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64(buf) } },
+        { type: 'text', text: 'Relève les locataires du bail.' },
+      ] }] }),
+    })
+    if (rep.ok) {
+      const j = await rep.json()
+      const t = (j.content || []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('\n')
+      let res: { occupants?: unknown }
+      try { res = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)) } catch { return { status: 502, body: { error: 'Réponse de l’IA illisible, réessayez.' } } }
+      if (!Array.isArray(res.occupants)) return { status: 502, body: { error: 'L’IA n’a pas trouvé de locataire dans ce document.' } }
+      await service.rpc('pilotage_lecture_occupants', { p_bail: bail, p_occupants: res.occupants, p_source: `Rivage : ${src.libelle || src.upload_id}`, p_modele: m, p_user: user })
+      return { status: 200, body: { ok: true, occupants: res.occupants.length } }
+    }
+    console.error('[pilotage-lecture-bail] occupants', m, rep.status, (await rep.text()).slice(0, 300))
+    if (rep.status === 401) break
+  }
+  return { status: 502, body: { error: 'Le service IA n’a pas répondu' } }
 }
 
 // Vérification d'une pièce déposée dans Rivage (en cas de doute sur son nom) : l'IA dit si le document est bien la pièce attendue.
@@ -387,7 +431,7 @@ Deno.serve(async (req) => {
   const { data: moi } = await utilisateur.rpc('pilotage_moi')
   if (!moi) return rep(403, { error: 'Accès refusé' })
 
-  let corps: { bail_id?: string; mandat_id?: string; pdf?: string; nom?: string; upload_id?: string; piece?: string }
+  let corps: { bail_id?: string; mandat_id?: string; pdf?: string; nom?: string; upload_id?: string; piece?: string; occupants?: boolean }
   try { corps = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   const mandat = !!corps.mandat_id
   const id = corps.mandat_id || corps.bail_id
@@ -396,6 +440,10 @@ Deno.serve(async (req) => {
   if (!['direction', 'superviseur', 'gestionnaire'].includes(moi.role)) {
     const { data: permis } = await utilisateur.rpc('pilotage_peut_lire', { p_objet: mandat ? 'mandat' : 'bail', p_id: id })
     if (permis !== true) return rep(403, { error: 'Ce dossier ne vous est pas attribué' })
+  }
+  if (corps.occupants && !mandat) {
+    const o = await lireOccupants(service, id, u.user.id)
+    return rep(o.status, o.body)
   }
   if (corps.upload_id) {
     const v = await verifierPiece(service, id, corps.upload_id, corps.piece || 'pièce du dossier', mandat)
