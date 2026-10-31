@@ -1,7 +1,6 @@
 import { nature, Parties, Carte, texteRecherche, correspond, normaliser } from './cartes.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc, ecouterRivage } from './supabase.js';
-import { lireExportMonday } from './importMonday.js';
 import SuiviBaux, { EditeurMail, NATURES, DossierBail } from './SuiviBaux.jsx';
 import { preparer, MODELES } from './mails.js';
 import DossierMandat, { NATURES_MANDAT } from './SuiviMandat.jsx';
@@ -1320,7 +1319,6 @@ function Impayes() {
     <ImpayesMois peut={d.peut_saisir} apres={charger} />
     <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
       <div className="bascule">{[['cartes', 'Cartes'], ['tableau', 'Tableau']].map(([k, l]) => <button key={k} className={vue === k ? 'on' : ''} onClick={() => changerVue(k)}>{l}</button>)}</div>
-      {moi?.role === 'direction' && <ImportMonday membres={d.membres} apres={charger} />}
     </div>
     <div className="filtres-imp">
       {[['en_cours', 'En cours', actifs.length], ...[...GROUPES_IMP, ...autres].map(([g, titre, c]) => [g, g === 'Clôturé' ? 'Clôturés' : (GROUPES_IMP.find((x) => x[0] === g) ? g : titre), d.dossiers.filter((x) => x.groupe === g).length, c]), ['tous', 'Tous', d.dossiers.length]]
@@ -1335,11 +1333,11 @@ function Impayes() {
         <span>{(c.locataires || []).map((l) => l.nom).join(', ')} · {c.adresse} · impayé {euro(c.impaye)}{c.assureur_gli ? ' · GLI ' + c.assureur_gli : ''}</span>
         {d.peut_saisir && <button className="btn" onClick={() => ouvrir(c.bail_id)}>Ouvrir un dossier</button>}</div>)}
     </div>}
-    {d.dossiers.some((x) => x.ecart_garantie) && <details className="mini-alerte haute" style={{ marginBottom: 14 }}>
-      <summary style={{ cursor: 'pointer' }}><b>{d.dossiers.filter((x) => x.ecart_garantie).length} dossier(s) dont la garantie ne concorde pas avec la GLI du bail dans Rivage</b>
-        {' '}({d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé').length} en cours)</summary>
-      {d.dossiers.filter((x) => x.ecart_garantie).map((x) => <div key={x.id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-        <span>{parties(x).titre}{x.groupe === 'Clôturé' ? ' (clôturé)' : ''} · {x.ecart_garantie}</span>
+    {/* 31/10 : seuls les dossiers en cours ; un dossier clôturé garde son avertissement sur sa carte */}
+    {d.dossiers.some((x) => x.ecart_garantie && x.groupe !== 'Clôturé') && <details className="mini-alerte haute" style={{ marginBottom: 14 }}>
+      <summary style={{ cursor: 'pointer' }}><b>{d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé').length} dossier(s) en cours dont la garantie ne concorde pas avec la GLI du bail dans Rivage</b></summary>
+      {d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé').map((x) => <div key={x.id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+        <span>{parties(x).titre} · {x.ecart_garantie}</span>
         <button className="btn" onClick={() => setSel(x.id)}>Ouvrir</button></div>)}
     </details>}
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un dossier pour voir et modifier le suivi." detail={s && <DossierImpaye key={s.id} d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} />}>
@@ -1379,37 +1377,7 @@ function Impayes() {
   </>;
 }
 
-function ImportMonday({ membres, apres }) {
-  const [etat, setEtat] = useState(null);
-  const [lu, setLu] = useState(null);
-  const lire = async (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    setEtat({ msg: 'Lecture du fichier…' });
-    try { const r = await lireExportMonday(f, membres); setLu(r); setEtat(null); }
-    catch (x) { setEtat({ err: 'Fichier illisible : ' + x.message }); }
-    e.target.value = '';
-  };
-  const importer = async () => {
-    setEtat({ msg: 'Import en cours…' });
-    try {
-      const r1 = await rpc('pilotage_import_monday', { p_items: lu.items, p_notes: [] });
-      // Commentaires : messages puis réponses, par paquets
-      const tri = [...lu.notes].sort((a, b) => (a.parent_post_id ? 1 : 0) - (b.parent_post_id ? 1 : 0) || a.le.localeCompare(b.le));
-      let nc = 0;
-      for (let i = 0; i < tri.length; i += 150) { const r = await rpc('pilotage_import_monday', { p_items: [], p_notes: tri.slice(i, i + 150) }); nc += r.commentaires; }
-      setEtat({ ok: `${r1.dossiers} dossier(s) et ${nc} commentaire(s) importés. Les éléments déjà présents ont été ignorés.` });
-      setLu(null); apres();
-    } catch (x) { setEtat({ err: 'Import interrompu : ' + x.message }); }
-  };
-  return <div className="import-monday">
-    <label className="btn gris">Importer un export Monday (.xlsx)<input type="file" accept=".xlsx" onChange={lire} hidden /></label>
-    {lu && <span>{lu.items.length} dossiers, {lu.items.reduce((t, i) => t + i.actions.length, 0)} sous-éléments, {lu.notes.length} commentaires trouvés.
-      <button className="btn plein" style={{ marginLeft: 8 }} onClick={importer}>Importer</button> <button className="lien" onClick={() => setLu(null)}>Annuler</button></span>}
-    {etat?.msg && <span className="muted">{etat.msg}</span>}
-    {etat?.ok && <span style={{ color: 'var(--teal)' }}>{etat.ok}</span>}
-    {etat?.err && <span className="err">{etat.err}</span>}
-  </div>;
-}
+// 31/10 : bouton « Importer un export Monday (.xlsx) » retiré (Nicolas) ; la fonction pilotage_import_monday reste en base.
 
 function Commentaires({ id, peut, recharger }) {
   const [notes, setNotes] = useState(null);
