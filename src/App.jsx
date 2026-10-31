@@ -1300,8 +1300,10 @@ function Impayes() {
   if (err) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
   const ouvrir = async (bail) => { try { const id = await rpc('pilotage_impaye_ouvrir', { p_bail: bail, p_groupe: 'GLI ZELOK' }); await charger(); setSel(id); } catch (e) { setErr(e.message); } };
-  const q = recherche.trim().toLowerCase();
-  const filtre = (x) => !q || JSON.stringify([x.titre, x.bailleur_nom, x.locataire_nom, x.adresse, x.cause, x.observations, x.rivage?.locataires, x.rivage?.bailleurs, x.rivage?.adresse]).toLowerCase().includes(q);
+  // Recherche (31/10) : sans accents, tous les mots tapés ; elle porte sur tous les dossiers, clôturés compris, quel que soit l'onglet
+  const q = normaliser(recherche);
+  const filtre = (x) => !q || correspond(texteRecherche(x.titre, x.bailleur_nom, x.locataire_nom, x.adresse, x.cause, x.observations, x.garantie, x.organisme,
+    x.procedure, x.intervenants, x.responsable_prenom, x.groupe, x.rivage), q);
   const dossiers = d.dossiers.filter(filtre);
   const s = d.dossiers.find((x) => x.id === sel);
   const actifs = d.dossiers.filter((x) => x.groupe !== 'Clôturé');
@@ -1310,8 +1312,7 @@ function Impayes() {
   const autres = [...new Set(d.dossiers.map((x) => x.groupe).filter((g) => !groupesConnus.includes(g)))].map((g) => [g, g, '#666']);
   return <>
     <div className="entete"><div><h1>Suivi des impayés</h1>
-      <p className="sub">Un dossier par impayé : garantie, prise en charge, procédure, indemnisation et remboursements, avec le fil des échanges.</p></div>
-      <input className="recherche" placeholder="Rechercher un locataire, un bailleur, une adresse…" value={recherche} onChange={(e) => setRecherche(e.target.value)} /></div>
+      <p className="sub">Un dossier par impayé : garantie, prise en charge, procédure, indemnisation et remboursements, avec le fil des échanges.</p></div></div>
     <Tuiles items={[[actifs.length, 'Dossiers en cours'], [euro(somme('montant_impaye')), `Montant saisi · ${actifs.filter((x) => x.montant_impaye != null).length} dossier(s) sur ${actifs.length} renseigné(s)`],
       [actifs.filter((x) => !x.declaration_le).length, 'Sans date de déclaration', true],
       [actifs.filter((x) => x.audience_le && x.audience_le >= auj()).length, 'Audiences à venir'],
@@ -1319,6 +1320,11 @@ function Impayes() {
     <ImpayesMois peut={d.peut_saisir} apres={charger} />
     <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
       <div className="bascule">{[['cartes', 'Cartes'], ['tableau', 'Tableau']].map(([k, l]) => <button key={k} className={vue === k ? 'on' : ''} onClick={() => changerVue(k)}>{l}</button>)}</div>
+      <div className="row" style={{ gap: 8, flex: '1 1 280px', justifyContent: 'flex-end' }}>
+        {q && <span className="muted" style={{ fontSize: 13 }}>{dossiers.length} dossier{dossiers.length > 1 ? 's' : ''} trouvé{dossiers.length > 1 ? 's' : ''}, tous onglets</span>}
+        <input className="recherche" type="search" style={{ flex: '1 1 260px', maxWidth: 460 }} placeholder="Rechercher : locataire, bailleur, adresse, garantie, cause, personne…"
+          value={recherche} onChange={(e) => setRecherche(e.target.value)} aria-label="Rechercher un dossier d’impayé" />
+      </div>
     </div>
     <div className="filtres-imp">
       {[['en_cours', 'En cours', actifs.length], ...[...GROUPES_IMP, ...autres].map(([g, titre, c]) => [g, g === 'Clôturé' ? 'Clôturés' : (GROUPES_IMP.find((x) => x[0] === g) ? g : titre), d.dossiers.filter((x) => x.groupe === g).length, c]), ['tous', 'Tous', d.dossiers.length]]
@@ -1342,10 +1348,10 @@ function Impayes() {
     </details>}
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un dossier pour voir et modifier le suivi." detail={s && <DossierImpaye key={s.id} d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} />}>
       {[...GROUPES_IMP, ...autres].map(([g, titre, couleur]) => {
-        if (section === 'en_cours' ? g === 'Clôturé' : section !== 'tous' && section !== g) return null;
+        if (!q && (section === 'en_cours' ? g === 'Clôturé' : section !== 'tous' && section !== g)) return null;
         const items = dossiers.filter((x) => x.groupe === g);
         if (!items.length && (q || section !== 'tous')) return null;
-        const ouvert = section === g ? true : (ouverts[g] ?? items.length > 0);
+        const ouvert = q || section === g ? true : (ouverts[g] ?? items.length > 0);
         return <section key={g} className="groupe-imp">
           <button className="groupe-tete" style={{ color: couleur }} onClick={() => setOuverts({ ...ouverts, [g]: !ouvert })}>
             {ouvert ? '▾' : '▸'} {titre} <span className="muted">{items.length} dossier{items.length > 1 ? 's' : ''}</span></button>
