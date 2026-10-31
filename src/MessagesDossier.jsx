@@ -7,6 +7,9 @@
 // « État des lieux d'entrée ». Les champs date à saisir s'ouvrent en calendrier ; ce qui est saisi apparaît aussitôt dans le texte.
 // La mention sur les données personnelles (RGPD) est ajoutée au bas de chaque mail préparé (mails.js, lienGmail).
 // 110 : identité des locataires lue dans le bail (déclaration aux impôts), affichée sur les étapes d'entrée et de sortie, avec la lecture IA.
+// 31/10 : ouvert depuis une alerte de Ma journée ou depuis le circuit de validation, on ne propose que les messages de l'étape liée
+// au type d'alerte (prop etapes) ; les messages déjà préparés des autres étapes restent visibles, en historique seulement.
+// Sans prop etapes (Baux et obligations, Mandats, Messages à envoyer) : toutes les étapes, comme avant.
 import React, { useEffect, useState } from 'react';
 import { rpc, supabase } from './supabase.js';
 import { lienGmail, smsFactures, MENTION_RGPD } from './mails.js';
@@ -18,8 +21,14 @@ const libelleChamp = (c) => c.replace(/[{}]/g, '').replace(/_/g, ' ');
 let roleCache = null;
 const monRole = () => (roleCache = roleCache || rpc('pilotage_moi').then((x) => x?.role || null).catch(() => { roleCache = null; return null; }));
 const GESTION = ['direction', 'superviseur', 'gestionnaire', 'comptable'];
+// Type d'alerte (règle) → étape de messages proposée depuis l'alerte. Une alerte absente de cette liste ne propose aucun message.
+export const ETAPE_DES_ALERTES = {
+  bail_a_signer: 'nouveau_bail', edl_entree_a_organiser: 'edl_entree', conge_recu: 'conge',
+  edl_sortie_a_commander: 'edl_sortie', edl_sortie_a_confirmer: 'edl_sortie',
+};
+export const etapesDesAlertes = (regles) => [...new Set((regles || []).map((r) => ETAPE_DES_ALERTES[r]).filter(Boolean))];
 
-export default function MessagesDossier({ objet, id, apres, titre = true }) {
+export default function MessagesDossier({ objet, id, apres, titre = true, etapes }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [etape, setEtape] = useState(null);
@@ -27,15 +36,23 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState(null);
   const charger = () => rpc('pilotage_messages_dossier', { p_objet: objet, p_id: id }).then((x) => {
-    setD(x); setEtape((e) => e || (x.actives || [])[0] || null);
+    setD(x); setEtape((e) => e || premiere(x));
   }).catch((e) => setErr(e.message));
+  // Étapes proposées : toutes, ou seulement celles de l'alerte ; les autres ne gardent que leurs messages déjà faits (historique)
+  const proposee = (cle) => !etapes || etapes.includes(cle);
+  const visible = (x, cle) => proposee(cle) || (x.messages || []).some((m) => m.categorie === cle && m.fait);
+  const premiere = (x) => (x.actives || []).find(proposee) || (etapes || []).find((k) => visible(x, k))
+    || (x.categories || []).map((k) => k.cle).find((k) => visible(x, k)) || null;
   useEffect(() => { setD(null); setEtape(null); setOuvert(null); charger(); }, [objet, id]);
   useEffect(() => { supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || '')); monRole().then(setRole); }, []);
   if (err && !d) return <div className="err">{err}</div>;
   if (!d) return null;
   const actives = d.actives || [];
-  const restants = (cle) => d.messages.filter((m) => m.categorie === cle && !m.fait && !m.attente).length;
-  const liste = d.messages.filter((m) => m.categorie === etape);
+  const categories = d.categories.filter((k) => visible(d, k.cle));
+  if (!categories.length) return null;
+  const historique = etape && !proposee(etape);
+  const restants = (cle) => (proposee(cle) ? d.messages.filter((m) => m.categorie === cle && !m.fait && !m.attente).length : 0);
+  const liste = d.messages.filter((m) => m.categorie === etape && (!historique || m.fait));
   const noter = async (m, moyen, x) => {
     setErr('');
     try {
@@ -47,7 +64,7 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
     <div style={{ marginTop: 18 }}>
       {titre && <h3 style={{ margin: '0 0 6px' }}>Messages {objet === 'mandat' ? 'au bailleur' : 'au locataire et au bailleur'}</h3>}
       <div className="row" role="tablist" style={{ marginBottom: 8 }}>
-        {d.categories.map((k) => (
+        {categories.map((k) => (
           <button key={k.cle} role="tab" aria-selected={etape === k.cle} className={'chip' + (etape === k.cle ? ' on' : '')} onClick={() => { setEtape(k.cle); setOuvert(null); }}
             style={k.active ? undefined : { opacity: 0.6 }}>
             {k.libelle}{k.active && restants(k.cle) > 0 && <span className="n">{restants(k.cle)}</span>}
@@ -55,10 +72,11 @@ export default function MessagesDossier({ objet, id, apres, titre = true }) {
         ))}
       </div>
       {!etape && <p className="muted" style={{ fontSize: 13 }}>Aucune étape en cours pour ce dossier : choisissez une étape pour voir ses messages.</p>}
-      {etape && !actives.includes(etape) && <p className="muted" style={{ fontSize: 13 }}>Cette étape n’est pas en cours pour ce dossier ; les messages restent utilisables.</p>}
+      {historique && <p className="muted" style={{ fontSize: 13 }}>Messages déjà préparés pour cette étape (historique).</p>}
+      {etape && !historique && !actives.includes(etape) && <p className="muted" style={{ fontSize: 13 }}>Cette étape n’est pas en cours pour ce dossier ; les messages restent utilisables.</p>}
       {err && <div className="err">{err}</div>}
-      {d.identite && ['edl_entree', 'edl_sortie'].includes(etape) && <Identite bail={id} x={d.identite} apres={async () => { await charger(); apres && apres(); }} />}
-      {d.edl_entree && ['nouveau_bail', 'edl_entree'].includes(etape) && <EdlEntree bail={id} e={d.edl_entree} apres={async () => { await charger(); apres && apres(); }} />}
+      {d.identite && !historique && ['edl_entree', 'edl_sortie'].includes(etape) && <Identite bail={id} x={d.identite} apres={async () => { await charger(); apres && apres(); }} />}
+      {d.edl_entree && !historique && ['nouveau_bail', 'edl_entree'].includes(etape) && <EdlEntree bail={id} e={d.edl_entree} apres={async () => { await charger(); apres && apres(); }} />}
       <div className="stack" style={{ gap: 6 }}>
         {liste.map((m, i) => {
           const cle = m.code + '|' + i;

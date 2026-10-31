@@ -8,7 +8,7 @@ import DossierMandat, { NATURES_MANDAT } from './SuiviMandat.jsx';
 import Commissions from './Commissions.jsx';
 import MesDossiers, { RecapRemuneration } from './Circuit.jsx';
 import ModelesMessages from './ModelesMessages.jsx';
-import MessagesDossier, { MessagesAEnvoyer } from './MessagesDossier.jsx';
+import MessagesDossier, { MessagesAEnvoyer, etapesDesAlertes } from './MessagesDossier.jsx';
 import Fiche from './Fiche.jsx';
 import FicheConge from './FicheConge.jsx';
 import ALouer from './ALouer.jsx';
@@ -262,8 +262,9 @@ function Journee({ moi }) {
                   ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
                   : d.bail_id
                   ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse, bailleur: d.bailleur, mandat: d.mandat }}
-                      peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger} />
-                  : <DossierMandat m={{ id: d.mandat_id }} apres={charger} />}
+                      peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger}
+                      etapesMessages={etapesDesAlertes(d.alertes.map((a) => a.regle))} />
+                  : <DossierMandat m={{ id: d.mandat_id }} apres={charger} etapesMessages={etapesDesAlertes(d.alertes.map((a) => a.regle))} />}
               </Fiche>}
             </article>
           ))}

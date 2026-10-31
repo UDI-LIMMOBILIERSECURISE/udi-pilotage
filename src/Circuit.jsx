@@ -52,7 +52,7 @@ export default function MesDossiers({ moi }) {
     </>}
     {ouvert && <section className="panneau" style={{ marginTop: 12 }}>
       <button className="fermer" onClick={() => setSel(null)} aria-label="Fermer le dossier">×</button>
-      <Dossier x={ouvert} moi={moi} apres={charger} />
+      <Dossier x={ouvert} moi={moi} apres={charger} validation={gestion} />
     </section>}
   </section>;
 }
@@ -137,11 +137,14 @@ function DossierRemu({ x, apres, setErr }) {
   </details>;
 }
 
-// Le bandeau du circuit est affiché par le dossier lui-même (mandat ou bail)
-function Dossier({ x, moi, apres }) {
+// Le bandeau du circuit est affiché par le dossier lui-même (mandat ou bail).
+// Ouvert par la gestion (validation, consultation) : aucun message à proposer, seulement l'historique des messages déjà
+// préparés (31/10). Ouvert par le commercial dans « Mes dossiers » : tous ses messages, comme avant.
+function Dossier({ x, moi, apres, validation }) {
+  const etapes = validation ? [] : undefined;
   return x.objet === 'mandat'
-    ? <DossierMandat m={{ id: x.id }} apres={apres} />
-    : <DossierBail b={x.ligne} peut moi={moi} apres={apres} />;
+    ? <DossierMandat m={{ id: x.id }} apres={apres} etapesMessages={etapes} />
+    : <DossierBail b={x.ligne} peut moi={moi} apres={apres} etapesMessages={etapes} />;
 }
 
 // ----- Bandeau du circuit, actions et fil de discussion (affiché en tête du dossier) -----
