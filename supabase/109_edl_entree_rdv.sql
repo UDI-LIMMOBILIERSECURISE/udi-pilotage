@@ -12,7 +12,7 @@
 -- Fonctions modifiées : messages_contexte, pilotage_messages_dossier, etapes_detections (remplacements ciblés, contrôlés).
 -- Nouvelles : edl_entree_le, pilotage_edl_entree_maj. Aucune donnée existante modifiée.
 -- Retour arrière de l'alerte : update pilotage.regles set actif = false where cle = 'edl_entree_a_organiser'.
--- Un seul bloc.
+-- Un seul bloc. (v2 du 31/10 : fins de ligne Windows de l'éditeur Supabase neutralisées dans les textes recherchés)
 
 begin;
 
@@ -85,6 +85,7 @@ begin
   if position('edl_entree' in d) = 0 then
     a := $r$attente := case when coalesce(m.objet, '') || m.texte like '%{date_edl}%' and (c->>'date_edl' is null or c->>'heure_edl' is null)
                     then 'À préparer quand la date (Rivage) et l''heure de l''état des lieux seront connues : heure à saisir dans la fiche du congé.' end;$r$;
+    a := replace(a, E'\r\n', E'\n');  -- l'éditeur Supabase peut envoyer des fins de ligne Windows
     if position(a in d) = 0 then raise exception 'pilotage_messages_dossier : condition d''attente introuvable'; end if;
     d := replace(d, a, $r$attente := case when (coalesce(m.objet, '') || m.texte like '%{date_edl}%' and c->>'date_edl' is null)
                          or (coalesce(m.objet, '') || m.texte like '%{heure_edl}%' and c->>'heure_edl' is null)
@@ -109,6 +110,7 @@ begin
   if position('edl_entree_a_organiser' in d) = 0 then
     a := $r$    from n where n.debut <= current_date
 $function$$r$;
+    a := replace(a, E'\r\n', E'\n');
     if position(a in d) = 0 then raise exception 'etapes_detections : fin de requête introuvable'; end if;
     b := $r$    from n where n.debut <= current_date
   union all
@@ -131,6 +133,7 @@ $function$$r$;
               and exists (select 1 from pilotage.messages_journal j where j.objet = 'bail' and j.objet_id = b.id and j.code = 'ee_locataire_email'
                             and j.le >= coalesce(e.maj_le, '-infinity'::timestamptz)))
 $function$$r$;
+    b := replace(b, E'\r\n', E'\n');
     d := replace(d, a, b);
     execute d;
   end if;
