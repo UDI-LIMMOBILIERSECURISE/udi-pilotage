@@ -2,10 +2,11 @@
 -- Avant : dès que Rivage donnait un type (vide, meublé, commercial...), le point « Type de bail » du contrôle d'entrée était conforme,
 -- même si le bail lu par l'IA disait autre chose (contraire à la règle : une donnée Rivage n'est conforme que si elle concorde avec le bail).
 -- Désormais, quand le type vient de Rivage (pas de type saisi dans la fiche) et que le bail a été lu :
---   - même famille (vide / meublé / commercial) : conforme ;
+--   - même famille (vide / meublé / commercial / dérogatoire / professionnel) : conforme ;
 --   - famille différente : anomalie « Rivage : meublé · le bail indique : vide », à corriger dans Rivage ou à trancher avec « Corriger »
 --     (type saisi dans la fiche) ; tant qu'elle reste, elle compte dans les points du commercial (alerte « dossier à compléter »).
---   Étudiant et mobilité comptent comme meublé ; dérogatoire et professionnel comme commercial ; mixte et autre ne sont pas comparés.
+--   Étudiant et mobilité comptent comme meublé ; commercial, dérogatoire et professionnel sont trois types distincts (règle de Nicolas,
+--   02/11 : régimes différents) ; mixte et autre ne sont pas comparés.
 --   Bail pas encore lu : inchangé (Rivage fait foi en attendant).
 -- Écarts réels au 02/11 : bail 510 (TEBLAOUI) et 513 : Rivage « meublé », bail « non meublé, 3 ans » (extrait lu page 2).
 -- Conséquence d'un mauvais type dans Rivage : plafond du dépôt, durée et échéance du bail, délais de congé calculés à tort.
@@ -18,7 +19,7 @@ language sql immutable as $function$
   select case lower(coalesce(p_type, ''))
     when 'vide' then 'vide'
     when 'meuble' then 'meuble' when 'etudiant' then 'meuble' when 'mobilite' then 'meuble'
-    when 'commercial' then 'commercial' when 'derogatoire' then 'commercial' when 'professionnel' then 'commercial' end
+    when 'commercial' then 'commercial' when 'derogatoire' then 'derogatoire' when 'professionnel' then 'professionnel' end
 $function$;
 
 do $do$
@@ -29,13 +30,14 @@ begin
   if position(ancien in d) = 0 then raise exception '119 : ligne du type de bail introuvable dans controle_bail (fonction modifiée depuis)'; end if;
   if position('119 : type Rivage' in d) > 0 then raise notice '119 déjà passé'; return; end if;
   nouveau := ancien || $r$
-      -- 119 : type Rivage comparé au type lu dans le bail (famille vide / meublé / commercial)
+      -- 119 : type Rivage comparé au type lu dans le bail (vide / meublé / commercial / dérogatoire / professionnel)
       if q.ref = 'type_bail' and f.type_bail is null and pilotage.type_bail_rivage(p_bail) is not null
          and pilotage.famille_type_bail(valeur_ia->>'code') is not null
          and pilotage.famille_type_bail(valeur_ia->>'code') <> pilotage.famille_type_bail(pilotage.type_bail_rivage(p_bail)) then
         auto := 'anomalie';
         detail := detail || ' · le bail indique : ' || case pilotage.famille_type_bail(valeur_ia->>'code')
-          when 'vide' then 'vide (non meublé)' when 'meuble' then 'meublé' else 'commercial' end
+          when 'vide' then 'vide (non meublé)' when 'meuble' then 'meublé' when 'derogatoire' then 'dérogatoire'
+          when 'professionnel' then 'professionnel' else 'commercial' end
           || coalesce(' (page ' || (valeur_ia->>'page') || ')', '');
       end if;$r$;
   execute replace(d, ancien, nouveau);
