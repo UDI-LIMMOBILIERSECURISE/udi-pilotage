@@ -10,9 +10,32 @@
 --   Bail pas encore lu : inchangé (Rivage fait foi en attendant).
 -- Écarts réels au 02/11 : bail 510 (TEBLAOUI) et 513 : Rivage « meublé », bail « non meublé, 3 ans » (extrait lu page 2).
 -- Conséquence d'un mauvais type dans Rivage : plafond du dépôt, durée et échéance du bail, délais de congé calculés à tort.
+-- Types de Rivage (liste relevée dans le formulaire « Modifier la location » le 02/11, 14 valeurs) désormais tous traduits :
+--   unfurnished → vide ; furnished → meublé ; student → étudiant ; mobility → mobilité ; commercial → commercial (dérogatoire si
+--   36 mois ou moins : 6 baux saisis « commercial » au 02/11, à recoder « Bail dérogatoire » dans Rivage) ; short_term → dérogatoire ;
+--   professionnal → professionnel ; civil_code, parking, secondary_residence, seasonal, rural, law_48, other → autre (non comparés).
+--   Avant, « meublé » de 9 mois ou de 1 à 10 mois était déduit étudiant ou mobilité : Rivage a ses propres valeurs, la déduction est
+--   retirée (aucun bail concerné au 02/11).
 -- Modification ciblée de pilotage.controle_bail (remplacement contrôlé d'une ligne). Un seul bloc.
 
 begin;
+
+-- Traduction de tous les types de contrat de location de Rivage
+create or replace function pilotage.type_bail_rivage(p_bail text) returns text
+language sql stable security definer set search_path = pilotage, public as $function$
+  select case coalesce(o.data->'edit_attributes'->>'nature', (select s.data->'lease'->'data'->'attributes'->>'nature' from pilotage.baux_situation s where s.bail_id = p_bail))
+    when 'unfurnished' then 'vide'
+    when 'furnished' then 'meuble'
+    when 'student' then 'etudiant'
+    when 'mobility' then 'mobilite'
+    when 'commercial' then case when nullif(o.data->>'duration_in_months', '')::int between 1 and 36 then 'derogatoire' else 'commercial' end
+    when 'short_term' then 'derogatoire'
+    when 'professionnal' then 'professionnel'
+    when 'professional' then 'professionnel'
+    when 'civil_code' then 'autre' when 'parking' then 'autre' when 'secondary_residence' then 'autre' when 'seasonal' then 'autre'
+    when 'rural' then 'autre' when 'law_48' then 'autre' when 'other' then 'autre' end
+  from pilotage.objets o where o.type = 'LeasingContract' and o.id = p_bail
+$function$;
 
 create or replace function pilotage.famille_type_bail(p_type text) returns text
 language sql immutable as $function$
