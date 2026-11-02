@@ -23,7 +23,7 @@ export const NATURES = {
 const PERIODE = { assurance: 12, entretien: 12, compteur: 6, tsb: 12, surprime: 12, charges_regul: 12, etat_travaux: 36, tertiaire: 12, destination: 12, dg_ajust: 12 };
 const ETATS = {
   a_venir: 'À venir', a_informer: 'Bailleur à informer', attente_bailleur: 'Réponse du bailleur attendue', reconduit: 'Reconduit (sans réponse)', decide: 'Décision prise',
-  conge_a_delivrer: 'Congé à délivrer', conge_en_cours: 'Congé en préparation', conge_depose: 'Congé déposé dans Rivage, à enregistrer', conge_delivre: 'Congé délivré', hors_delai: 'Délai dépassé', fin_auto: 'Fin automatique', info: 'Contrat à vérifier',
+  conge_a_delivrer: 'Congé à délivrer', conge_en_cours: 'Congé en préparation', conge_depose: 'Congé déposé dans Rivage, à enregistrer', conge_delivre: 'Congé délivré', hors_delai: 'Délai dépassé', fin_auto: 'Fin automatique', info: 'Contrat à vérifier', maintien: 'Maintien dans les lieux (loi de 1948)',
   derogatoire_terme: 'Opposition urgente', derogatoire_depasse: 'Dérogatoire dépassé', incomplet: 'Fiche incomplète',
 };
 // Catégorie Rivage où déposer le justificatif d'un suivi : le dépôt fait passer le suivi à l'échéance suivante (027)
