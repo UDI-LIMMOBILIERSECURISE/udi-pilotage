@@ -8,9 +8,12 @@ const plusJours = (x, n) => { if (!x) return null; const t = new Date(x); t.setD
 const plusMois = (x, n) => { if (!x) return null; const t = new Date(x); t.setMonth(t.getMonth() + n); return t.toISOString().slice(0, 10); };
 const eur = (n) => (n == null ? '…' : Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €');
 
+// 120 : les 14 types de contrat de Rivage (+ mixte, saisi dans la fiche)
 export const TYPES_BAIL = {
   vide: 'Habitation vide', meuble: 'Habitation meublée', etudiant: 'Meublé étudiant', mobilite: 'Bail mobilité', mixte: 'Mixte habitation et professionnel',
-  commercial: 'Commercial', derogatoire: 'Dérogatoire (courte durée)', professionnel: 'Professionnel', autre: 'Autre (parking, garage...)',
+  residence_secondaire: 'Résidence secondaire', saisonnier: 'Location saisonnière', loi_1948: 'Loi de 1948',
+  commercial: 'Commercial', derogatoire: 'Dérogatoire (courte durée)', professionnel: 'Professionnel', rural: 'Bail rural',
+  code_civil: 'Code civil', parking: 'Parking, box, garage', autre: 'Autre',
 };
 
 export const DECISIONS = {
