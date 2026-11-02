@@ -1,6 +1,8 @@
 // Lecture d'un bail ou d'un mandat de gestion par l'IA : propose une réponse à chaque question du contrôle d'entrée, avec la page et l'extrait.
 // La proposition n'est jamais validée seule : la gestionnaire confirme ou corrige dans le questionnaire.
-// Deux sources : le dernier bail déposé dans Rivage pour ce bail, ou un PDF envoyé depuis le poste (base64).
+// Deux sources : les documents de la section bail dans Rivage pour ce bail (117 : bail, annexes, renouvellement, lus ensemble ;
+// jamais un document rattaché à un autre bail), ou un PDF envoyé depuis le poste (base64).
+// 117 : l'IA dit si les documents concernent bien les locataires du bail dans Rivage ; sinon rien n'est enregistré.
 // Appel par un membre (gestionnaire, superviseur, direction) ou par la tâche planifiée (en-tête x-pilotage-cron) :
 // dans ce cas, lit les baux commerciaux qui ont un bail déposé dans Rivage et pas encore de lecture (3 au plus par passage).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
@@ -13,6 +15,8 @@ const MODELES = [Deno.env.get('PILOTAGE_MODELE_LECTURE') || 'claude-sonnet-5-5',
 const MODELE_EXPERT = Deno.env.get('PILOTAGE_MODELE_EXPERT') || 'claude-opus-5-5'
 const MODELES_SIMPLES = MODELES
 const MAX_OCTETS = 25 * 1024 * 1024
+// 117 : plusieurs documents lus ensemble, taille totale limitée (la requête à l'IA est plafonnée à 32 Mo en base64)
+const MAX_TOTAL = 20 * 1024 * 1024
 
 function cors(req: Request) {
   const o = req.headers.get('origin') || ''
@@ -50,6 +54,10 @@ Règles strictes :
 - Ajoute une clé "refacturations" : liste des sommes que le bail permet de refacturer au preneur (taxes, assurances, honoraires, travaux...), chacune {"nature": "...", "article": "...", "page": n}.
 - Ajoute une clé "anomalies" : liste de phrases courtes signalant les incohérences ou blancs du document (montant non rempli, dates contradictoires, document qui n'est pas un bail...).
 ${CONSIGNE_OCCUPANTS_CLE}
+- Plusieurs documents peuvent t'être fournis (bail, annexes, renouvellement, ancien bail). Réponds pour le bail en cours, en t'aidant des autres documents.
+  Pour "page", donne la page dans le document qui fonde la réponse et ajoute "document" : le titre de ce document.
+- Ajoute une clé "locataires_concordent" : true si le bail fourni est conclu avec au moins un des locataires indiqués par Rivage (même nom de famille, à l'orthographe près),
+  false s'il est conclu avec d'autres personnes (par exemple un ancien locataire du logement), null si Rivage n'indique pas de locataire.
 Réponds uniquement par un objet JSON valide, sans texte autour.`
 
 const SYSTEME_MANDAT = `Tu lis un mandat de gestion locative (loi Hoguet) pour une agence de gestion française.
@@ -81,20 +89,44 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
   if (eq || !questions?.length) return { status: 404, body: { error: mandat ? 'Mandat introuvable' : 'Bail introuvable' } }
 
   let source = nom ? `PDF envoyé : ${nom}` : ''
-  if (!pdf) {
-    const { data: src } = mandat
-      ? await service.rpc('pilotage_mandat_source', { p_mandat: bail })
-      : await service.rpc('pilotage_lecture_source', { p_bail: bail })
-    if (!src?.url) return { status: 404, body: { error: mandat
-      ? 'Aucun mandat de gestion repéré dans Rivage (document dont le nom contient « mandat de gestion »). Déposez-le dans Rivage ou lisez un PDF depuis votre poste.'
-      : 'Aucun bail déposé dans Rivage pour ce bail. Déposez-le dans Rivage ou lisez un PDF depuis votre poste.' } }
+  // Documents à lire : { titre, data } ; plusieurs pour un bail lu depuis Rivage (117)
+  let docs: { titre: string; data: string }[] = []
+  const omis: string[] = []
+  let locataires: string | null = null
+  if (!pdf && !mandat) {
+    const { data: srcs, error: es } = await service.rpc('pilotage_lecture_sources', { p_bail: bail })
+    locataires = srcs?.locataires || null
+    let liste = (srcs?.documents || []) as { upload_id: string; libelle: string | null; url: string }[]
+    // Script 117 pas encore passé : ancien choix d'un seul document
+    if (es) { const { data: src } = await service.rpc('pilotage_lecture_source', { p_bail: bail }); liste = src?.url ? [src] : [] }
+    if (!liste.length) return { status: 404, body: { error: 'Aucun bail déposé dans Rivage pour ce bail. Déposez-le dans Rivage ou lisez un PDF depuis votre poste.' } }
+    let total = 0
+    for (const d of liste) {
+      const titre = d.libelle || d.upload_id
+      const r = await fetch(d.url)
+      if (!r.ok) { omis.push(`${titre} (lien expiré)`); continue }
+      const buf = await r.arrayBuffer()
+      if (total + buf.byteLength > MAX_TOTAL) { omis.push(`${titre} (taille)`); continue }
+      total += buf.byteLength
+      docs.push({ titre, data: b64(buf) })
+    }
+    if (!docs.length) return { status: omis.some((x) => x.endsWith('(taille)')) ? 413 : 502, body: { error: omis.some((x) => x.endsWith('(taille)'))
+      ? 'Document trop volumineux pour la lecture (20 Mo au plus).'
+      : 'Le lien du document Rivage a expiré ou ne répond pas : relancez la mise à jour depuis Rivage, ou lisez le PDF depuis votre poste.' } }
+    source = `Rivage : ${docs.map((d) => d.titre).join(' + ')}`
+  } else if (!pdf) {
+    const { data: src } = await service.rpc('pilotage_mandat_source', { p_mandat: bail })
+    if (!src?.url) return { status: 404, body: { error: 'Aucun mandat de gestion repéré dans Rivage (document dont le nom contient « mandat de gestion »). Déposez-le dans Rivage ou lisez un PDF depuis votre poste.' } }
     const r = await fetch(src.url)
     if (!r.ok) return { status: 502, body: { error: 'Le lien du document Rivage a expiré ou ne répond pas : relancez la mise à jour depuis Rivage, ou lisez le PDF depuis votre poste.' } }
     const buf = await r.arrayBuffer()
     if (buf.byteLength > MAX_OCTETS) return { status: 413, body: { error: 'Document trop volumineux pour la lecture (25 Mo au plus).' } }
-    pdf = b64(buf); source = `Rivage : ${src.libelle || src.upload_id}`
+    docs = [{ titre: src.libelle || src.upload_id, data: b64(buf) }]; source = `Rivage : ${src.libelle || src.upload_id}`
+  } else {
+    if (pdf.length * 0.75 > MAX_OCTETS) return { status: 413, body: { error: 'Document trop volumineux pour la lecture (25 Mo au plus).' } }
+    docs = [{ titre: nom || 'PDF envoyé', data: pdf }]
+    if (!mandat) { const { data: srcs } = await service.rpc('pilotage_lecture_sources', { p_bail: bail }); locataires = srcs?.locataires || null }
   }
-  if (pdf.length * 0.75 > MAX_OCTETS) return { status: 413, body: { error: 'Document trop volumineux pour la lecture (25 Mo au plus).' } }
 
   const cleApi = Deno.env.get('ANTHROPIC_API_KEY')
   if (!cleApi) return { status: 500, body: { error: 'Service IA non configuré' } }
@@ -102,31 +134,47 @@ async function lire(service: ReturnType<typeof createClient>, bail: string, pdf:
 
   let texte = '', modele = ''
   const expert = mandat || questions.some((q: { cle: string }) => q.cle.startsWith('c_'))
-  for (const m of expert ? [MODELE_EXPERT, ...MODELES] : MODELES) {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: m, max_tokens: 8000, system: mandat ? SYSTEME_MANDAT : SYSTEME, ...(m.includes('haiku') ? { temperature: 0 } : {}),
-        messages: [{ role: 'user', content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } },
-          { type: 'text', text: `Questions :\n${liste}` },
-        ] }],
-      }),
-    })
-    if (r.ok) {
-      const j = await r.json()
-      texte = (j.content || []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('\n')
-      modele = m
-      break
+  const appeler = async (lot: { titre: string; data: string }[]) => {
+    let dernier = { status: 0, msg: '' }
+    for (const m of expert ? [MODELE_EXPERT, ...MODELES] : MODELES) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: m, max_tokens: 8000, system: mandat ? SYSTEME_MANDAT : SYSTEME, ...(m.includes('haiku') ? { temperature: 0 } : {}),
+          messages: [{ role: 'user', content: [
+            ...lot.map((d) => ({ type: 'document', title: d.titre.slice(0, 200), source: { type: 'base64', media_type: 'application/pdf', data: d.data } })),
+            { type: 'text', text: `${mandat ? '' : `Locataires du bail selon Rivage : ${locataires || 'non indiqués'}.\n`}Questions :\n${liste}` },
+          ] }],
+        }),
+      })
+      if (r.ok) {
+        const j = await r.json()
+        texte = (j.content || []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('\n')
+        modele = m
+        return dernier
+      }
+      dernier = { status: r.status, msg: (await r.text()).slice(0, 300) }
+      console.error('[pilotage-lecture-bail]', m, lot.length, 'document(s)', dernier.status, dernier.msg)
+      if (r.status === 401 || dernier.msg.includes('credit balance')) break  // clé refusée ou crédit épuisé : inutile d'essayer un autre modèle
     }
-    console.error('[pilotage-lecture-bail]', m, r.status, (await r.text()).slice(0, 300))
-    if (r.status === 401) break  // clé refusée : inutile d'essayer un autre modèle
+    return dernier
+  }
+  const d1 = await appeler(docs)
+  // Plusieurs documents refusés (taille, nombre de pages) : on relit le premier seul
+  if (!texte && docs.length > 1 && d1.status === 400 && !d1.msg.includes('credit balance')) {
+    omis.push(...docs.slice(1).map((d) => `${d.titre} (lecture groupée refusée)`))
+    docs = docs.slice(0, 1); source = `Rivage : ${docs[0].titre}`
+    await appeler(docs)
   }
   if (!texte) return { status: 502, body: { error: 'Le service IA n’a pas répondu' } }
   const debut = texte.indexOf('{'), fin = texte.lastIndexOf('}')
   let resultat: Record<string, unknown>
   try { resultat = JSON.parse(texte.slice(debut, fin + 1)) } catch { return { status: 502, body: { error: 'Réponse de l’IA illisible, réessayez.' } } }
+  // 117 : bail d'autres locataires (ancien locataire du logement) : rien n'est enregistré
+  if (!mandat && resultat.locataires_concordent === false) return { status: 422, body: { error:
+    `Le document lu (${docs.map((d) => d.titre).join(' + ')}) ne concerne pas les locataires du bail dans Rivage (${locataires || '?'}) : déposez le bon bail dans Rivage, ou lisez le PDF depuis votre poste.` } }
+  if (omis.length) resultat.anomalies = [...(Array.isArray(resultat.anomalies) ? resultat.anomalies : []), `Document(s) de la section bail non lu(s) : ${omis.join(', ')}`]
 
   await service.rpc('pilotage_lecture_ecrire', { p_bail: bail, p_source: source, p_modele: modele, p_resultat: resultat, p_user: user })
   return { status: 200, body: { ok: true, modele, source } }
