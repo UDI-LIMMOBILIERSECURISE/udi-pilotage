@@ -14,7 +14,8 @@ export const ETAT = { a_finaliser: 'À finaliser', en_attente: 'En attente de va
 const COULEUR = { a_finaliser: 'haute', en_attente: 'normale', valide: 'normale', non_soumis: 'normale' };
 
 // ----- Liste « Mes dossiers » en tête de la journée -----
-export default function MesDossiers({ moi }) {
+// pour : membre dont on regarde la journée (124) ; la liste est celle de la direction, filtrée comme le serveur la filtre pour ce membre
+export default function MesDossiers({ moi, pour }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [sel, setSel] = useState(null);
@@ -22,10 +23,11 @@ export default function MesDossiers({ moi }) {
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return null;
-  const liste = d.dossiers || [];
+  const ROLES_GESTION = ['direction', 'superviseur', 'gestionnaire', 'comptable'];
+  const liste = (d.dossiers || []).filter((x) => !pour || ROLES_GESTION.includes(pour.role) || x.a_attribuer || x.commercial === pour.prenom);
   if (!liste.length && !sel) return null;
-  const gestion = !!d.gestion;
-  const lecture = !!d.lecture;
+  const gestion = pour ? ROLES_GESTION.includes(pour.role) : !!d.gestion;
+  const lecture = pour ? pour.role === 'comptable' : !!d.lecture;
   const prendre = async (x, user) => { setErr(''); try { await rpc('pilotage_dossier_prendre', { p_objet: x.objet, p_id: x.id, p_user: user }); await charger(); } catch (e) { setErr(e.message); } };
   const attribuer = liste.filter((x) => x.a_attribuer && x.etat !== 'valide');
   const attente = liste.filter((x) => x.etat === 'en_attente' && !x.a_attribuer);
@@ -40,7 +42,8 @@ export default function MesDossiers({ moi }) {
   // Gestion, comptable, direction : leur file d'abord ; les dossiers encore chez les commerciaux restent repliés
   return <section className="card" style={{ marginBottom: 16 }}>
     {err && <div className="err">{err}</div>}
-    <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>{gestion ? (lecture ? 'Dossiers en cours de validation' : 'Dossiers des commerciaux') : 'Mes dossiers'}</h2>
+    <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>{gestion ? (lecture ? 'Dossiers en cours de validation' : 'Dossiers des commerciaux') : (pour ? 'Dossiers de ' + pour.prenom : 'Mes dossiers')}</h2>
+    {pour && <div className="muted" style={{ fontSize: 12, margin: '-4px 0 8px' }}>Ce que {pour.prenom} voit dans sa journée. Ce que vous faites ici est fait en votre nom.</div>}
     {gestion ? <>
       {groupe(lecture ? 'En attente de validation par la gestion' : 'À valider', attente, lecture ? null : 'Le commercial a tout complété : vérifier les écarts et les justifications, puis valider ou lui écrire.')}
       {groupe('En cours chez les commerciaux', finaliser, 'Pour consultation : le commercial complète encore le dossier.', false)}
