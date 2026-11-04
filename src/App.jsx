@@ -198,6 +198,8 @@ function Journee({ moi }) {
       </div>
       {err && <div className="banner">{err}</div>}
       {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
+      {/* 124 : journée d'un membre de l'équipe : son bloc de dossiers tel qu'il le voit */}
+      {cible !== moi.user_id && (() => { const m = membres.find((x) => x.user_id === cible); return m && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(m.role) && <MesDossiers key={cible} moi={moi} pour={m} />; })()}
       {cible === moi.user_id && ['gestionnaire', 'negociateur'].includes(moi.role) && <MessagesAEnvoyer />}
       {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
       {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
