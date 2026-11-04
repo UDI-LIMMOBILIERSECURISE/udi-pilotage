@@ -29,7 +29,7 @@ end $$;
 -- 2. Assurance du locataire reprise de Rivage
 create or replace function pilotage.assurance_rivage_auto()
 returns integer language plpgsql security definer set search_path to 'pilotage', 'public' as $$
-declare n integer := 0; x record; cle text; nid bigint;
+declare n integer := 0; x record; v_cle text; nid bigint;
 begin
   for x in
     select b.id bail_id, b.lot_id, u.id upload_id, u.maj_le::date depose_le, (u.data->>'expiration_date')::date fin
@@ -43,7 +43,7 @@ begin
      where b.statut in ('created', 'move_in', 'in_progress') and (b.fin is null or b.fin > current_date)
        and pilotage.dossier_nouveau('LeasingContract', b.id)
   loop
-    cle := case when pilotage.portee_bail_id(x.bail_id) = 'commercial' then 'c_cl_assurance' else 'h_cl_assurance' end;
+    v_cle := case when pilotage.portee_bail_id(x.bail_id) = 'commercial' then 'c_cl_assurance' else 'h_cl_assurance' end;
     -- suivi créé seulement s'il n'y en a aucun d'actif
     if not exists (select 1 from pilotage.baux_obligations o where o.bail_id = x.bail_id and o.nature = 'assurance' and o.actif) then
       insert into pilotage.baux_obligations (bail_id, nature, libelle, periodicite_mois, prochaine, derniere_le)
@@ -53,7 +53,7 @@ begin
     end if;
     -- question répondue seulement si personne n'y a répondu
     insert into pilotage.baux_reponses (bail_id, cle, statut, suivi, valeur)
-    values (x.bail_id, cle, 'ok', 'backoffice', 'Attestation valable jusqu’au ' || to_char(x.fin, 'DD/MM/YYYY') || ' (Rivage)')
+    values (x.bail_id, v_cle, 'ok', 'backoffice', 'Attestation valable jusqu’au ' || to_char(x.fin, 'DD/MM/YYYY') || ' (Rivage)')
     on conflict (bail_id, cle) do nothing;
   end loop;
   return n;
