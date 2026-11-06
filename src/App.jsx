@@ -10,7 +10,7 @@ import ModelesMessages from './ModelesMessages.jsx';
 import MessagesDossier, { MessagesAEnvoyer, etapesDesAlertes } from './MessagesDossier.jsx';
 import Fiche from './Fiche.jsx';
 import FicheConge from './FicheConge.jsx';
-import ALouer from './ALouer.jsx';
+import ALouer, { PermisLouer } from './ALouer.jsx';
 import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
@@ -109,7 +109,7 @@ function Connexion() {
 // Menu de navigation : rubriques regroupées, page courante gardée dans l'adresse (#regles) pour le retour arrière et le rechargement
 const MENU = [
   ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['alouer', 'À louer', '⌂']]],
-  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['cles', 'Clés', '⚿'], ['sinistres', 'Tickets', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
+  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['permis', 'Permis de louer', '⚖'], ['cles', 'Clés', '⚿'], ['sinistres', 'Tickets', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
   ['Commercial', [['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
   ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['equipe', 'Équipe', '☺']]],
 ];
@@ -182,6 +182,7 @@ function Espace() {
         {page === 'compta' && <Compta />}
         {page === 'impayes' && <Impayes />}
         {page === 'alouer' && <ALouer />}
+        {page === 'permis' && <PermisLouer />}
         {page === 'cles' && <Cles />}
         {page === 'reprise' && <Reprise moi={moi} />}
         {page === 'baux' && <SuiviBaux moi={moi} />}

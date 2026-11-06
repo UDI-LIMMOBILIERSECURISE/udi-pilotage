@@ -1,6 +1,6 @@
 // Liste « À louer » (038) : lots mis en location par la gestion (proposés d'office quand un congé arrive à sa fin ou qu'un lot n'a pas
 // de bail), indicateur « prêt à louer » (DPE, état des risques de moins de 6 mois, permis de louer), sortie automatique à la création
-// d'un bail dans Rivage. En dessous : la table des communes du permis de louer, à confirmer par la gestion.
+// d'un bail dans Rivage. 06/11 : suivi du permis de louer et table des communes déplacés sur la page Permis de louer (PermisLouer).
 import React, { useEffect, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { REGIME, LotPermis } from './Permis.jsx';
@@ -23,26 +23,41 @@ export default function ALouer() {
   const trouve = (x) => !q || correspond(texteRecherche(x.lot && 'lot ' + x.lot, x.adresse, x.bailleur, x.mandat, NATURE[x.nature], x.note, x.motif, x.bail?.reference && 'bail ' + x.bail.reference, x.bail?.locataires), q);
   const lots = d.lots.filter(trouve);
   const propositions = d.propositions.filter(trouve);
+  // 06/11 : la page ne montre que les lots à louer. Les propositions restent en bas, repliées ; le suivi du permis de louer et la table
+  // des communes ont leur propre page (PermisLouer, menu Gestion).
+  const parDispo = (a, b) => String(a.disponible_le || '9999').localeCompare(String(b.disponible_le || '9999')) || String(a.lot).localeCompare(String(b.lot), 'fr', { numeric: true });
   return <>
     <div className="entete"><div><h1>À louer</h1>
-      <p className="sub">Lots en recherche de locataire. Un lot sort de la liste dès qu’un bail est créé dans Rivage.</p></div></div>
+      <p className="sub">Lots en recherche de locataire, du plus tôt disponible au plus tard. Un lot sort de la liste dès qu’un bail est créé dans Rivage.</p></div></div>
     {err && <div className="banner">{err}</div>}
-    <input className="recherche" placeholder="Rechercher : lot, adresse, bailleur, mandat, locataire, bail" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher dans À louer et le permis de louer" />
+    <input className="recherche" placeholder="Rechercher : lot, adresse, bailleur, mandat, locataire, bail" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher dans les lots à louer" />
     <div className="tuiles">
       <div className="tuile"><div className="muted">Lots à louer</div><div className="tuile-n">{d.lots.length}</div></div>
       <div className="tuile"><div className="muted">Prêts à louer</div><div className="tuile-n">{prets}</div></div>
-      {d.peut && <div className="tuile"><div className="muted">Propositions à confirmer</div><div className="tuile-n" style={{ color: d.propositions.length ? 'var(--amber)' : undefined }}>{d.propositions.length}</div></div>}
     </div>
-    {d.peut && propositions.length > 0 && <details className="replie" open style={{ margin: '10px 0' }}>
-      <summary style={{ cursor: 'pointer', fontWeight: 700 }}>À mettre en location ? ({propositions.length})</summary>
-      <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Congé qui arrive à sa fin ou lot d’un mandat sans bail : confirmer d’un clic.</div>
-      <div className="stack" style={{ gap: 6 }}>{propositions.map((p) => <Proposition key={p.asset_id} p={p} agir={agir} />)}</div>
-    </details>}
     {!d.lots.length ? <div className="card">Aucun lot en recherche de locataire.</div>
       : !lots.length ? <div className="card">Aucun lot à louer ne correspond à « {q} ».</div>
-      : <div className="stack" style={{ gap: 8 }}>{lots.map((l) => <LotALouer key={l.asset_id} l={l} peut={d.peut} agir={agir} />)}</div>}
+      : <div className="stack" style={{ gap: 8 }}>{[...lots].sort(parDispo).map((l) => <LotALouer key={l.asset_id} l={l} peut={d.peut} agir={agir} />)}</div>}
+    {d.peut && propositions.length > 0 && <details className="replie" style={{ marginTop: 20 }}>
+      <summary style={{ cursor: 'pointer' }} className="muted">Lots qui pourraient être mis en location ({propositions.length})</summary>
+      <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Congé qui arrive à sa fin ou lot d’un mandat sans bail : « Mettre en location » l’ajoute à la liste.</div>
+      <div className="stack" style={{ gap: 6 }}>{propositions.map((p) => <Proposition key={p.asset_id} p={p} agir={agir} />)}</div>
+    </details>}
+  </>;
+}
+
+// Page « Permis de louer » (06/11, sortie de la page À louer) : suivi des démarches et table des communes
+const GESTION_PERMIS = ['direction', 'superviseur', 'gestionnaire'];
+export function PermisLouer() {
+  const [q, setQ] = useState('');
+  const [peut, setPeut] = useState(false);
+  useEffect(() => { rpc('pilotage_moi').then((x) => setPeut(GESTION_PERMIS.includes(x?.role))).catch(() => {}); }, []);
+  return <>
+    <div className="entete"><div><h1>Permis de louer</h1>
+      <p className="sub">Démarches d’autorisation préalable et de déclaration de mise en location des logements gérés, et table des communes.</p></div></div>
+    <input className="recherche" placeholder="Rechercher : lot, adresse, bailleur, mandat, locataire, bail" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher dans le suivi du permis de louer" />
     <SuiviPermis q={q} />
-    <Communes peut={d.peut} />
+    <Communes peut={peut} />
   </>;
 }
 
