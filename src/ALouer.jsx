@@ -1,9 +1,9 @@
 // Liste « À louer » (038) : lots mis en location par la gestion (proposés d'office quand un congé arrive à sa fin ou qu'un lot n'a pas
 // de bail), indicateur « prêt à louer » (DPE, état des risques de moins de 6 mois, permis de louer), sortie automatique à la création
-// d'un bail dans Rivage. 06/11 : suivi du permis de louer et table des communes déplacés sur la page Permis de louer (PermisLouer).
+// d'un bail dans Rivage. 06/11 : table des communes sur sa page (Réglages) ; suivi du permis de louer dans Tickets (tags PL, DMEL).
 import React, { useEffect, useState } from 'react';
-import { supabase, rpc } from './supabase.js';
-import { REGIME, LotPermis } from './Permis.jsx';
+import { rpc } from './supabase.js';
+import { REGIME } from './Permis.jsx';
 import { texteRecherche, correspond } from './cartes.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
@@ -46,67 +46,17 @@ export default function ALouer() {
   </>;
 }
 
-// Page « Permis de louer » (06/11, sortie de la page À louer) : suivi des démarches et table des communes
+// Page « Communes du permis de louer » (Réglages, 132) : la table des communes seule. Le suivi des démarches se fait dans Tickets
+// (tags PL et DMEL) et dans la fiche du bail ; la page de suivi d'ensemble est retirée (06/11, décision de Nicolas).
 const GESTION_PERMIS = ['direction', 'superviseur', 'gestionnaire'];
 export function PermisLouer() {
-  const [q, setQ] = useState('');
   const [peut, setPeut] = useState(false);
   useEffect(() => { rpc('pilotage_moi').then((x) => setPeut(GESTION_PERMIS.includes(x?.role))).catch(() => {}); }, []);
   return <>
-    <div className="entete"><div><h1>Permis de louer</h1>
-      <p className="sub">Démarches d’autorisation préalable et de déclaration de mise en location des logements gérés, et table des communes.</p></div></div>
-    <input className="recherche" placeholder="Rechercher : lot, adresse, bailleur, mandat, locataire, bail" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher dans le suivi du permis de louer" />
-    <SuiviPermis q={q} />
+    <div className="entete"><div><h1>Communes du permis de louer</h1>
+      <p className="sub">Régime de chaque commune (autorisation préalable, déclaration, aucun). Information de référence : le suivi d’un lot s’ouvre avec le tag PL ou DMEL d’un ticket Rivage, qui prime sur cette table.</p></div></div>
     <Communes peut={peut} />
   </>;
-}
-
-// ----- Suivi d'ensemble du permis de louer (052) : tous les logements gérés soumis, état de la démarche, prochaine action -----
-const FILTRES_PERMIS = [['traiter', 'À traiter', (x) => x.ordre <= 2], ['attente', 'En attente', (x) => x.ordre === 3], ['faits', 'À jour', (x) => x.ordre === 4], ['tous', 'Tous', () => true]];
-function SuiviPermis({ q }) {
-  const [liste, setListe] = useState(null);
-  const [err, setErr] = useState('');
-  const [filtre, setFiltre] = useState('traiter');
-  const [ouvert, setOuvert] = useState(null);
-  const [email, setEmail] = useState('');
-  const [prenom, setPrenom] = useState('');
-  const charger = () => rpc('pilotage_permis_suivi').then(setListe).catch((e) => setErr(e.message));
-  useEffect(() => {
-    charger();
-    supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || ''));
-    rpc('pilotage_moi').then((x) => setPrenom(x?.prenom || '')).catch(() => {});
-  }, []);
-  const agir = async (args) => { setErr(''); try { await rpc('pilotage_permis_action', args); await charger(); } catch (e) { setErr(e.message); } };
-  if (!liste) return err ? <div className="banner" style={{ marginTop: 16 }}>Suivi du permis de louer indisponible : {err}</div> : null;
-  const f = FILTRES_PERMIS.find((x) => x[0] === filtre);
-  // avec une recherche, tous les états sont parcourus (un dossier « À jour » est aussi retrouvé)
-  const vus = q ? liste.filter((x) => correspond(texteRecherche('lot ' + x.lot, x.adresse, x.bailleur, x.mandat, NATURE[x.nature], x.etat, x.bail?.reference && 'bail ' + x.bail.reference, x.bail?.locataires), q)) : liste.filter(f[2]);
-  return <section style={{ marginTop: 20 }}>
-    <div className="groupe-tete"><b>Permis de louer : suivi des démarches</b></div>
-    <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>Tous les logements gérés soumis à autorisation préalable ou à déclaration de mise en location, d’après la table des communes.</div>
-    {err && <div className="banner">{err}</div>}
-    {q && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Recherche « {q} » sur tous les états ({vus.length}).</div>}
-    {!q && <div className="row" style={{ marginBottom: 10 }}>{FILTRES_PERMIS.map(([k, l, t]) =>
-      <button key={k} className={'chip' + (filtre === k ? ' on' : '')} onClick={() => setFiltre(k)}>{l}<span className="n">{liste.filter(t).length}</span></button>)}</div>}
-    {!liste.length ? <div className="card">Aucun logement géré n’est soumis au permis de louer d’après la table des communes.</div>
-      : !vus.length ? <div className="card">{q ? 'Aucun logement soumis au permis ne correspond.' : 'Rien avec ce filtre.'}</div>
-      : <div className="stack" style={{ gap: 8 }}>{vus.map((x) => <article key={x.asset_id} className={'card ' + x.gravite} style={{ padding: 12 }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <div className="kcarte-titre">Lot {x.lot} · {NATURE[x.nature] || x.nature}{x.a_louer ? ' · à louer' : ''}</div>
-            <div className="muted">{x.adresse} · bailleur : {x.bailleur || '—'} · {x.mandat || '—'}</div>
-            <div style={{ marginTop: 6 }}><span className={'sev ' + x.gravite}>{x.etat}</span>
-              <span className="etq" style={{ marginLeft: 6 }}>{REGIME[x.permis?.regime] || x.permis?.regime}</span>
-              {x.echeance && <span className="mono" style={{ marginLeft: 6, fontSize: 12 }}>échéance {date(x.echeance)}</span>}</div>
-            {x.action && <div style={{ fontSize: 13, marginTop: 4 }}>{x.action}</div>}
-            {x.bail && <div className="muted" style={{ fontSize: 12 }}>Bail {x.bail.reference} · {x.bail.locataires || '—'} · signé le {date(x.bail.signe_le)}</div>}
-          </div>
-          <button className="btn" onClick={() => setOuvert(ouvert === x.asset_id ? null : x.asset_id)}>{ouvert === x.asset_id ? 'Fermer' : x.peut ? 'Traiter' : 'Détail'}</button>
-        </div>
-        {ouvert === x.asset_id && (x.peut ? <LotPermis l={x} agir={agir} email={email} prenom={prenom} recharger={charger} />
-          : <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{(x.demandes || []).length ? x.demandes.map((dm) => `Dépôt le ${date(dm.depot_le)}${dm.reponse ? ' · ' + dm.reponse + ' le ' + date(dm.reponse_le) : ''}`).join(' ; ') : 'Aucune demande enregistrée.'} Seule la gestion peut enregistrer les démarches.</div>)}
-      </article>)}</div>}
-  </section>;
 }
 
 function Proposition({ p, agir }) {

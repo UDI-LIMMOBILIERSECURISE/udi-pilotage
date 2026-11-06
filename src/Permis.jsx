@@ -59,7 +59,7 @@ export function PermisBail({ bail, lot, onErreur }) {
     supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || ''));
     rpc('pilotage_moi').then((r) => setPrenom(r?.prenom || '')).catch(() => {});
   }, [bail, lot]);
-  if (x === null && lot) return <div className="mini-alerte haute" style={{ marginTop: 10 }}>Permis de louer : le lot {lot} n’est pas soumis d’après la table des communes du pilotage. Si la mairie l’exige, corriger le régime du lot (onglet À louer, « Modifier » sur le lot).</div>;
+  if (x === null && lot) return <div className="mini-alerte haute" style={{ marginTop: 10 }}>Permis de louer : le lot {lot} n’est pas suivi. Le suivi s’ouvre quand un ticket Rivage du lot porte le tag PL ou DMEL (le tag apparaît ici à la modification suivante de l’incident).</div>;
   if (!x) return null;
   const agir = async (args) => { try { await rpc('pilotage_permis_action', args); await charger(); } catch (e) { onErreur ? onErreur(e.message) : alert(e.message); } };
   return <div style={{ marginTop: 10 }}>
@@ -74,7 +74,7 @@ export function PermisBail({ bail, lot, onErreur }) {
 export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
   const p = l.permis || {};
   const [modif, setModif] = useState(false);
-  const modifiable = p.regime !== 'non_concerne';
+  const modifiable = p.regime !== 'non_concerne' && !p.tag; // 132 : avec un tag PL ou DMEL, c'est le tag qui décide
   // Régime choisi pour ce lot (062) : prime sur la table des communes
   const agirRegime = async (regime) => {
     try { await rpc('pilotage_permis_lot_regime', { p_asset: l.asset_id, p_regime: regime }); recharger && await recharger(); }
@@ -103,9 +103,10 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
     {p.detail && <div className="muted" style={{ fontSize: 12 }}>{p.detail}{p.source ? ' · source : ' + p.source : ''}</div>}
     {p.regime === 'inconnu' && <div className="muted" style={{ fontSize: 12 }}>La recherche automatique de la commune est lancée dans l’heure ; le résultat sera à confirmer par la gestion (onglet À louer).</div>}
     {(l.demandes || []).map((d) => <Demande key={d.id} l={l} d={d} agir={agir} email={email} prenom={prenom} recharger={recharger} onErreur={onErreur} />)}
-    {['autorisation', 'a_verifier'].includes(p.regime) && !enCours && <div className="row" style={{ marginTop: 4 }}>
-      <span className="muted">{l.choix === 'agence' ? 'Dépôt par l’agence (90 € TTC à facturer)' : l.choix === 'bailleur' ? 'Dépôt par le bailleur (récépissé à obtenir)' : l.choix_a_demander ? 'Choix du bailleur à obtenir :' : 'Qui dépose ?'}</span>
-      {l.choix !== 'agence' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_agence', p_le: null, p_numero: null, p_notes: null })}>L’agence dépose (90 € TTC)</button>}
+    {/* 132 : « Qui dépose ? » aussi pour la déclaration (DMEL), sans montant ; 90 € TTC pour l'autorisation (PL) */}
+    {soumis && !enCours && <div className="row" style={{ marginTop: 4 }}>
+      <span className="muted">{l.choix === 'agence' ? 'Dépôt par l’agence' + (p.regime === 'declaration' ? '' : ' (90 € TTC à facturer)') : l.choix === 'bailleur' ? 'Dépôt par le bailleur (récépissé à obtenir)' : l.choix_a_demander ? 'Choix du bailleur à obtenir :' : 'Qui dépose ?'}</span>
+      {l.choix !== 'agence' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_agence', p_le: null, p_numero: null, p_notes: null })}>{p.regime === 'declaration' ? 'L’agence dépose' : 'L’agence dépose (90 € TTC)'}</button>}
       {l.choix !== 'bailleur' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_bailleur', p_le: null, p_numero: null, p_notes: null })}>Le bailleur dépose</button>}
     </div>}
     {['autorisation', 'a_verifier'].includes(p.regime) && !enCours && (obtenu.ouvert
