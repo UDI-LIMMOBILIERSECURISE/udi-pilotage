@@ -143,7 +143,7 @@ function Espace() {
     <main><div className="card"><h1>Accès non ouvert</h1><p className="sub">Votre compte existe mais n’a pas encore accès au pilotage. Demandez à Nicolas de vous ajouter dans l’onglet Équipe.</p>
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
-  const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, cles: true,
+  const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, permis: true, cles: true,
     mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
     obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true };
   const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
