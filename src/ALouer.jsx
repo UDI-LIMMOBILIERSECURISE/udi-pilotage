@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { REGIME, LotPermis } from './Permis.jsx';
+import { texteRecherche, correspond } from './cartes.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const euro = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €');
@@ -12,36 +13,42 @@ const NATURE = { flat: 'Appartement', room: 'Chambre', house: 'Maison', commerci
 export default function ALouer() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
+  const [q, setQ] = useState(''); // recherche sur toute la page : lots à louer, propositions, suivi du permis de louer
   const charger = () => rpc('pilotage_a_louer').then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
   const agir = async (args) => { setErr(''); try { await rpc('pilotage_a_louer_maj', args); await charger(); } catch (e) { setErr(e.message); } };
   const prets = d.lots.filter((l) => l.pret.dpe && l.pret.erp && l.pret.permis).length;
+  const trouve = (x) => !q || correspond(texteRecherche(x.lot && 'lot ' + x.lot, x.adresse, x.bailleur, x.mandat, NATURE[x.nature], x.note, x.motif, x.bail?.reference && 'bail ' + x.bail.reference, x.bail?.locataires), q);
+  const lots = d.lots.filter(trouve);
+  const propositions = d.propositions.filter(trouve);
   return <>
     <div className="entete"><div><h1>À louer</h1>
       <p className="sub">Lots en recherche de locataire. Un lot sort de la liste dès qu’un bail est créé dans Rivage.</p></div></div>
     {err && <div className="banner">{err}</div>}
+    <input className="recherche" placeholder="Rechercher : lot, adresse, bailleur, mandat, locataire, bail" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher dans À louer et le permis de louer" />
     <div className="tuiles">
       <div className="tuile"><div className="muted">Lots à louer</div><div className="tuile-n">{d.lots.length}</div></div>
       <div className="tuile"><div className="muted">Prêts à louer</div><div className="tuile-n">{prets}</div></div>
       {d.peut && <div className="tuile"><div className="muted">Propositions à confirmer</div><div className="tuile-n" style={{ color: d.propositions.length ? 'var(--amber)' : undefined }}>{d.propositions.length}</div></div>}
     </div>
-    {d.peut && d.propositions.length > 0 && <details className="replie" open style={{ margin: '10px 0' }}>
-      <summary style={{ cursor: 'pointer', fontWeight: 700 }}>À mettre en location ? ({d.propositions.length})</summary>
+    {d.peut && propositions.length > 0 && <details className="replie" open style={{ margin: '10px 0' }}>
+      <summary style={{ cursor: 'pointer', fontWeight: 700 }}>À mettre en location ? ({propositions.length})</summary>
       <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Congé qui arrive à sa fin ou lot d’un mandat sans bail : confirmer d’un clic.</div>
-      <div className="stack" style={{ gap: 6 }}>{d.propositions.map((p) => <Proposition key={p.asset_id} p={p} agir={agir} />)}</div>
+      <div className="stack" style={{ gap: 6 }}>{propositions.map((p) => <Proposition key={p.asset_id} p={p} agir={agir} />)}</div>
     </details>}
     {!d.lots.length ? <div className="card">Aucun lot en recherche de locataire.</div>
-      : <div className="stack" style={{ gap: 8 }}>{d.lots.map((l) => <LotALouer key={l.asset_id} l={l} peut={d.peut} agir={agir} />)}</div>}
-    <SuiviPermis />
+      : !lots.length ? <div className="card">Aucun lot à louer ne correspond à « {q} ».</div>
+      : <div className="stack" style={{ gap: 8 }}>{lots.map((l) => <LotALouer key={l.asset_id} l={l} peut={d.peut} agir={agir} />)}</div>}
+    <SuiviPermis q={q} />
     <Communes peut={d.peut} />
   </>;
 }
 
 // ----- Suivi d'ensemble du permis de louer (052) : tous les logements gérés soumis, état de la démarche, prochaine action -----
 const FILTRES_PERMIS = [['traiter', 'À traiter', (x) => x.ordre <= 2], ['attente', 'En attente', (x) => x.ordre === 3], ['faits', 'À jour', (x) => x.ordre === 4], ['tous', 'Tous', () => true]];
-function SuiviPermis() {
+function SuiviPermis({ q }) {
   const [liste, setListe] = useState(null);
   const [err, setErr] = useState('');
   const [filtre, setFiltre] = useState('traiter');
@@ -57,15 +64,17 @@ function SuiviPermis() {
   const agir = async (args) => { setErr(''); try { await rpc('pilotage_permis_action', args); await charger(); } catch (e) { setErr(e.message); } };
   if (!liste) return err ? <div className="banner" style={{ marginTop: 16 }}>Suivi du permis de louer indisponible : {err}</div> : null;
   const f = FILTRES_PERMIS.find((x) => x[0] === filtre);
-  const vus = liste.filter(f[2]);
+  // avec une recherche, tous les états sont parcourus (un dossier « À jour » est aussi retrouvé)
+  const vus = q ? liste.filter((x) => correspond(texteRecherche('lot ' + x.lot, x.adresse, x.bailleur, x.mandat, NATURE[x.nature], x.etat, x.bail?.reference && 'bail ' + x.bail.reference, x.bail?.locataires), q)) : liste.filter(f[2]);
   return <section style={{ marginTop: 20 }}>
     <div className="groupe-tete"><b>Permis de louer : suivi des démarches</b></div>
     <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>Tous les logements gérés soumis à autorisation préalable ou à déclaration de mise en location, d’après la table des communes.</div>
     {err && <div className="banner">{err}</div>}
-    <div className="row" style={{ marginBottom: 10 }}>{FILTRES_PERMIS.map(([k, l, t]) =>
-      <button key={k} className={'chip' + (filtre === k ? ' on' : '')} onClick={() => setFiltre(k)}>{l}<span className="n">{liste.filter(t).length}</span></button>)}</div>
+    {q && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Recherche « {q} » sur tous les états ({vus.length}).</div>}
+    {!q && <div className="row" style={{ marginBottom: 10 }}>{FILTRES_PERMIS.map(([k, l, t]) =>
+      <button key={k} className={'chip' + (filtre === k ? ' on' : '')} onClick={() => setFiltre(k)}>{l}<span className="n">{liste.filter(t).length}</span></button>)}</div>}
     {!liste.length ? <div className="card">Aucun logement géré n’est soumis au permis de louer d’après la table des communes.</div>
-      : !vus.length ? <div className="card">Rien avec ce filtre.</div>
+      : !vus.length ? <div className="card">{q ? 'Aucun logement soumis au permis ne correspond.' : 'Rien avec ce filtre.'}</div>
       : <div className="stack" style={{ gap: 8 }}>{vus.map((x) => <article key={x.asset_id} className={'card ' + x.gravite} style={{ padding: 12 }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
