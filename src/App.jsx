@@ -935,7 +935,8 @@ function Sinistres() {
     vieux: (x) => !x.clos && x.jours > 15,
     sans: (x) => !x.clos && !x.prestataires,
   };
-  const tagsDe = (x) => (Array.isArray(x.tags) ? x.tags.map(tagNom).filter(Boolean) : []);
+  // Rivage envoie les tags en objets { id, name, archived } (constat du 06/11 sur l'incident 48) ; un tag archivé n'est pas affiché
+  const tagsDe = (x) => (Array.isArray(x.tags) ? x.tags.filter((t) => !(t && typeof t === 'object' && t.archived)).map(tagNom).filter(Boolean) : []);
   // les 7 tags de Rivage toujours proposés, dans leur ordre ; un tag inconnu reçu de Rivage s'ajoute à la suite
   const tousTags = [...TAGS_RIVAGE, ...[...new Set(d.flatMap(tagsDe))].filter((t) => !TAGS_RIVAGE.some((r) => normaliser(r) === normaliser(t))).sort((a, b) => a.localeCompare(b, 'fr'))];
   const aTag = (x, t) => tagsDe(x).some((y) => normaliser(y) === normaliser(t));
@@ -959,7 +960,7 @@ function Sinistres() {
       ...STATUTS.map(([k, l]) => [k, l, d.filter(tests[filtre]).filter((x) => colonneDe(x) === k).length])]} />
     <Filtres val={tag || 'tous'} set={(v) => setTag(v === 'tous' ? '' : v)} items={[['tous', 'Tous les tags', d.length],
       ...tousTags.map((t) => [t, t === 'PL' ? 'PL (permis de louer)' : t === 'DMEL' ? 'DMEL (déclaration)' : t, d.filter((x) => aTag(x, t)).length])]} />
-    {!d.some((x) => tagsDe(x).length) && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Aucun tag reçu de Rivage pour l’instant : au 06/11, les incidents arrivent avec un champ tags vide (question en cours).</div>}
+    <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Rivage n’envoie pas la pose d’un tag seule : un tag apparaît ici à la modification suivante de l’incident (statut, description…).</div>
     <input className="recherche" placeholder="Rechercher : titre, adresse, locataire, bailleur, entreprise, téléphone, e-mail, n° de bail" value={cherche}
       onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un ticket" />
     {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) avec les filtres choisis.</div>}
