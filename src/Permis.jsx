@@ -47,6 +47,28 @@ export default function PermisMandat({ m, onErreur }) {
   </>;
 }
 
+// Fiche du bail : permis de louer du lot du bail (suivi d'ensemble 052, filtré sur ce bail). Rien si le lot n'est pas soumis.
+export function PermisBail({ bail, onErreur }) {
+  const [x, setX] = useState(undefined);
+  const [email, setEmail] = useState('');
+  const [prenom, setPrenom] = useState('');
+  const charger = () => rpc('pilotage_permis_suivi').then((liste) => setX((liste || []).find((y) => y.bail?.id === bail) || null)).catch(() => setX(null));
+  useEffect(() => {
+    charger();
+    supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || ''));
+    rpc('pilotage_moi').then((r) => setPrenom(r?.prenom || '')).catch(() => {});
+  }, [bail]);
+  if (!x) return null;
+  const agir = async (args) => { try { await rpc('pilotage_permis_action', args); await charger(); } catch (e) { onErreur ? onErreur(e.message) : alert(e.message); } };
+  return <div style={{ marginTop: 10 }}>
+    <div className="groupe-tete"><b>Permis de louer</b> <span className={'sev ' + (x.gravite || 'normale')} style={{ marginLeft: 6 }}>{x.etat}</span>
+      {x.echeance && <span className="mono" style={{ marginLeft: 6, fontSize: 12 }}>échéance {date(x.echeance)}</span>}</div>
+    {x.action && <div style={{ fontSize: 13, marginTop: 4 }}>{x.action}</div>}
+    {x.peut ? <LotPermis l={x} agir={agir} email={email} prenom={prenom} recharger={charger} onErreur={onErreur} />
+      : <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{(x.demandes || []).length ? x.demandes.map((d) => `${d.regime === 'declaration' ? 'Déclaration' : 'Demande'} déposée le ${date(d.depot_le)}${d.reponse ? ' · ' + d.reponse + ' le ' + date(d.reponse_le) : ''}`).join(' ; ') : 'Aucune démarche enregistrée.'} Seule la gestion enregistre les démarches.</div>}
+  </div>;
+}
+
 export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
   const p = l.permis || {};
   const [modif, setModif] = useState(false);
@@ -116,6 +138,7 @@ function Demande({ l, d, agir, email, prenom }) {
       {d.close_le ? ` · close le ${date(d.close_le)}` : ''}</div>
     {d.reponse ? <div>{d.reponse === 'accord' ? `Accordée le ${date(d.reponse_le)}` : d.reponse === 'tacite' ? `Accord tacite le ${date(d.reponse_le)}` : `Refusée le ${date(d.reponse_le)}`}
       {d.reponse !== 'refus' && ` · caduc le ${date(new Date(new Date(d.reponse_le).setFullYear(new Date(d.reponse_le).getFullYear() + 2)))} sans bail signé`}</div>
+      : d.regime === 'declaration' ? <div className="muted">Déclaration : pas de décision à attendre de la mairie.{l.bail?.signe_le ? ` Bail signé le ${date(l.bail.signe_le)} : déposée ${Math.round((new Date(d.depot_le) - new Date(l.bail.signe_le)) / 86400000)} jour(s) après la signature (délai : 15 jours).` : ''}</div>
       : d.regime === 'autorisation' && <div className="muted">Sans réponse depuis {jours} jour(s){jours >= 35 ? ' : l’accord est tacite (acquis à 30 jours), à constater' : jours >= 30 ? ' : accord acquis à 30 jours, mais une décision peut encore arriver par courrier : attendre 35 jours avant de signer' : jours >= 21 ? ' : relancer la mairie' : ''}.</div>}
     {d.reponse === 'tacite' && <div>{d.attestation_recue_le ? `Attestation reçue le ${date(d.attestation_recue_le)}` : d.attestation_demandee_le ? `Attestation demandée le ${date(d.attestation_demandee_le)}` : 'Attestation à demander à la mairie'}</div>}
     {!d.close_le && <div className="row" style={{ marginTop: 4 }}>
