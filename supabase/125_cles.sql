@@ -6,6 +6,8 @@
 --  Écart assumé avec WeRoof : un lot peut avoir plusieurs trousseaux (un par agence, par exemple). Dans WeRoof, trois biens portent deux
 --  trousseaux dans le même champ texte (« 84 (et 69 ballancourt) », « 20 corbeil et ballancourt »), et deux fiches ne notent que le contenu
 --  (« 4 clés remises », « IL y a 10 clés et un BIP ») : d'où le champ composition.
+--  Contrairement à WeRoof (liste de tous les biens), seuls les lots qui ont des clés apparaissent ; un bouton ajoute des clés, soit sur un lot
+--  Rivage, soit sous un nom saisi à la main (clés d'un local, d'un bien hors Rivage) : trousseau « libre », sans lot (précision de Nicolas du 06/11).
 --  Rien n'est écrit dans WeRoof ni dans Rivage. Les tables WeRoof restent intactes.
 --  Bloc 1 : tables. Bloc 2 : fonctions. Bloc 3 : reprise des biens WeRoof rapprochés (rapprochement validé du 092-093, un seul lot).
 
@@ -20,7 +22,8 @@ on conflict (code) do nothing;
 
 create table if not exists pilotage.cles_trousseaux (
   id bigserial primary key,
-  asset_id text not null,                                   -- lot Rivage
+  asset_id text,                                            -- lot Rivage ; vide pour des clés enregistrées sous un nom saisi à la main
+  libelle text,                                             -- nom saisi à la main (clés sans lot Rivage)
   numero text,                                              -- étiquette physique du trousseau
   agence text references pilotage.cles_agences (code),      -- agence où il est rangé
   composition text,                                         -- ex. « 3 clés, 1 bip, 1 badge »
@@ -30,13 +33,14 @@ create table if not exists pilotage.cles_trousseaux (
   par uuid,
   le timestamptz not null default now(),
   supprime_le timestamptz,
-  check (numero is not null or composition is not null or agence is not null)
+  check (numero is not null or composition is not null or agence is not null or libelle is not null),
+  check (asset_id is not null or nullif(trim(libelle), '') is not null)
 );
 create index if not exists cles_trousseaux_lot on pilotage.cles_trousseaux (asset_id) where supprime_le is null;
 
 create table if not exists pilotage.cles_mouvements (
   id bigserial primary key,
-  asset_id text not null,
+  asset_id text,                                            -- vide pour un trousseau sans lot (trousseau_id obligatoire)
   trousseau_id bigint references pilotage.cles_trousseaux (id),
   type_mouvement text not null check (type_mouvement in ('prise', 'retour')),
   date_mouvement timestamptz not null default now(),
@@ -51,7 +55,8 @@ create table if not exists pilotage.cles_mouvements (
   le timestamptz not null default now(),
   supprime_le timestamptz,
   supprime_par uuid,
-  check ((qui = 'membre' and membre_id is not null) or (qui <> 'membre' and nullif(trim(nom), '') is not null))
+  check ((qui = 'membre' and membre_id is not null) or (qui <> 'membre' and nullif(trim(nom), '') is not null)),
+  check (asset_id is not null or trousseau_id is not null)
 );
 create index if not exists cles_mouvements_lot on pilotage.cles_mouvements (asset_id, date_mouvement desc) where supprime_le is null;
 
@@ -75,26 +80,33 @@ end $$;
 
 -- 125 : tableau des clés, rattaché aux lots Rivage, repris de WeRoof (bloc 2 sur 3)
 
--- Un lot : trousseaux avec leur état, état des clés sans trousseau, dernier mouvement, historique si demandé
-create or replace function pilotage.cles_lot_json(p_asset text, p_histo boolean) returns jsonb
+-- Une entrée du tableau : un lot Rivage (trousseaux avec leur état, clés notées sans trousseau, dernier mouvement, historique si demandé),
+-- ou un trousseau enregistré sous un nom saisi à la main (p_asset vide, p_trousseau renseigné)
+create or replace function pilotage.cles_json(p_asset text, p_trousseau bigint, p_histo boolean) returns jsonb
 language sql stable security definer set search_path to 'pilotage', 'public' as $$
   with mv as (
     select m.*, case m.qui when 'membre' then coalesce((select mb.prenom from pilotage.membres mb where mb.user_id = m.membre_id), 'Membre') else m.nom end as detenteur,
       (select mb.prenom from pilotage.membres mb where mb.user_id = m.par) as saisi_par
-    from pilotage.cles_mouvements m where m.asset_id = p_asset and m.supprime_le is null),
-  tr as (select t.* from pilotage.cles_trousseaux t where t.asset_id = p_asset and t.supprime_le is null),
+    from pilotage.cles_mouvements m where m.supprime_le is null
+      and (m.asset_id = p_asset or (p_asset is null and m.asset_id is null and m.trousseau_id = p_trousseau))),
+  tr as (select t.* from pilotage.cles_trousseaux t where t.supprime_le is null
+      and (t.asset_id = p_asset or (p_asset is null and t.asset_id is null and t.id = p_trousseau))),
   etats as (  -- dernier mouvement par trousseau ; clé 0 = mouvements notés sans trousseau
     select distinct on (coalesce(trousseau_id, 0)) coalesce(trousseau_id, 0) as k, type_mouvement as type, date_mouvement as date, qui, detenteur, motif
     from mv order by coalesce(trousseau_id, 0), date_mouvement desc, id desc)
   select jsonb_build_object(
-    'asset_id', l.id, 'lot', coalesce(nullif(l.reference, ''), l.id), 'nature', l.nature, 'adresse', l.adresse,
+    'asset_id', l.id, 'cle', coalesce(l.id, 't' || p_trousseau), 'libre', l.id is null,
+    'lot', coalesce(nullif(l.reference, ''), l.id), 'nature', l.nature, 'adresse', l.adresse,
+    'libelle', case when l.id is null then (select t.libelle from tr t limit 1) end,
     'mandat', (select o.data->>'reference' from pilotage.objets o where o.type = 'ManagementContract' and o.id = l.mandat_id),
     'trousseaux', coalesce((select jsonb_agg(jsonb_build_object('id', t.id, 'numero', t.numero, 'agence', t.agence, 'agence_nom', a.nom,
-         'composition', t.composition, 'note', t.note, 'a_verifier', t.a_verifier,
+         'composition', t.composition, 'note', t.note, 'a_verifier', t.a_verifier, 'libelle', t.libelle,
          'etat', (select to_jsonb(e) - 'k' from etats e where e.k = t.id),
-         -- même numéro dans la même agence sur un autre lot : trousseau commun à l'immeuble, ou erreur à corriger
-         'aussi_sur', (select jsonb_agg(distinct coalesce(nullif(l2.reference, ''), l2.id)) from pilotage.cles_trousseaux t2 join pilotage.v_lots l2 on l2.id = t2.asset_id
-                       where t2.supprime_le is null and t2.asset_id <> t.asset_id and t2.numero = t.numero and t2.agence is not distinct from t.agence))
+         -- même numéro dans la même agence sur un autre lot ou d'autres clés : trousseau commun à l'immeuble, ou erreur à corriger
+         'aussi_sur', (select jsonb_agg(distinct coalesce('lot ' || coalesce(nullif(l2.reference, ''), l2.id), t2.libelle))
+                       from pilotage.cles_trousseaux t2 left join pilotage.v_lots l2 on l2.id = t2.asset_id
+                       where t2.supprime_le is null and t2.id <> t.id and (t2.asset_id is distinct from t.asset_id or t.asset_id is null)
+                         and t2.numero = t.numero and t2.agence is not distinct from t.agence))
        order by t.id) from tr t left join pilotage.cles_agences a on a.code = t.agence), '[]'::jsonb),
     'etat_lot', (select to_jsonb(e) - 'k' from etats e where e.k = 0),
     'sorties', (select count(*) from etats e where e.type = 'prise' and (e.k = 0 or e.k in (select id from tr))),
@@ -102,7 +114,8 @@ language sql stable security definer set search_path to 'pilotage', 'public' as 
     'mouvements', case when p_histo then coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'type', m.type_mouvement, 'date', m.date_mouvement, 'qui', m.qui,
          'detenteur', m.detenteur, 'motif', m.motif, 'commentaire', m.commentaire, 'trousseau', (select t.numero from pilotage.cles_trousseaux t where t.id = m.trousseau_id),
          'source', m.source, 'saisi_par', m.saisi_par, 'saisi_le', m.le, 'par_id', m.par) order by m.date_mouvement desc, m.id desc) from mv m), '[]'::jsonb) end)
-  from pilotage.v_lots l where l.id = p_asset
+  from (select 1) x left join pilotage.v_lots l on l.id = p_asset
+  where (p_asset is not null and l.id is not null) or (p_asset is null and exists (select 1 from tr))
 $$;
 
 -- Listes communes aux écrans : droits, agences, membres, noms déjà saisis (proposés à la saisie)
@@ -184,7 +197,7 @@ begin
   return n;
 end $$;
 
-revoke all on function pilotage.cles_lot_json(text, boolean) from public, anon, authenticated;
+revoke all on function pilotage.cles_json(text, bigint, boolean) from public, anon, authenticated;
 revoke all on function pilotage.cles_contexte() from public, anon, authenticated;
 revoke all on function pilotage.cles_weroof_restants() from public, anon, authenticated;
 revoke all on function pilotage.cles_reprendre_weroof(uuid, text, uuid) from public, anon, authenticated;
@@ -195,16 +208,18 @@ language plpgsql stable security definer set search_path to 'pilotage', 'public'
 begin
   if pilotage.mon_role() is null then raise exception 'Accès refusé'; end if;
   return pilotage.cles_contexte() || jsonb_build_object(
-    'lots', coalesce((select jsonb_agg(pilotage.cles_lot_json(x.a, false)) from (
-        select asset_id as a from pilotage.cles_trousseaux where supprime_le is null
-        union select asset_id from pilotage.cles_mouvements where supprime_le is null) x
-      where exists (select 1 from pilotage.v_lots l where l.id = x.a)), '[]'::jsonb),
+    'lots', coalesce((select jsonb_agg(pilotage.cles_json(x.a, null, false)) from (
+        select asset_id as a from pilotage.cles_trousseaux where supprime_le is null and asset_id is not null
+        union select asset_id from pilotage.cles_mouvements where supprime_le is null and asset_id is not null) x
+      where exists (select 1 from pilotage.v_lots l where l.id = x.a)), '[]'::jsonb)
+      || coalesce((select jsonb_agg(pilotage.cles_json(null, t.id, false) order by t.id) from pilotage.cles_trousseaux t
+                   where t.supprime_le is null and t.asset_id is null), '[]'::jsonb),
     'tous_lots', coalesce((select jsonb_agg(jsonb_build_object('id', id, 'lot', coalesce(nullif(reference, ''), id), 'adresse', adresse)) from pilotage.v_lots), '[]'::jsonb),
     'weroof', case when pilotage.peut_suivre_baux() then pilotage.cles_weroof_restants() else '[]'::jsonb end);
 end $$;
 
 -- Fiches mandat et bail : clés des lots du dossier (lot du bail retrouvé dans Rivage), avec l'historique
-create or replace function public.pilotage_cles_lots(p_assets text[], p_bail text) returns jsonb
+create or replace function public.pilotage_cles_lots(p_assets text[], p_bail text, p_trousseau bigint default null) returns jsonb
 language plpgsql stable security definer set search_path to 'pilotage', 'public' as $$
 declare a text[] := coalesce(p_assets, '{}');
 begin
@@ -213,12 +228,14 @@ begin
     a := a || array(select data->>'asset_id' from pilotage.objets where type = 'LeasingContract' and id = p_bail and data->>'asset_id' is not null);
   end if;
   return pilotage.cles_contexte() || jsonb_build_object(
-    'lots', coalesce((select jsonb_agg(pilotage.cles_lot_json(y.x, true) order by y.x) from (select distinct unnest(a) as x) y
-                      where exists (select 1 from pilotage.v_lots l where l.id = y.x)), '[]'::jsonb));
+    'lots', coalesce((select jsonb_agg(pilotage.cles_json(y.x, null, true) order by y.x) from (select distinct unnest(a) as x) y
+                      where exists (select 1 from pilotage.v_lots l where l.id = y.x)), '[]'::jsonb)
+         || case when p_trousseau is not null and exists (select 1 from pilotage.cles_trousseaux where id = p_trousseau and asset_id is null and supprime_le is null)
+                 then jsonb_build_array(pilotage.cles_json(null, p_trousseau, true)) else '[]'::jsonb end);
 end $$;
 
 -- Trousseau : création, modification, suppression (gestion et direction)
-create or replace function public.pilotage_cles_trousseau(p_id bigint, p_asset text, p_numero text, p_agence text, p_composition text, p_note text, p_supprimer boolean)
+create or replace function public.pilotage_cles_trousseau(p_id bigint, p_asset text, p_libelle text, p_numero text, p_agence text, p_composition text, p_note text, p_supprimer boolean)
 returns bigint language plpgsql security definer set search_path to 'pilotage', 'public' as $$
 declare v bigint;
 begin
@@ -228,18 +245,23 @@ begin
     if v is null then raise exception 'Trousseau introuvable'; end if;
     return v;
   end if;
+  p_libelle := nullif(trim(p_libelle), ''); p_asset := nullif(trim(p_asset), '');
   p_numero := nullif(trim(p_numero), ''); p_agence := nullif(trim(p_agence), ''); p_composition := nullif(trim(p_composition), ''); p_note := nullif(trim(p_note), '');
   if p_numero is null and p_composition is null then raise exception 'Indiquer le numéro du trousseau, ou à défaut ce qu''il contient'; end if;
   if p_agence is not null and not exists (select 1 from pilotage.cles_agences where code = p_agence) then raise exception 'Agence inconnue'; end if;
+  if p_asset is not null and not exists (select 1 from pilotage.v_lots where id = p_asset) then raise exception 'Lot inconnu dans Rivage'; end if;
   if p_id is null then
-    if not exists (select 1 from pilotage.v_lots where id = p_asset) then raise exception 'Lot inconnu dans Rivage'; end if;
-    insert into pilotage.cles_trousseaux (asset_id, numero, agence, composition, note, par)
-    values (p_asset, p_numero, p_agence, p_composition, p_note, auth.uid()) returning id into v;
+    if p_asset is null and p_libelle is null then raise exception 'Choisir un lot Rivage, ou donner un nom aux clés'; end if;
+    insert into pilotage.cles_trousseaux (asset_id, libelle, numero, agence, composition, note, par)
+    values (p_asset, case when p_asset is null then p_libelle end, p_numero, p_agence, p_composition, p_note, auth.uid()) returning id into v;
   else
-    update pilotage.cles_trousseaux set numero = p_numero, agence = p_agence, composition = p_composition, note = p_note,
-      a_verifier = null, par = auth.uid(), le = now()
+    -- des clés saisies à la main peuvent être rattachées plus tard à un lot Rivage ; leurs mouvements suivent
+    update pilotage.cles_trousseaux set asset_id = coalesce(p_asset, asset_id),
+      libelle = case when coalesce(p_asset, asset_id) is null then coalesce(p_libelle, libelle) end,
+      numero = p_numero, agence = p_agence, composition = p_composition, note = p_note, a_verifier = null, par = auth.uid(), le = now()
     where id = p_id and supprime_le is null returning id into v;
     if v is null then raise exception 'Trousseau introuvable'; end if;
+    if p_asset is not null then update pilotage.cles_mouvements set asset_id = p_asset where trousseau_id = v and asset_id is null; end if;
   end if;
   return v;
 end $$;
@@ -251,11 +273,13 @@ language plpgsql security definer set search_path to 'pilotage', 'public' as $$
 declare v bigint; nb integer;
 begin
   if pilotage.mon_role() is null then raise exception 'Accès refusé'; end if;
-  if not exists (select 1 from pilotage.v_lots where id = p_asset) then raise exception 'Lot inconnu dans Rivage'; end if;
+  if p_asset is null and p_trousseau is not null then  -- clés sans lot Rivage
+    if not exists (select 1 from pilotage.cles_trousseaux where id = p_trousseau and asset_id is null and supprime_le is null) then raise exception 'Clés introuvables'; end if;
+  elsif not exists (select 1 from pilotage.v_lots where id = p_asset) then raise exception 'Lot inconnu dans Rivage'; end if;
   if p_type not in ('prise', 'retour') then raise exception 'Indiquer prise ou retour'; end if;
   if p_date > now() + interval '5 minutes' then raise exception 'La date ne peut pas être dans le futur'; end if;
   if p_trousseau is not null then
-    if not exists (select 1 from pilotage.cles_trousseaux where id = p_trousseau and asset_id = p_asset and supprime_le is null) then
+    if not exists (select 1 from pilotage.cles_trousseaux where id = p_trousseau and asset_id is not distinct from p_asset and supprime_le is null) then
       raise exception 'Ce trousseau n''est pas rattaché à ce lot'; end if;
   else
     select count(*), min(id) into nb, v from pilotage.cles_trousseaux where asset_id = p_asset and supprime_le is null;
@@ -303,8 +327,8 @@ end $$;
 do $$
 declare f text;
 begin
-  foreach f in array array['pilotage_cles_liste()', 'pilotage_cles_lots(text[], text)',
-    'pilotage_cles_trousseau(bigint, text, text, text, text, text, boolean)',
+  foreach f in array array['pilotage_cles_liste()', 'pilotage_cles_lots(text[], text, bigint)',
+    'pilotage_cles_trousseau(bigint, text, text, text, text, text, text, boolean)',
     'pilotage_cles_mouvement(text, bigint, text, timestamptz, text, uuid, text, text, text)',
     'pilotage_cles_mouvement_supprimer(bigint)', 'pilotage_cles_weroof(uuid, text, boolean)'] loop
     execute 'revoke all on function public.' || f || ' from public, anon';
