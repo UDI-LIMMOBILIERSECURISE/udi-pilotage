@@ -9,6 +9,7 @@ import { preparer, SMS, nomSms, smsFactures, lienGmail, TYPES_BAIL, DECISIONS, C
 import { chargerModeles, texteSmsGestion, MOYEN as MOYEN_MSG } from './messages.js';
 import MessagesDossier from './MessagesDossier.jsx';
 import FicheConge from './FicheConge.jsx';
+import { ClesLots } from './Cles.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const auj = () => new Date().toISOString().slice(0, 10);
@@ -182,6 +183,7 @@ export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
       </div>}
     </div>)}
     <div ref={refMail}>{mail && <EditeurMail mail={mail} email={email} fermer={() => setMail(null)} marquer={async () => { await etapeFaite(mail.etape.cle, mail.etape.etape, mail.etape.detail); setMail(null); }} peut={gere} />}</div>
+    <ClesLots bail={b.bail_id} />
     <FicheConge bail={b.bail_id} apres={() => { setRev((n) => n + 1); apres && apres(); }} />
     <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} etapes={etapesMessages} />
 

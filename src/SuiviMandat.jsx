@@ -9,6 +9,7 @@ import { Circuit } from './Circuit.jsx';
 import MessagesDossier from './MessagesDossier.jsx';
 import OrduresLots, { useOrdures } from './Ordures.jsx';
 import PermisMandat from './Permis.jsx';
+import { ClesLots } from './Cles.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const court = (t) => (t || '').split(' · ')[0];
@@ -87,6 +88,7 @@ export default function DossierMandat({ m, apres, etapesMessages }) {
     </>}
     <Immeubles m={m} onErreur={setErr} apres={async () => { await charger(); apres && apres(); }} />
     <PermisMandat m={m} onErreur={setErr} />
+    {(d.lots || []).length > 0 && <ClesLots assets={d.lots.map((l) => l.id)} />}
     <SuivisMandat m={m} d={d} agir={agir} />
   </>;
 }
