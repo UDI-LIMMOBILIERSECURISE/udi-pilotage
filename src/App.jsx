@@ -915,7 +915,8 @@ function Sinistres() {
   const [statut, setStatut] = useState('tous');
   const [sel, setSel] = useState(null);
   const [cherche, setCherche] = useState('');
-  const [tag, setTag] = useState('');
+  const [tags, setTags] = useState([]); // plusieurs tags possibles (06/11) : tous à la fois, ou au moins un
+  const [tousLesTags, setTousLesTags] = useState(true);
   // Colonne « Clos » repliée au départ (plus de 200 dossiers repris de Monday et WeRoof) ; un clic sur l'en-tête replie ou ouvre une colonne
   const [replie, setReplie] = useState({ clos: true });
   if (err) return <div className="banner">{err}</div>;
@@ -940,7 +941,7 @@ function Sinistres() {
   // les 7 tags de Rivage toujours proposés, dans leur ordre ; un tag inconnu reçu de Rivage s'ajoute à la suite
   const tousTags = [...TAGS_RIVAGE, ...[...new Set(d.flatMap(tagsDe))].filter((t) => !TAGS_RIVAGE.some((r) => normaliser(r) === normaliser(t))).sort((a, b) => a.localeCompare(b, 'fr'))];
   const aTag = (x, t) => tagsDe(x).some((y) => normaliser(y) === normaliser(t));
-  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut).filter((x) => !tag || aTag(x, tag)).filter(trouve);
+  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut).filter((x) => !tags.length || (tousLesTags ? tags.every((t) => aTag(x, t)) : tags.some((t) => aTag(x, t)))).filter(trouve);
   const colonnes = STATUTS.filter(([k]) => statut === 'tous' || k === statut).map(([k, l]) => [k, l, vus.filter((x) => colonneDe(x) === k)]);
   const s = d.find((x) => x.id === sel);
   return <>
@@ -958,8 +959,15 @@ function Sinistres() {
       ['vieux', '+ de 15 jours', d.filter(tests.vieux).length], ['sans', 'Sans prestataire', d.filter(tests.sans).length]]} />
     <Filtres val={statut} set={setStatut} items={[['tous', 'Tous les statuts', d.filter(tests[filtre]).length],
       ...STATUTS.map(([k, l]) => [k, l, d.filter(tests[filtre]).filter((x) => colonneDe(x) === k).length])]} />
-    <Filtres val={tag || 'tous'} set={(v) => setTag(v === 'tous' ? '' : v)} items={[['tous', 'Tous les tags', d.length],
-      ...tousTags.map((t) => [t, t === 'PL' ? 'PL (permis de louer)' : t === 'DMEL' ? 'DMEL (déclaration)' : t, d.filter((x) => aTag(x, t)).length])]} />
+    <div className="row" role="group" aria-label="Filtrer par tags (plusieurs choix possibles)" style={{ gap: 6, margin: '6px 0' }}>
+      <span className="muted" style={{ fontSize: 12 }}>Tags :</span>
+      <button className={'chip' + (!tags.length ? ' on' : '')} onClick={() => setTags([])}>Tous</button>
+      {tousTags.map((t) => { const on = tags.includes(t);
+        return <button key={t} className={'chip' + (on ? ' on' : '')} aria-pressed={on} onClick={() => setTags(on ? tags.filter((x) => x !== t) : [...tags, t])}>
+          {on ? '✓ ' : ''}{t === 'PL' ? 'PL (permis de louer)' : t === 'DMEL' ? 'DMEL (déclaration)' : t}<span className="n">{d.filter((x) => aTag(x, t)).length}</span></button>; })}
+      {tags.length > 1 && <button className="lien" onClick={() => setTousLesTags(!tousLesTags)}>
+        {tousLesTags ? 'Tickets avec tous ces tags (passer à « au moins un »)' : 'Tickets avec au moins un de ces tags (passer à « tous »)'}</button>}
+    </div>
     <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Rivage n’envoie pas la pose d’un tag seule : un tag apparaît ici à la modification suivante de l’incident (statut, description…).</div>
     <input className="recherche" placeholder="Rechercher : titre, adresse, locataire, bailleur, entreprise, téléphone, e-mail, n° de bail" value={cherche}
       onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un ticket" />
