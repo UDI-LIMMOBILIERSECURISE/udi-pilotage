@@ -171,14 +171,19 @@ function EdlEntree({ bail, e, apres }) {
 // Champs non fournis par Rivage ({date_edl}, {heure_edl}…) : saisis ici, remplacés dans le texte avant l'envoi.
 // Un champ date s'ouvre en calendrier (valeur AAAA-MM-JJ, écrite JJ/MM/AAAA dans le texte).
 const estDate = (c) => /date/.test(c);
+// 130 : liste sur plusieurs lignes ({travaux_a_prevoir} du mail après pré-visite) : zone de texte au lieu d'un champ d'une ligne.
+const estLong = (c) => /travaux/.test(c);
 const enTexte = (valeurs) => Object.fromEntries(Object.entries(valeurs).map(([k, v]) =>
   [k, estDate(k) && /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v.split('-').reverse().join('/') : v]));
 function Champs({ champs, valeurs, setValeurs }) {
   if (!champs.length) return null;
   return (
     <div className="row" style={{ fontSize: 13 }}>
-      {champs.map((c) => <label key={c}>{libelleChamp(c)} <input type={estDate(c) ? 'date' : 'text'} value={valeurs[c] || ''}
-        onChange={(e) => setValeurs({ ...valeurs, [c]: e.target.value })} /></label>)}
+      {champs.map((c) => estLong(c)
+        ? <label key={c} style={{ width: '100%' }}>{libelleChamp(c)} (une ligne par point)<textarea rows={4} style={{ width: '100%' }} value={valeurs[c] || ''}
+            placeholder={'- …\n- …'} onChange={(e) => setValeurs({ ...valeurs, [c]: e.target.value })} /></label>
+        : <label key={c}>{libelleChamp(c)} <input type={estDate(c) ? 'date' : 'text'} value={valeurs[c] || ''}
+            onChange={(e) => setValeurs({ ...valeurs, [c]: e.target.value })} /></label>)}
     </div>
   );
 }
