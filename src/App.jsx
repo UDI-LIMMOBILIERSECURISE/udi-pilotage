@@ -108,7 +108,7 @@ function Connexion() {
 // Menu de navigation : rubriques regroupées, page courante gardée dans l'adresse (#regles) pour le retour arrière et le rechargement
 const MENU = [
   ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['alouer', 'À louer', '⌂']]],
-  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['cles', 'Clés', '⚿'], ['sinistres', 'Sinistres', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
+  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['cles', 'Clés', '⚿'], ['sinistres', 'Tickets', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
   ['Commercial', [['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
   ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['equipe', 'Équipe', '☺']]],
 ];
@@ -220,7 +220,7 @@ function Journee({ moi }) {
   const dossiers = useMemo(() => {
     const m = new Map();
     visibles.forEach((a) => {
-      const k = a.dossier?.type === 'bail' || a.dossier?.type === 'lot' ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
+      const k = ['bail', 'lot', 'ticket'].includes(a.dossier?.type) ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
       if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, bailleur: a.bailleur, mandat_id: a.mandat_id, alertes: [] });
       m.get(k).alertes.push(a);
       if (a.objet_type === 'LeasingContract') m.get(k).bail_id = a.objet_id;
@@ -270,7 +270,7 @@ function Journee({ moi }) {
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
-                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.dossier?.type === 'invoice' ? 'Facture fournisseur' : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
+                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.dossier?.type === 'invoice' ? 'Facture fournisseur' : d.dossier?.type === 'ticket' ? `Ticket n°${d.dossier.ref}${d.dossier.titre ? ' · ' + d.dossier.titre : ''}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
                   <div className="grid2">
                     {d.bailleur && <><span>Bailleur</span><span>{d.bailleur}</span></>}
                     {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
@@ -895,7 +895,9 @@ function SuiviSinistre({ dossier, recharger }) {
   </>;
 }
 
-// ----- Sinistres : colonnes par statut -----
+// ----- Tickets (ex-Sinistres, 127) : colonnes par statut, filtre par tags Rivage, rappels et notifications -----
+// Forme des tags Rivage encore inconnue au 06/11 (champ vide partout) : texte, ou objet avec un nom
+const tagNom = (t) => (t == null ? '' : typeof t === 'string' ? t : t.name || t.label || t.title || t.value || JSON.stringify(t));
 
 const TYPE_INC = { plumbing: 'Plomberie', roofing: 'Toiture', painting: 'Peinture', electricity: 'Électricité', electrical: 'Électricité', heating: 'Chauffage', locksmith: 'Serrurerie', locksmithing: 'Serrurerie', other: 'Autre' };
 const URG = { urgent: ['Urgent', 'critique'], high: ['Haute', 'haute'], normal: ['Normale', 'normale'], low: ['Basse', 'normale'] };
@@ -909,6 +911,7 @@ function Sinistres() {
   const [statut, setStatut] = useState('tous');
   const [sel, setSel] = useState(null);
   const [cherche, setCherche] = useState('');
+  const [tag, setTag] = useState('');
   // Colonne « Clos » repliée au départ (plus de 200 dossiers repris de Monday et WeRoof) ; un clic sur l'en-tête replie ou ouvre une colonne
   const [replie, setReplie] = useState({ clos: true });
   if (err) return <div className="banner">{err}</div>;
@@ -928,12 +931,14 @@ function Sinistres() {
     vieux: (x) => !x.clos && x.jours > 15,
     sans: (x) => !x.clos && !x.prestataires,
   };
-  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut).filter(trouve);
+  const tagsDe = (x) => (Array.isArray(x.tags) ? x.tags.map(tagNom).filter(Boolean) : []);
+  const tousTags = [...new Set(d.flatMap(tagsDe))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut).filter((x) => !tag || tagsDe(x).includes(tag)).filter(trouve);
   const colonnes = STATUTS.filter(([k]) => statut === 'tous' || k === statut).map(([k, l]) => [k, l, vus.filter((x) => colonneDe(x) === k)]);
   const s = d.find((x) => x.id === sel);
   return <>
     <div className="entete">
-      <div><h1>Sinistres et incidents techniques</h1><p className="sub">Au {date(auj())} · {d.filter((x) => x.source !== 'monday').length} incidents reçus de Rivage
+      <div><h1>Tickets</h1><p className="sub">Au {date(auj())} · {d.filter((x) => x.source !== 'monday').length} incidents reçus de Rivage
         · {d.filter((x) => x.source === 'monday' && x.origine !== 'weroof').length} repris de Monday · {d.filter((x) => x.origine === 'weroof').length} repris de WeRoof
         · {d.filter((x) => x.repris).length} dossiers repris devenus incidents Rivage</p></div>
       <div className="objectif"><div className="row" style={{ justifyContent: 'space-between' }}><span className="muted">Objectif : aucun incident ouvert depuis plus de 15 jours</span><b>{aJour}/{ouverts.length}</b></div>
@@ -946,14 +951,19 @@ function Sinistres() {
       ['vieux', '+ de 15 jours', d.filter(tests.vieux).length], ['sans', 'Sans prestataire', d.filter(tests.sans).length]]} />
     <Filtres val={statut} set={setStatut} items={[['tous', 'Tous les statuts', d.filter(tests[filtre]).length],
       ...STATUTS.map(([k, l]) => [k, l, d.filter(tests[filtre]).filter((x) => colonneDe(x) === k).length])]} />
+    {tousTags.length > 0 ? <Filtres val={tag || 'tous'} set={(v) => setTag(v === 'tous' ? '' : v)} items={[['tous', 'Tous les tags', d.length],
+      ...tousTags.map((t) => [t, t, d.filter((x) => tagsDe(x).includes(t)).length])]} />
+      : <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Aucun tag sur les incidents Rivage pour l’instant : le filtre par tag apparaîtra dès qu’un incident en portera un.</div>}
     <input className="recherche" placeholder="Rechercher : titre, adresse, locataire, bailleur, entreprise, téléphone, e-mail, n° de bail" value={cherche}
-      onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un sinistre" />
+      onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un ticket" />
     {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) avec les filtres choisis.</div>}
     <div style={{ height: 8 }} />
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un incident pour voir le détail." detail={s && <>
       <div className="muted">{s.source === 'monday' ? `Repris de ${ORIGINE(s)}${s.reference ? ' · ' + s.reference : ''} · ${s.clos ? 'Clos' : 'En cours'}${s.statut_monday ? ' (' + ORIGINE(s) + ' : ' + s.statut_monday + ')' : ''}`
         : `Incident n°${s.numero} · ${ST_INC[s.statut] || s.statut}${s.repris ? ` · repris de ${ORIGINE(s.repris)}${s.repris.reference ? ' ' + s.repris.reference : ''} (ouvert le ${date(s.repris.ouvert_le)})` : ''}`}</div>
       <h2>{s.titre}</h2>
+      {tagsDe(s).length > 0 && <div className="row" style={{ gap: 4, marginBottom: 6 }}>{tagsDe(s).map((t) => <span key={t} className="etq info">{t}</span>)}</div>}
+      <RappelsTicket key={'r' + s.id} ticket={s} />
       {s.situation && <div className={'mini-alerte ' + s.situation.gravite}><b>Situation du bien : {s.situation.libelle}</b>
         <div>{s.situation.detail}{s.situation.bail ? ' Bail ' + s.situation.bail + '.' : ''}</div>
         {s.mandat_statut && <div className="muted">{s.mandat_statut}</div>}</div>}
@@ -985,6 +995,7 @@ function Sinistres() {
             <div className="row" style={{ justifyContent: 'space-between' }}><span className="mono muted">{(x.source === 'monday' ? ORIGINE(x) + (x.reference ? ' · ' + x.reference : '') : '#' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type)) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}</span>
               <span className="row" style={{ gap: 4 }}><span className={'statut-inc ' + colonneDe(x)}>{x.clos ? (ST_INC[x.statut] || 'Clos') : x.statut_monday || ST_INC[x.statut] || x.statut}</span>{u[0] && <span className={'sev ' + u[1]}>{u[0]}</span>}</span></div>
             <div className="kcarte-titre">{x.titre}</div>
+            {tagsDe(x).length > 0 && <div className="row" style={{ gap: 4, margin: '2px 0' }}>{tagsDe(x).map((t) => <span key={t} className="etq info" style={{ fontSize: 11 }}>{t}</span>)}</div>}
             <div className="muted">{x.adresse || 'Immeuble, pas de lot précis'}</div>
             {x.situation && <div style={{ marginTop: 6 }}><span className={'situ ' + x.situation.code + ' ' + x.situation.gravite}>{x.situation.libelle}</span>
               {x.mandat_statut && x.mandat_statut !== 'Mandat actif' && <span className="situ critique" style={{ marginLeft: 6 }}>{x.mandat_statut}</span>}</div>}
@@ -999,6 +1010,50 @@ function Sinistres() {
       </div>; })}</div>
     </AvecDetail>
   </>;
+}
+
+// Rappel pour soi, ou notification à un collègue : arrive dans Ma journée de la personne (le jour choisi pour un rappel, tout de suite pour une notification)
+function RappelsTicket({ ticket }) {
+  const [d, setD] = useState(null);
+  const [f, setF] = useState(null);
+  const [err, setErr] = useState('');
+  const demain = () => { const x = new Date(); x.setDate(x.getDate() + 1); return x.toISOString().slice(0, 10); };
+  const charger = () => rpc('pilotage_ticket_rappels', { p_ticket: ticket.id }).then(setD).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, [ticket.id]);
+  if (!d) return err ? <div className="err">{err}</div> : null;
+  const agir = async (args) => { setErr(''); try { await rpc('pilotage_ticket_rappel', { p_action: null, p_id: null, p_ticket: null, p_titre: null, p_nature: null, p_destinataire: null, p_message: null, p_echeance: null, ...args }); await charger(); return true; } catch (e) { setErr(e.message); return false; } };
+  const ouverts = d.rappels.filter((r) => !r.fait_le);
+  return <div className="mini-alerte normale" style={{ color: 'var(--ink)' }}>
+    <div className="row" style={{ justifyContent: 'space-between' }}>
+      <b>Rappels et notifications{ouverts.length ? ` (${ouverts.length})` : ''}</b>
+      {!f && <span className="row" style={{ gap: 6 }}>
+        <button className="btn" onClick={() => setF({ nature: 'rappel', echeance: demain(), message: '' })}>Me mettre un rappel</button>
+        <button className="btn" onClick={() => setF({ nature: 'notification', destinataire: d.membres.find((m) => m.id !== d.moi)?.id || '', message: '' })}>Notifier un collègue</button>
+      </span>}
+    </div>
+    {err && <div className="err">{err}</div>}
+    {f && <div className="row" style={{ marginTop: 6, alignItems: 'flex-end' }}>
+      {f.nature === 'notification'
+        ? <label className="muted">Notifier<br /><select value={f.destinataire} onChange={(e) => setF({ ...f, destinataire: e.target.value })}>
+            {d.membres.filter((m) => m.id !== d.moi).map((m) => <option key={m.id} value={m.id}>{m.prenom}</option>)}</select></label>
+        : <label className="muted">Me le rappeler le<br /><input type="date" value={f.echeance} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ ...f, echeance: e.target.value })} /></label>}
+      <label className="muted" style={{ flex: 1, minWidth: 200 }}>{f.nature === 'notification' ? 'Message' : 'Note (facultatif)'}<br />
+        <input value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} style={{ width: '100%' }} autoFocus
+          placeholder={f.nature === 'notification' ? 'Ex. peux-tu appeler le plombier ?' : 'Ex. relancer l’assureur'} /></label>
+      <button className="btn plein" disabled={f.nature === 'notification' ? !f.destinataire || !f.message.trim() : !f.echeance}
+        onClick={async () => { if (await agir({ p_action: 'creer', p_ticket: ticket.id, p_titre: (ticket.numero ? 'n°' + ticket.numero + ' ' : '') + (ticket.titre || ''), p_nature: f.nature, p_destinataire: f.destinataire || null, p_message: f.message, p_echeance: f.echeance || null })) setF(null); }}>
+        {f.nature === 'notification' ? 'Envoyer' : 'Enregistrer'}</button>
+      <button className="lien" onClick={() => setF(null)}>Annuler</button>
+    </div>}
+    {d.rappels.map((r) => { const pourMoi = r.destinataire === d.moi; return <div key={r.id} className="row" style={{ gap: 8, padding: '3px 0', fontSize: 13, opacity: r.fait_le ? 0.6 : 1 }}>
+      <input type="checkbox" checked={!!r.fait_le} disabled={!pourMoi && r.auteur !== d.moi} aria-label={r.fait_le ? 'Rouvrir' : 'Marquer fait'}
+        onChange={() => agir({ p_action: r.fait_le ? 'rouvrir' : 'fait', p_id: r.id })} />
+      <span style={{ flex: 1, minWidth: 180, textDecoration: r.fait_le ? 'line-through' : 'none' }}>
+        {r.nature === 'rappel' ? `Rappel de ${r.destinataire_prenom} le ${date(r.echeance)}` : `${r.auteur_prenom} → ${r.destinataire_prenom}`}{r.message ? ' : ' + r.message : ''}</span>
+      <span className="muted">{r.fait_le ? 'fait le ' + date(r.fait_le) : r.nature === 'notification' ? 'envoyée le ' + date(r.cree_le) : ''}</span>
+      {!r.fait_le && (pourMoi || r.auteur === d.moi) && <button className="lien" onClick={() => agir({ p_action: 'supprimer', p_id: r.id })}>Supprimer</button>}
+    </div>; })}
+  </div>;
 }
 
 // ----- Sorties et dépôts de garantie -----
