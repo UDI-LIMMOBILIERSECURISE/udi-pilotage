@@ -48,16 +48,18 @@ export default function PermisMandat({ m, onErreur }) {
 }
 
 // Fiche du bail : permis de louer du lot du bail (suivi d'ensemble 052, filtré sur ce bail). Rien si le lot n'est pas soumis.
-export function PermisBail({ bail, onErreur }) {
+// Fiche d'un ticket tagué PL ou DMEL : même bloc, retrouvé par le n° du lot (lot), avec un message si le lot n'est pas suivi.
+export function PermisBail({ bail, lot, onErreur }) {
   const [x, setX] = useState(undefined);
   const [email, setEmail] = useState('');
   const [prenom, setPrenom] = useState('');
-  const charger = () => rpc('pilotage_permis_suivi').then((liste) => setX((liste || []).find((y) => y.bail?.id === bail) || null)).catch(() => setX(null));
+  const charger = () => rpc('pilotage_permis_suivi').then((liste) => setX((liste || []).find((y) => (bail ? y.bail?.id === bail : String(y.lot) === String(lot))) || null)).catch(() => setX(null));
   useEffect(() => {
     charger();
     supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || ''));
     rpc('pilotage_moi').then((r) => setPrenom(r?.prenom || '')).catch(() => {});
-  }, [bail]);
+  }, [bail, lot]);
+  if (x === null && lot) return <div className="mini-alerte haute" style={{ marginTop: 10 }}>Permis de louer : le lot {lot} n’est pas soumis d’après la table des communes du pilotage. Si la mairie l’exige, corriger le régime du lot (onglet À louer, « Modifier » sur le lot).</div>;
   if (!x) return null;
   const agir = async (args) => { try { await rpc('pilotage_permis_action', args); await charger(); } catch (e) { onErreur ? onErreur(e.message) : alert(e.message); } };
   return <div style={{ marginTop: 10 }}>
