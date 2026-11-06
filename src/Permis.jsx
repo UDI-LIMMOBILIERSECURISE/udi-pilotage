@@ -100,7 +100,7 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
     </div>
     {p.detail && <div className="muted" style={{ fontSize: 12 }}>{p.detail}{p.source ? ' · source : ' + p.source : ''}</div>}
     {p.regime === 'inconnu' && <div className="muted" style={{ fontSize: 12 }}>La recherche automatique de la commune est lancée dans l’heure ; le résultat sera à confirmer par la gestion (onglet À louer).</div>}
-    {(l.demandes || []).map((d) => <Demande key={d.id} l={l} d={d} agir={agir} email={email} prenom={prenom} />)}
+    {(l.demandes || []).map((d) => <Demande key={d.id} l={l} d={d} agir={agir} email={email} prenom={prenom} recharger={recharger} onErreur={onErreur} />)}
     {['autorisation', 'a_verifier'].includes(p.regime) && !enCours && <div className="row" style={{ marginTop: 4 }}>
       <span className="muted">{l.choix === 'agence' ? 'Dépôt par l’agence (90 € TTC à facturer)' : l.choix === 'bailleur' ? 'Dépôt par le bailleur (récépissé à obtenir)' : l.choix_a_demander ? 'Choix du bailleur à obtenir :' : 'Qui dépose ?'}</span>
       {l.choix !== 'agence' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_agence', p_le: null, p_numero: null, p_notes: null })}>L’agence dépose (90 € TTC)</button>}
@@ -125,23 +125,96 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
     </div>)}
     {pieces && <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 12 }}>{(PIECES[p.regime === 'declaration' ? 'declaration' : 'autorisation']).map((x) => <li key={x}>{x}</li>)}
       {p.email_depot && <li>Dossier complet à transmettre à : {p.email_depot}{p.adresse_depot ? ' (' + p.adresse_depot + ')' : ''}</li>}</ul>}
+    {soumis && <FilPermis l={l} enCours={enCours} onErreur={onErreur} />}
   </div>;
 }
 
-function Demande({ l, d, agir, email, prenom }) {
+// Tâches et mises à jour du permis de louer d'un lot (126). Une tâche arrive dans Ma journée de la personne choisie le jour de son échéance.
+function FilPermis({ l, enCours, onErreur }) {
+  const [f, setF] = useState(null);
+  const [tache, setTache] = useState(null); // formulaire de nouvelle tâche
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const dans = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const charger = () => rpc('pilotage_permis_fil', { p_asset: l.asset_id }).then(setF).catch(() => setF(null));
+  useEffect(() => { charger(); }, [l.asset_id]);
+  if (!f) return null;
+  const erreur = (e) => (onErreur ? onErreur(e.message) : alert(e.message));
+  const tacheAction = async (action, t, extra = {}) => {
+    try { await rpc('pilotage_permis_tache', { p_action: action, p_id: t?.id || null, p_asset: l.asset_id, p_demande: extra.demande || null,
+      p_libelle: extra.libelle || null, p_echeance: extra.echeance || null, p_assigne: extra.assigne || null }); await charger(); return true; }
+    catch (e) { erreur(e); return false; }
+  };
+  const ouvertes = f.taches.filter((t) => !t.faite_le);
+  const faites = f.taches.filter((t) => t.faite_le);
+  return <div style={{ marginTop: 8 }}>
+    <div className="row" style={{ justifyContent: 'space-between' }}>
+      <b>Tâches{ouvertes.length ? ` (${ouvertes.length})` : ''}</b>
+      {!tache && <button className="lien" onClick={() => setTache({ libelle: '', echeance: dans(7), assigne: f.moi, demande: enCours?.id || null })}>+ Ajouter une tâche</button>}
+    </div>
+    {tache && <div className="row" style={{ marginTop: 4, alignItems: 'flex-end' }}>
+      <label className="muted" style={{ flex: 1, minWidth: 200 }}>Tâche<br /><input value={tache.libelle} onChange={(e) => setTache({ ...tache, libelle: e.target.value })}
+        placeholder="Ex. relancer la mairie, transmettre le récépissé au locataire" style={{ width: '100%' }} autoFocus /></label>
+      <label className="muted">Pour<br /><select value={tache.assigne} onChange={(e) => setTache({ ...tache, assigne: e.target.value })}>
+        {f.membres.map((m) => <option key={m.id} value={m.id}>{m.prenom}</option>)}</select></label>
+      <label className="muted">Échéance<br /><input type="date" value={tache.echeance} onChange={(e) => setTache({ ...tache, echeance: e.target.value })} /></label>
+      <button className="btn plein" disabled={!tache.libelle.trim() || !tache.echeance} onClick={async () => { if (await tacheAction('creer', null, tache)) setTache(null); }}>Enregistrer</button>
+      <button className="lien" onClick={() => setTache(null)}>Annuler</button>
+    </div>}
+    {!f.taches.length && !tache && <div className="muted" style={{ fontSize: 12 }}>Aucune tâche.</div>}
+    {[...ouvertes, ...faites].map((t) => <div key={t.id} className="row" style={{ gap: 8, padding: '3px 0', fontSize: 13, opacity: t.faite_le ? 0.6 : 1 }}>
+      <input type="checkbox" checked={!!t.faite_le} aria-label={t.faite_le ? 'Rouvrir la tâche' : 'Marquer la tâche faite'} onChange={() => tacheAction(t.faite_le ? 'rouvrir' : 'faite', t)} />
+      <span style={{ flex: 1, minWidth: 180, textDecoration: t.faite_le ? 'line-through' : 'none' }}>{t.libelle}</span>
+      <span className="muted">{t.assigne_prenom} · {t.faite_le ? `faite le ${date(t.faite_le)}${t.faite_par ? ' par ' + t.faite_par : ''}`
+        : <span style={{ color: t.echeance < auj() ? 'var(--red)' : t.echeance === auj() ? 'var(--amber)' : undefined }}>échéance {date(t.echeance)}</span>}</span>
+      {!t.faite_le && <button className="lien" onClick={() => window.confirm('Supprimer cette tâche ?') && tacheAction('supprimer', t)}>Supprimer</button>}
+    </div>)}
+
+    <div style={{ marginTop: 10 }}><b>Mises à jour{f.notes.length ? ` (${f.notes.length})` : ''}</b></div>
+    <div className="row" style={{ marginTop: 4, alignItems: 'flex-end' }}>
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Ajouter une mise à jour (appel à la mairie, pièce envoyée, réponse du bailleur…)" style={{ flex: 1, minWidth: 220 }} />
+      <button className="btn" disabled={busy || !note.trim()} onClick={async () => { setBusy(true); try { await rpc('pilotage_permis_note', { p_asset: l.asset_id, p_contenu: note, p_supprimer: null }); setNote(''); await charger(); } catch (e) { erreur(e); } setBusy(false); }}>Publier</button>
+    </div>
+    {f.notes.map((n) => <div key={n.id} style={{ borderLeft: '3px solid var(--line)', padding: '4px 8px', margin: '6px 0', fontSize: 13 }}>
+      <div className="muted" style={{ fontSize: 12 }}>{n.auteur || '—'} · {new Date(n.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        {n.auteur_id === f.moi && <button className="lien" style={{ marginLeft: 8 }} onClick={async () => { if (!window.confirm('Retirer ce message ?')) return; try { await rpc('pilotage_permis_note', { p_asset: l.asset_id, p_contenu: null, p_supprimer: n.id }); await charger(); } catch (e) { erreur(e); } }}>Retirer</button>}</div>
+      <div style={{ whiteSpace: 'pre-wrap' }}>{n.contenu}</div>
+    </div>)}
+  </div>;
+}
+
+function Demande({ l, d, agir, email, prenom, recharger, onErreur }) {
   const [rep, setRep] = useState({ action: '', le: auj() });
+  // déclaration (126) : accusé de réception de la mairie, correction de la date de dépôt et du n° de dossier
+  const [edit, setEdit] = useState(null);
+  const enregistrer = async () => {
+    try {
+      await rpc('pilotage_permis_demande_maj', { p_demande: d.id, p_depot_le: edit.depot, p_numero: edit.numero, p_recepisse_le: edit.recepisse || null });
+      setEdit(null); recharger && await recharger();
+    } catch (e) { onErreur ? onErreur(e.message) : alert(e.message); }
+  };
   const jours = Math.round((new Date(auj()) - new Date(d.depot_le)) / 86400000);
   const act = (action, extra = {}) => agir({ p_asset: l.asset_id, p_demande: d.id, p_action: action, p_le: extra.le || null, p_numero: null, p_notes: null });
   const mail = mailAttestation(l, d, prenom);
   return <div className="mini-alerte normale" style={{ margin: '4px 0' }}>
     <div><b>{d.regime === 'declaration' ? 'Déclaration' : 'Demande d’autorisation'}</b> déposée le {date(d.depot_le)}{d.numero ? ` · n° ${d.numero}` : ''}
       {d.close_le ? ` · close le ${date(d.close_le)}` : ''}</div>
+    {d.regime === 'declaration' && <div>{d.recepisse_le ? `Accusé de réception de la mairie du ${date(d.recepisse_le)}` : <span className="muted">Accusé de réception de la mairie : date non renseignée</span>}</div>}
     {d.reponse ? <div>{d.reponse === 'accord' ? `Accordée le ${date(d.reponse_le)}` : d.reponse === 'tacite' ? `Accord tacite le ${date(d.reponse_le)}` : `Refusée le ${date(d.reponse_le)}`}
       {d.reponse !== 'refus' && ` · caduc le ${date(new Date(new Date(d.reponse_le).setFullYear(new Date(d.reponse_le).getFullYear() + 2)))} sans bail signé`}</div>
       : d.regime === 'declaration' ? <div className="muted">Déclaration : pas de décision à attendre de la mairie.{l.bail?.signe_le ? ` Bail signé le ${date(l.bail.signe_le)} : déposée ${Math.round((new Date(d.depot_le) - new Date(l.bail.signe_le)) / 86400000)} jour(s) après la signature (délai : 15 jours).` : ''}</div>
       : d.regime === 'autorisation' && <div className="muted">Sans réponse depuis {jours} jour(s){jours >= 35 ? ' : l’accord est tacite (acquis à 30 jours), à constater' : jours >= 30 ? ' : accord acquis à 30 jours, mais une décision peut encore arriver par courrier : attendre 35 jours avant de signer' : jours >= 21 ? ' : relancer la mairie' : ''}.</div>}
     {d.reponse === 'tacite' && <div>{d.attestation_recue_le ? `Attestation reçue le ${date(d.attestation_recue_le)}` : d.attestation_demandee_le ? `Attestation demandée le ${date(d.attestation_demandee_le)}` : 'Attestation à demander à la mairie'}</div>}
+    {edit && <div className="row" style={{ marginTop: 4, alignItems: 'flex-end' }}>
+      <label className="muted">Déposée le<br /><input type="date" value={edit.depot} max={auj()} onChange={(e) => setEdit({ ...edit, depot: e.target.value })} /></label>
+      <label className="muted">N° de dossier<br /><input value={edit.numero} onChange={(e) => setEdit({ ...edit, numero: e.target.value })} style={{ width: 150 }} /></label>
+      <label className="muted">Accusé de réception du<br /><input type="date" value={edit.recepisse} min={edit.depot} max={auj()} onChange={(e) => setEdit({ ...edit, recepisse: e.target.value })} /></label>
+      <button className="btn plein" disabled={!edit.depot} onClick={enregistrer}>Enregistrer</button>
+      <button className="lien" onClick={() => setEdit(null)}>Annuler</button>
+    </div>}
     {!d.close_le && <div className="row" style={{ marginTop: 4 }}>
+      {d.regime === 'declaration' && !edit && <button className="btn" onClick={() => setEdit({ depot: d.depot_le || '', numero: d.numero || '', recepisse: d.recepisse_le || '' })}>
+        {d.recepisse_le ? 'Modifier la déclaration' : 'Noter l’accusé de réception'}</button>}
       {d.regime === 'autorisation' && !d.reponse && <>
         <select value={rep.action} onChange={(e) => setRep({ ...rep, action: e.target.value })} aria-label="Réponse de la mairie">
           <option value="">Réponse de la mairie…</option><option value="accord">Accordée</option><option value="refus">Refusée</option>
