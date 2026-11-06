@@ -12,6 +12,7 @@ import Fiche from './Fiche.jsx';
 import FicheConge from './FicheConge.jsx';
 import ALouer from './ALouer.jsx';
 import Reprise from './Reprise.jsx';
+import Cles from './Cles.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
@@ -60,7 +61,7 @@ function Connexion() {
 // Menu de navigation : rubriques regroupées, page courante gardée dans l'adresse (#regles) pour le retour arrière et le rechargement
 const MENU = [
   ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['alouer', 'À louer', '⌂']]],
-  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['sinistres', 'Sinistres', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
+  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['cles', 'Clés', '⚿'], ['sinistres', 'Sinistres', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
   ['Commercial', [['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
   ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['equipe', 'Équipe', '☺']]],
 ];
@@ -94,7 +95,7 @@ function Espace() {
     <main><div className="card"><h1>Accès non ouvert</h1><p className="sub">Votre compte existe mais n’a pas encore accès au pilotage. Demandez à Nicolas de vous ajouter dans l’onglet Équipe.</p>
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
-  const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true,
+  const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, cles: true,
     mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
     obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true };
   const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
@@ -133,6 +134,7 @@ function Espace() {
         {page === 'compta' && <Compta />}
         {page === 'impayes' && <Impayes />}
         {page === 'alouer' && <ALouer />}
+        {page === 'cles' && <Cles />}
         {page === 'reprise' && <Reprise moi={moi} />}
         {page === 'baux' && <SuiviBaux moi={moi} />}
         {page === 'mandats' && <Mandats />}
