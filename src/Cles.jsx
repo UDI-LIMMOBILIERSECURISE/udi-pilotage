@@ -21,6 +21,9 @@ const maintenantLocal = () => { const d = new Date(); d.setMinutes(d.getMinutes(
 // État d'un lot : sorti si au moins un trousseau (ou des clés sans trousseau) est dehors ; jamais sorti s'il n'y a aucun mouvement
 export const etatLot = (l) => (l.sorties > 0 ? 'sortie' : !l.dernier ? 'jamais' : 'agence');
 const ETAT = { sortie: ['Sorties', 'encours'], agence: ['À l’agence', 'ok'], jamais: ['Jamais sorties', 'gris'] };
+// 129 : étage lu dans Rivage (0 = rez-de-chaussée), porte saisie dans le pilotage
+export const etageTxt = (e) => (e == null || e === '' ? null : Number(e) === 0 ? 'RDC' : Number(e) < 0 ? 'sous-sol ' + -Number(e) : Number(e) === 1 ? '1er étage' : e + 'e étage');
+const situationLot = (l) => [etageTxt(l.etage), l.porte && 'porte ' + l.porte].filter(Boolean).join(' · ');
 const trousseauTxt = (t) => [t.numero ? 'n° ' + t.numero : 'sans n°', t.agence_nom].filter(Boolean).join(' · ');
 const detenteurs = (l) => [...(l.trousseaux || []).map((t) => t.etat), l.etat_lot].filter((e) => e && e.type === 'prise');
 
@@ -38,7 +41,7 @@ export default function Cles() {
   useEffect(() => { charger(); }, []);
 
   const lots = useMemo(() => (d?.lots || []).map((l) => ({ ...l, _etat: etatLot(l),
-    _txt: normaliser([l.lot, l.libelle, l.adresse, l.mandat, nature(l.nature), ...(l.trousseaux || []).flatMap((t) => [t.numero, t.agence_nom, t.composition, t.note]),
+    _txt: normaliser([l.lot, l.libelle, l.adresse, l.mandat, l.bailleur, etageTxt(l.etage), l.porte, l.complement, nature(l.nature), ...(l.trousseaux || []).flatMap((t) => [t.numero, t.agence_nom, t.composition, t.note]),
       ...detenteurs(l).map((e) => e.detenteur)].filter(Boolean).join(' ')) })), [d]);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
@@ -51,7 +54,8 @@ export default function Cles() {
     .filter((l) => !agence || (l.trousseaux || []).some((t) => t.agence === agence))
     .filter((l) => !motif || l.dernier?.motif === motif)
     .filter((l) => !q || correspond(l._txt, q))
-    .sort(tri === 'date' ? (a, b) => new Date(b.dernier?.date || 0) - new Date(a.dernier?.date || 0)
+    .sort(tri === 'bailleur' ? (a, b) => String(a.bailleur || '~').localeCompare(String(b.bailleur || '~'), 'fr') || String(a.lot).localeCompare(String(b.lot), 'fr', { numeric: true })
+      : tri === 'date' ? (a, b) => new Date(b.dernier?.date || 0) - new Date(a.dernier?.date || 0)
       : tri === 'numero' ? (a, b) => String(a.trousseaux?.[0]?.numero || '~').localeCompare(String(b.trousseaux?.[0]?.numero || '~'), 'fr', { numeric: true })
       : (a, b) => String(a.lot).localeCompare(String(b.lot), 'fr', { numeric: true }));
   const sorties = lots.filter((l) => l._etat === 'sortie');
@@ -69,7 +73,7 @@ export default function Cles() {
       <div className="tuile"><div className="muted">Sorties depuis plus de 30 jours</div><div className="tuile-n" style={{ color: longues.length ? 'var(--red)' : undefined }}>{longues.length}</div></div>
       {d.peut && d.weroof.length > 0 && <div className="tuile"><div className="muted">Clés WeRoof à rattacher</div><div className="tuile-n">{d.weroof.length}</div></div>}
     </div>
-    <input className="recherche" placeholder="Rechercher : n° de trousseau, nom des clés, lot, adresse, mandat, détenteur" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher des clés" />
+    <input className="recherche" placeholder="Rechercher : bailleur, n° de trousseau, nom des clés, lot, adresse, mandat, détenteur" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher des clés" />
     <div className="row" style={{ margin: '10px 0' }}>
       {FILTRES.map(([k, l, t]) => <button key={k} className={'chip' + (etat === k ? ' on' : '')} onClick={() => setEtat(k)}>{l}<span className="n">{lots.filter(t).length}</span></button>)}
     </div>
@@ -79,7 +83,7 @@ export default function Cles() {
       <select value={motif} onChange={(e) => setMotif(e.target.value)} aria-label="Motif du dernier mouvement">
         <option value="">Tous les motifs</option>{Object.entries(MOTIFS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <select value={tri} onChange={(e) => setTri(e.target.value)} aria-label="Trier">
-        <option value="lot">Tri par lot</option><option value="numero">Tri par n° de trousseau</option><option value="date">Dernier mouvement d’abord</option></select>
+        <option value="lot">Tri par lot</option><option value="bailleur">Tri par bailleur</option><option value="numero">Tri par n° de trousseau</option><option value="date">Dernier mouvement d’abord</option></select>
     </div>
     {!lots.length ? <div className="card">Aucune clé enregistrée.{d.peut ? ' « + Ajouter des clés » pour commencer.' : ''}</div>
       : !vus.length ? <div className="card">Rien avec ces filtres.</div>
@@ -99,8 +103,9 @@ function CarteLot({ l, ouvrir }) {
     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 220 }}>
         {l.libre ? <><div className="kcarte-titre" style={{ marginTop: 0 }}>{l.libelle}</div><div className="muted">Clés sans lot Rivage (nom saisi à la main)</div></>
-          : <><div className="kcarte-titre" style={{ marginTop: 0 }}>Lot {l.lot} · {nature(l.nature)}{l.mandat ? ' · mandat ' + l.mandat : ''}</div>
-            <div className="muted">{l.adresse}</div></>}
+          : <><div className="kcarte-titre" style={{ marginTop: 0 }}>Lot {l.lot} · {nature(l.nature)}{situationLot(l) ? ' · ' + situationLot(l) : ''}</div>
+            <div className="muted">{l.adresse}</div>
+            <div className="muted">Bailleur : {l.bailleur || '—'}{l.mandat ? ' · mandat ' + l.mandat : ''}</div></>}
         <div className="row" style={{ marginTop: 6, gap: 6 }}>
           {(l.trousseaux || []).map((t) => <span key={t.id} className="etq info" style={{ maxWidth: 'none' }}>{trousseauTxt(t)}</span>)}
           {!(l.trousseaux || []).length && <span className="muted">Aucun trousseau enregistré</span>}
@@ -153,7 +158,8 @@ function LotCles({ l, d, seul, apres, onErreur }) {
   return <div style={{ borderTop: seul ? 0 : '1px solid var(--line)', padding: '8px 0' }}>
     {!seul && <div style={{ fontWeight: 700, fontSize: 14 }}>Lot {l.lot} · {nature(l.nature)} <span className="muted">· {l.adresse}</span></div>}
     {seul && <div className="muted" style={{ marginBottom: 6 }}>{l.libre ? 'Clés sans lot Rivage, enregistrées sous le nom « ' + l.libelle + ' »'
-      : <>Lot {l.lot} · {nature(l.nature)} · {l.adresse}{l.mandat ? ' · mandat ' + l.mandat : ''}</>}</div>}
+      : <>Lot {l.lot} · {nature(l.nature)} · {l.adresse}{l.mandat ? ' · mandat ' + l.mandat : ''}<br />Bailleur : {l.bailleur || '—'}</>}</div>}
+    {!l.libre && <Situation l={l} d={d} apres={apres} onErreur={onErreur} />}
 
     {trs.map((t) => <div key={t.id} className={'mini-alerte ' + (t.etat?.type === 'prise' ? 'haute' : 'normale')} style={{ background: t.etat?.type === 'prise' ? 'var(--amber-bg)' : 'var(--teal-bg)', color: 'var(--ink)' }}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -202,6 +208,28 @@ function LotCles({ l, d, seul, apres, onErreur }) {
       </li>)}</ol>
       {mvts.length > 10 && !tout && <button className="lien" onClick={() => setTout(true)}>Voir les {mvts.length - 10} mouvements plus anciens</button>}
     </>}
+  </div>;
+}
+
+// Étage (Rivage, non modifiable ici) et porte (saisie dans le pilotage, par la gestion)
+function Situation({ l, d, apres, onErreur }) {
+  const [edit, setEdit] = useState(null);
+  const enregistrer = async () => {
+    onErreur('');
+    try { await rpc('pilotage_lot_porte', { p_asset: l.asset_id, p_porte: edit }); setEdit(null); await apres(); } catch (e) { onErreur(e.message); }
+  };
+  return <div className="row" style={{ gap: 8, marginBottom: 6, fontSize: 13, alignItems: 'center' }}>
+    <span>Étage : {etageTxt(l.etage) || <span className="muted">non renseigné dans Rivage</span>}</span>
+    <span>·</span>
+    {edit === null ? <>
+      <span>Porte : {l.porte || <span className="muted">non renseignée</span>}</span>
+      {d.peut && <button className="lien" onClick={() => setEdit(l.porte || '')}>{l.porte ? 'Modifier' : 'Renseigner'}</button>}
+    </> : <>
+      <input value={edit} onChange={(e) => setEdit(e.target.value)} placeholder="Ex. gauche, B17, fond du couloir" style={{ width: 200 }} autoFocus />
+      <button className="btn plein" onClick={enregistrer}>Enregistrer</button>
+      <button className="lien" onClick={() => setEdit(null)}>Annuler</button>
+    </>}
+    {l.complement && <span className="muted">(adresse Rivage : {l.complement})</span>}
   </div>;
 }
 
