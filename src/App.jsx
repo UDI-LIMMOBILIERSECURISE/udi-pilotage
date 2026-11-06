@@ -13,6 +13,7 @@ import FicheConge from './FicheConge.jsx';
 import ALouer from './ALouer.jsx';
 import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
+import { PermisBail } from './Permis.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
@@ -898,6 +899,9 @@ function SuiviSinistre({ dossier, recharger }) {
 // ----- Tickets (ex-Sinistres, 127) : colonnes par statut, filtre par tags Rivage, rappels et notifications -----
 // Forme des tags Rivage encore inconnue au 06/11 (champ vide partout) : texte, ou objet avec un nom
 const tagNom = (t) => (t == null ? '' : typeof t === 'string' ? t : t.name || t.label || t.title || t.value || JSON.stringify(t));
+// Tags créés dans Rivage (Nicolas, 06/11) : PL = permis de louer, DMEL = déclaration de mise en location
+const TAGS_RIVAGE = ['Sinistre', 'Travaux', 'A Facturer', 'PL', 'DMEL', 'Logement occupé', 'Logement vide'];
+const TAGS_PERMIS = ['pl', 'dmel'];
 
 const TYPE_INC = { plumbing: 'Plomberie', roofing: 'Toiture', painting: 'Peinture', electricity: 'Électricité', electrical: 'Électricité', heating: 'Chauffage', locksmith: 'Serrurerie', locksmithing: 'Serrurerie', other: 'Autre' };
 const URG = { urgent: ['Urgent', 'critique'], high: ['Haute', 'haute'], normal: ['Normale', 'normale'], low: ['Basse', 'normale'] };
@@ -932,8 +936,10 @@ function Sinistres() {
     sans: (x) => !x.clos && !x.prestataires,
   };
   const tagsDe = (x) => (Array.isArray(x.tags) ? x.tags.map(tagNom).filter(Boolean) : []);
-  const tousTags = [...new Set(d.flatMap(tagsDe))].sort((a, b) => a.localeCompare(b, 'fr'));
-  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut).filter((x) => !tag || tagsDe(x).includes(tag)).filter(trouve);
+  // les 7 tags de Rivage toujours proposés, dans leur ordre ; un tag inconnu reçu de Rivage s'ajoute à la suite
+  const tousTags = [...TAGS_RIVAGE, ...[...new Set(d.flatMap(tagsDe))].filter((t) => !TAGS_RIVAGE.some((r) => normaliser(r) === normaliser(t))).sort((a, b) => a.localeCompare(b, 'fr'))];
+  const aTag = (x, t) => tagsDe(x).some((y) => normaliser(y) === normaliser(t));
+  const vus = d.filter(tests[filtre]).filter((x) => statut === 'tous' || colonneDe(x) === statut).filter((x) => !tag || aTag(x, tag)).filter(trouve);
   const colonnes = STATUTS.filter(([k]) => statut === 'tous' || k === statut).map(([k, l]) => [k, l, vus.filter((x) => colonneDe(x) === k)]);
   const s = d.find((x) => x.id === sel);
   return <>
@@ -951,9 +957,9 @@ function Sinistres() {
       ['vieux', '+ de 15 jours', d.filter(tests.vieux).length], ['sans', 'Sans prestataire', d.filter(tests.sans).length]]} />
     <Filtres val={statut} set={setStatut} items={[['tous', 'Tous les statuts', d.filter(tests[filtre]).length],
       ...STATUTS.map(([k, l]) => [k, l, d.filter(tests[filtre]).filter((x) => colonneDe(x) === k).length])]} />
-    {tousTags.length > 0 ? <Filtres val={tag || 'tous'} set={(v) => setTag(v === 'tous' ? '' : v)} items={[['tous', 'Tous les tags', d.length],
-      ...tousTags.map((t) => [t, t, d.filter((x) => tagsDe(x).includes(t)).length])]} />
-      : <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Aucun tag sur les incidents Rivage pour l’instant : le filtre par tag apparaîtra dès qu’un incident en portera un.</div>}
+    <Filtres val={tag || 'tous'} set={(v) => setTag(v === 'tous' ? '' : v)} items={[['tous', 'Tous les tags', d.length],
+      ...tousTags.map((t) => [t, t === 'PL' ? 'PL (permis de louer)' : t === 'DMEL' ? 'DMEL (déclaration)' : t, d.filter((x) => aTag(x, t)).length])]} />
+    {!d.some((x) => tagsDe(x).length) && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Aucun tag reçu de Rivage pour l’instant : au 06/11, les incidents arrivent avec un champ tags vide (question en cours).</div>}
     <input className="recherche" placeholder="Rechercher : titre, adresse, locataire, bailleur, entreprise, téléphone, e-mail, n° de bail" value={cherche}
       onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un ticket" />
     {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) avec les filtres choisis.</div>}
@@ -964,6 +970,7 @@ function Sinistres() {
       <h2>{s.titre}</h2>
       {tagsDe(s).length > 0 && <div className="row" style={{ gap: 4, marginBottom: 6 }}>{tagsDe(s).map((t) => <span key={t} className="etq info">{t}</span>)}</div>}
       <RappelsTicket key={'r' + s.id} ticket={s} />
+      {s.lot && tagsDe(s).some((t) => TAGS_PERMIS.includes(normaliser(t))) && <PermisBail key={'p' + s.id} lot={s.lot} />}
       {s.situation && <div className={'mini-alerte ' + s.situation.gravite}><b>Situation du bien : {s.situation.libelle}</b>
         <div>{s.situation.detail}{s.situation.bail ? ' Bail ' + s.situation.bail + '.' : ''}</div>
         {s.mandat_statut && <div className="muted">{s.mandat_statut}</div>}</div>}
