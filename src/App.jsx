@@ -21,16 +21,51 @@ const ROLES = { direction: 'Direction', superviseur: 'Superviseur', gestionnaire
 const euro = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }));
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 
+// Lien « réinitialiser le mot de passe » reçu par mail : Supabase revient sur le pilotage avec #...type=recovery.
+// Lu au chargement, avant que le client Supabase n'efface l'adresse ; l'événement PASSWORD_RECOVERY le confirme.
+const RETOUR_RECUPERATION = typeof window !== 'undefined' && /type=recovery/.test(window.location.hash);
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
+  const [recup, setRecup] = useState(RETOUR_RECUPERATION);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data } = supabase.auth.onAuthStateChange((e, s) => { if (e === 'PASSWORD_RECOVERY') setRecup(true); setSession(s); });
     return () => data.subscription.unsubscribe();
   }, []);
   if (!ready) return null;
+  if (session && recup) return <NouveauMotDePasse fini={() => { setRecup(false); window.location.hash = 'jour'; }} />;
   return session ? <Espace /> : <Connexion />;
+}
+
+function NouveauMotDePasse({ fini }) {
+  const [mdp, setMdp] = useState('');
+  const [mdp2, setMdp2] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async (e) => {
+    e.preventDefault(); setErr('');
+    if (mdp.length < 8) return setErr('Au moins 8 caractères.');
+    if (mdp !== mdp2) return setErr('Les deux saisies ne sont pas identiques.');
+    setBusy(true);
+    const { error } = await supabase.auth.updateUser({ password: mdp });
+    setBusy(false);
+    if (error) return setErr('Mot de passe refusé : ' + error.message);
+    fini();
+  };
+  return (
+    <form className="card login" onSubmit={go}>
+      <h1>Nouveau mot de passe</h1>
+      <p className="sub">Il sert aussi pour UDIGESTION (même compte).</p>
+      <label className="muted" htmlFor="pw1">Nouveau mot de passe</label>
+      <input id="pw1" type="password" autoComplete="new-password" value={mdp} onChange={(e) => setMdp(e.target.value)} required />
+      <label className="muted" htmlFor="pw2">Confirmer</label>
+      <input id="pw2" type="password" autoComplete="new-password" value={mdp2} onChange={(e) => setMdp2(e.target.value)} required />
+      {err && <div className="err">{err}</div>}
+      <button className="btn plein" disabled={busy} type="submit">{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
+    </form>
+  );
 }
 
 function Connexion() {
@@ -38,6 +73,16 @@ function Connexion() {
   const [mdp, setMdp] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [envoye, setEnvoye] = useState(false);
+  const oublie = async () => {
+    setErr('');
+    if (!email) return setErr('Saisissez d’abord votre e-mail.');
+    setBusy(true);
+    // le lien du mail revient sur cette adresse (à déclarer dans Supabase, Authentication > URL Configuration > Redirect URLs)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/' });
+    setBusy(false);
+    if (error) setErr('Envoi impossible : ' + error.message); else setEnvoye(true);
+  };
   const go = async (e) => {
     e.preventDefault(); setBusy(true); setErr('');
     const { error } = await supabase.auth.signInWithPassword({ email, password: mdp });
@@ -53,7 +98,9 @@ function Connexion() {
       <label className="muted" htmlFor="pw">Mot de passe</label>
       <input id="pw" type="password" autoComplete="current-password" value={mdp} onChange={(e) => setMdp(e.target.value)} required />
       {err && <div className="err">{err}</div>}
+      {envoye && <div className="muted">Un lien vient d’être envoyé à {email}. Il ne sert qu’une fois.</div>}
       <button className="btn plein" disabled={busy} type="submit">{busy ? 'Connexion…' : 'Se connecter'}</button>
+      <button className="lien" type="button" disabled={busy} onClick={oublie} style={{ marginTop: 8 }}>Mot de passe oublié</button>
     </form>
   );
 }
