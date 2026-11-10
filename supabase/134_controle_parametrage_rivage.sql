@@ -378,7 +378,9 @@ language sql stable security definer set search_path to 'pilotage', 'public' as 
     'https://rivage.immo/leasing_contracts?leasing_contract_id=' || b.id
   from pilotage.objets b
   cross join lateral (select pilotage.controle_rivage_bail(b.id, 'identite', b.data, 'habitation') r) z
-  where b.type = 'LeasingContract' and b.supprime_le is null and b.data->>'status' in ('created', 'in_progress', 'move_out')
+  where b.type = 'LeasingContract' and b.supprime_le is null
+    -- baux en cours ; en sortie seulement si la fin est à venir (le 10/11 : 173 baux du stock restés en sortie, terminés pour la plupart)
+    and (b.data->>'status' in ('created', 'in_progress') or (b.data->>'status' = 'move_out' and coalesce(nullif(b.data->>'end_date', '')::date, current_date) >= current_date))
     and (exists (select 1 from pilotage.baux_occupants o where o.bail_id = b.id)
          or exists (select 1 from pilotage.baux_lectures l where l.bail_id = b.id and l.resultat ? 'occupants'))
     and r->>'detail' like '%inversés%'
