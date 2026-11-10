@@ -23,6 +23,10 @@ const MODELES: [string, string, 'hebdo' | 'mensuel'][] = [
   // Pièces (068-069) : jusqu'ici reçues par webhook seulement ; à la bascule, le stock de production n'a envoyé aucun webhook.
   // Un échec de cette liste n'interrompt pas la synchronisation (compteur négatif = code HTTP).
   ['Upload', '/api/v1/uploads', 'hebdo'],
+  // Facturation (135) : lignes (honoraires, premier mois, refacturations) et taux (gestion, GLI) de tous les baux.
+  // Jusqu'ici reçues par webhook seulement (282 lignes sur 3 167 dans Rivage le 10/11) : le contrôle des honoraires en dépend.
+  ['BillingLine', '/api/v1/billing_lines', 'hebdo'],
+  ['BillingRate', '/api/v1/billing_rates', 'hebdo'],
   ['AccountingEventGroup', '/api/v1/accounting_event_groups', 'mensuel'],
   ['AccountingAccount', '/api/v1/accounting_accounts', 'mensuel'],
 ]
@@ -61,10 +65,10 @@ Deno.serve(async (req) => {
   const url = Deno.env.get('SUPABASE_URL')!
   const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   // Corps : {} ou {"mode": "mensuel" | "impayes"} pour la tâche planifiée ; {"extrait": "lc_…"} pour un extrait de compte (039)
-  // {"depuis": {"modele": "Upload", "page": 12}} : suite d'une relecture complète interrompue (068-070), appel interne seulement
+  // {"depuis": {"modele": "Upload", "curseur": "…"}} : suite d'une relecture complète interrompue (068-070, 135), appel interne seulement
   const DEBUT = Date.now()
   const BUDGET = 120000 // la fonction est arrêtée vers 150-200 s : on s'arrête proprement avant et on enchaîne la suite
-  let corps: { mode?: string; extrait?: string; depuis?: { modele: string; page: number } } = {}
+  let corps: { mode?: string; extrait?: string; depuis?: { modele: string; page?: number; curseur?: string | null } } = {}
   try { corps = await req.json() } catch { /* corps vide */ }
 
   // Qui appelle : la tâche planifiée (secret partagé) ou un membre de la direction
@@ -95,15 +99,29 @@ Deno.serve(async (req) => {
     return rep(500, { error: 'Clé Rivage mal formée : ' + diag })
   }
 
+  // Pagination (135) : Rivage refuse la pagination par numéro de page à partir du 20/11/2026 ; on suit le curseur
+  // (pagination=cursor, puis cursor=next_cursor). Repli sur le numéro de page si une liste ne renvoie pas de curseur.
+  const adresse = (chemin: string, curseur: string | null, page: number) =>
+    `${RIVAGE}${chemin}${chemin.includes('?') ? '&' : '?'}limit=100` +
+    (curseur ? `&pagination=cursor&cursor=${encodeURIComponent(curseur)}` : page > 1 ? `&page=${page}` : '&pagination=cursor')
+  const suivant = (j: { pagination?: Record<string, unknown> }, page: number) => {
+    const p = j.pagination || {}
+    const c = typeof p.next_cursor === 'string' && p.next_cursor ? p.next_cursor : null
+    const total = Number(p.total_pages || p.pages || 0)
+    return { curseur: c, fini: !c && !(total > page) }
+  }
+
   const lireTout = async (chemin: string) => {
     const lignes: Record<string, unknown>[] = []
-    let page = 1, total = 1
-    while (page <= total && page <= 50) {
-      const r = await fetch(`${RIVAGE}${chemin}${chemin.includes('?') ? '&' : '?'}page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
+    let curseur: string | null = null, page = 1
+    while (page <= 50) {
+      const r = await fetch(adresse(chemin, curseur, page), { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
       if (!r.ok) throw new Error(`${chemin} page ${page} : HTTP ${r.status}`)
       const j = await r.json()
-      total = j.pagination?.total_pages || j.pagination?.pages || 1
       lignes.push(...(j.data || []))
+      const s = suivant(j, page)
+      if (s.fini || !(j.data || []).length) break
+      curseur = s.curseur
       page++
     }
     return lignes
@@ -192,10 +210,14 @@ Deno.serve(async (req) => {
   if (cronValide) mode = corps.mode === 'mensuel' ? 'mensuel' : 'hebdo'
   if (cronValide && corps.depuis?.modele) mode = corps.mode === 'hebdo' ? 'hebdo' : 'complet'
   let aLire = MODELES.filter(([, , f]) => mode !== 'hebdo' || f === 'hebdo')
-  let premierePage = 1
+  let premierCurseur: string | null = null, premierePage = 1
   if (cronValide && corps.depuis?.modele) {
     const i = aLire.findIndex(([m]) => m === corps.depuis!.modele)
-    if (i >= 0) { aLire = aLire.slice(i); premierePage = Math.max(1, Number(corps.depuis.page) || 1) }
+    if (i >= 0) {
+      aLire = aLire.slice(i)
+      premierCurseur = corps.depuis.curseur || null
+      premierePage = Math.max(1, Number(corps.depuis.page) || 1)
+    }
   }
 
   const debutDetails = Date.now()
@@ -215,24 +237,23 @@ Deno.serve(async (req) => {
   const suiteDe = corps.depuis?.modele ? ' (suite ' + corps.depuis.modele + ')' : ''
   const { data: syncId } = await service.rpc('pilotage_sync_debut', { p_declencheur: declencheur + (mode === 'complet' ? '' : ' (' + mode + ')') + suiteDe })
   const compteurs: Record<string, number> = {}
-  let suite: { modele: string; page: number } | null = null
+  let suite: { modele: string; page: number; curseur: string | null } | null = null
   try {
     for (const [idx, [modele, chemin]] of aLire.entries()) {
-      let page = idx === 0 ? premierePage : 1, total = page, n = 0
-      while (page <= total) {
-        if (Date.now() - DEBUT > BUDGET) { suite = { modele, page }; break }
-        const r = await fetch(`${RIVAGE}${chemin}?page=${page}&limit=100`, { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
+      let page = idx === 0 ? premierePage : 1, curseur = idx === 0 ? premierCurseur : null, n = 0
+      while (true) {
+        if (Date.now() - DEBUT > BUDGET) { suite = { modele, page, curseur }; break }
+        const r = await fetch(adresse(chemin, curseur, page), { headers: { Authorization: `Bearer ${cle}`, Accept: 'application/json' } })
         if (r.status === 429) {
           // Limite Rivage (100 requêtes par minute) : on attend une minute si le temps le permet, sinon le passage suivant reprend ici
           if (Date.now() - DEBUT < BUDGET - 65000) { await new Promise((ok) => setTimeout(ok, 61000)); continue }
-          suite = { modele, page }; break
+          suite = { modele, page, curseur }; break
         }
         if (!r.ok) {
           if (modele === 'Upload') { n = -r.status; break }
           throw new Error(`${modele} page ${page} : HTTP ${r.status}`)
         }
         const j = await r.json()
-        total = j.pagination?.total_pages || 1
         let lot = (j.data || []).map((o: Record<string, unknown>) => nettoyer(modele, o))
         // Lots : la liste ne donne pas les diagnostics (seul le détail du lot les contient, annonce Rivage du 19/10).
         // Lecture du détail lot par lot, dans la limite de temps de la fonction (environ 60 s) ; le reste au passage suivant,
@@ -243,6 +264,9 @@ Deno.serve(async (req) => {
           if (error) throw new Error(`${modele} : ${error.message}`)
         }
         n += lot.length
+        const s = suivant(j, page)
+        if (s.fini || !(j.data || []).length) break
+        curseur = s.curseur
         page++
       }
       compteurs[modele] = n
