@@ -141,14 +141,18 @@ Deno.serve(async (req) => {
     return rep(200, { ok: true, lus: objets.length })
   }
 
-  // Situation des baux (051) : outil lire_situation_bail du MCP Rivage, même clé que l'API, sans IA.
+  // Situation des baux (051) : outil lire_situation_bail du MCP Rivage, sans IA.
+  // 27/10 : clé dédiée au MCP (secret RIVAGE_MCP_KEY) si elle existe, sinon la clé de l'API (403 avec la clé de production).
   // File remplie par les webhooks de bail et chaque matin ; 40 baux au plus par passage, un appel toutes les 0,65 s.
   if (cronValide && corps.mode === 'situations') {
+    const bruteMcp = (Deno.env.get('RIVAGE_MCP_KEY') || '').trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '')
+    const cleMcp = bruteMcp || cle
+    const source = bruteMcp ? 'RIVAGE_MCP_KEY' : 'RIVAGE_API_KEY'
     const { data: ids } = await service.rpc('pilotage_situations_a_lire', { p_max: 40 })
-    if (!Array.isArray(ids) || !ids.length) return rep(200, { ok: true, lus: 0 })
+    if (!Array.isArray(ids) || !ids.length) return rep(200, { ok: true, lus: 0, cle: source })
     let session: string | null = null
     const mcp = async (method: string, params: unknown, id: number | null) => {
-      const hm: Record<string, string> = { Authorization: `Bearer ${cle}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
+      const hm: Record<string, string> = { Authorization: `Bearer ${cleMcp}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
       if (session) hm['Mcp-Session-Id'] = session
       const r = await fetch(`${RIVAGE}/mcp`, { method: 'POST', headers: hm,
         body: JSON.stringify(id === null ? { jsonrpc: '2.0', method, params } : { jsonrpc: '2.0', id, method, params }) })
@@ -162,7 +166,7 @@ Deno.serve(async (req) => {
       return { statut: r.status, j }
     }
     const init = await mcp('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'udi-pilotage', version: '1' } }, 1)
-    if (init.statut !== 200) return rep(502, { error: `MCP Rivage indisponible (HTTP ${init.statut})` })
+    if (init.statut !== 200) return rep(502, { error: `MCP Rivage indisponible (HTTP ${init.statut}, clé ${source})` })
     await mcp('notifications/initialized', {}, null)
     let lus = 0, echecs = 0, n = 2
     for (const id of ids as string[]) {
@@ -172,7 +176,7 @@ Deno.serve(async (req) => {
         if (r.statut === 429) { await new Promise((ok) => setTimeout(ok, 60000)); continue }
         const res = r.j?.result as { content?: { text?: string }[]; isError?: boolean } | undefined
         const texte = res?.content?.[0]?.text
-        if (r.statut !== 200 || !texte || res?.isError) erreur = `HTTP ${r.statut} : ${texte || JSON.stringify(r.j?.error || '').slice(0, 200)}`
+        if (r.statut !== 200 || !texte || res?.isError) erreur = `HTTP ${r.statut} (clé ${source}) : ${texte || JSON.stringify(r.j?.error || '').slice(0, 200)}`
         else data = JSON.parse(texte)
       } catch (e) { erreur = e instanceof Error ? e.message : String(e) }
       await service.rpc('pilotage_situation_noter', { p_bail: id, p_data: data, p_erreur: erreur })
@@ -180,7 +184,7 @@ Deno.serve(async (req) => {
       await new Promise((ok) => setTimeout(ok, 650))
     }
     await service.rpc('pilotage_situations_signal')
-    return rep(200, { ok: true, lus, echecs })
+    return rep(200, { ok: true, lus, echecs, cle: source })
   }
 
   // Tâche planifiée : relecture hebdomadaire (corps vide) ou mensuelle ({"mode":"mensuel"}) ; à la demande : tout
