@@ -91,13 +91,14 @@ function Ligne({ x, gestion, sel, choisir, prendre, commerciaux, moi }) {
 
 // ----- Récap de la direction : rémunérations à valider (dossiers validés par la gestion) -----
 const eur = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €');
-export function RecapRemuneration() {
+export function RecapRemuneration({ page = false }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const charger = () => rpc('pilotage_remu_a_valider').then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
-  if (!d || !(d.dossiers || []).length) return null;
+  if (!d) return page ? <p className="sub">Chargement…</p> : null;
+  if (!(d.dossiers || []).length) return page ? <div className="card">Aucune rémunération à valider.{d.valides_30j ? ` ${d.valides_30j} dossier(s) validé(s) ces 30 derniers jours.` : ''}</div> : null;
   return <section className="card" style={{ marginBottom: 16 }}>
     <h2 style={{ fontSize: 17, margin: '0 0 4px' }}>Rémunérations à valider <span className="pastille">{d.dossiers.length}</span></h2>
     <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Dossiers validés par la gestion : vérifier la commission calculée, la corriger si besoin, puis valider. {d.valides_30j ? `${d.valides_30j} dossier(s) validé(s) ces 30 derniers jours.` : ''}</p>
