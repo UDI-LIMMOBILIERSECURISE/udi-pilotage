@@ -248,14 +248,55 @@ function PointRivage({ i, repondre, lien }) {
 // ----- Clauses : équipements et compteurs par lot, puis questions simples -----
 function Clauses({ m, d, c, agir, repondre, recharger, onErreur }) {
   const it = (cle) => c.items.find((i) => i.cle === cle);
-  const autres = c.items.filter((i) => i.bloc === 'clauses' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack', 'm_cl_ordures'].includes(i.cle));
+  const autres = c.items.filter((i) => i.bloc === 'clauses' && !['m_cl_equipements', 'm_cl_compteurs', 'm_cl_pack', 'm_cl_ordures', 'm_cl_pno'].includes(i.cle));
   return <>
     <div className="groupe-tete" style={{ marginTop: 10 }}><b>Équipements du bien et clauses</b></div>
     {it('m_cl_pack') && <ClauseSimple i={it('m_cl_pack')} repondre={repondre} />}
     {['m_cl_equipements', 'm_cl_compteurs'].map((cle) => it(cle) && <Equipements key={cle} i={it(cle)} d={d} agir={agir} repondre={repondre} recharger={recharger} onErreur={onErreur} />)}
     {it('m_cl_ordures') && <OrduresLots i={it('m_cl_ordures')} lots={d.lots} repondre={repondre} onErreur={onErreur} regle={regle(it('m_cl_ordures'))} />}
+    {it('m_cl_pno') && <Pno i={it('m_cl_pno')} m={m} recharger={recharger} onErreur={onErreur} />}
     {autres.map((i) => <ClauseSimple key={i.cle} i={i} repondre={repondre} />)}
   </>;
+}
+
+// PNO (134) : l'attestation est déposée dans la GED de Rivage avec « PNO » dans le nom ; sa date de fin se saisit ici
+// (Rivage n'a ni nature de pièce ni date d'expiration pour la PNO) et la gestion est alertée 30 jours avant.
+function Pno({ i, m, recharger, onErreur }) {
+  const [x, setX] = useState(undefined);
+  const [f, setF] = useState({ fin: '', assureur: '', numero: '' });
+  const [edit, setEdit] = useState(false);
+  const lire = () => rpc('pilotage_pno_lire', { p_mandat: m.id })
+    .then((r) => { setX(r || null); setF({ fin: r?.fin || '', assureur: r?.assureur || '', numero: r?.numero || '' }); })
+    .catch(() => setX(null));
+  useEffect(() => { setEdit(false); lire(); }, [m.id]);
+  const enregistrer = async (vider) => {
+    try {
+      await rpc('pilotage_pno_enregistrer', { p_mandat: m.id, p_fin: vider ? null : f.fin || null, p_assureur: f.assureur, p_numero: f.numero });
+      setEdit(false); await lire(); await recharger();
+    } catch (e) { onErreur(e.message); }
+  };
+  if (x === undefined) return null;
+  const expiree = x?.fin && x.fin < new Date().toISOString().slice(0, 10);
+  const saisie = edit || !x;
+  return <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', padding: '8px 0' }}>
+    <div style={{ flex: 1, minWidth: 220 }}>
+      <span style={{ color: x && !expiree ? 'var(--teal)' : expiree ? 'var(--red)' : 'var(--amber)', fontWeight: 700 }}>{x && !expiree ? '✓' : expiree ? '!' : '○'}</span> {i.libelle}
+      {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
+      {x && !edit && <div style={{ fontSize: 13 }}>{expiree ? 'Expirée le ' : 'Valable jusqu’au '}{date(x.fin)}{x.assureur ? ` · ${x.assureur}` : ''}{x.numero ? ` n° ${x.numero}` : ''} <span className="muted">({x.par || '—'}, {date(x.le)})</span></div>}
+    </div>
+    <div className="row" style={{ gap: 6 }}>
+      {saisie ? <>
+        <label className="muted">Fin <input type="date" value={f.fin} onChange={(e) => setF({ ...f, fin: e.target.value })} /></label>
+        <input placeholder="Assureur" value={f.assureur} onChange={(e) => setF({ ...f, assureur: e.target.value })} style={{ width: 120 }} />
+        <input placeholder="N° de contrat" value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} style={{ width: 120 }} />
+        <button className="btn" disabled={!f.fin} onClick={() => enregistrer(false)}>Enregistrer</button>
+        {x && <button className="lien" onClick={() => { setEdit(false); setF({ fin: x.fin || '', assureur: x.assureur || '', numero: x.numero || '' }); }}>Annuler</button>}
+      </> : <>
+        <button className="btn" onClick={() => setEdit(true)}>Modifier</button>
+        <button className="lien" onClick={() => enregistrer(true)}>Effacer</button>
+      </>}
+    </div>
+  </div>;
 }
 
 function Equipements({ i, d, agir, repondre, recharger, onErreur }) {
