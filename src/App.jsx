@@ -11,6 +11,7 @@ import MessagesDossier, { MessagesAEnvoyer, etapesDesAlertes } from './MessagesD
 import Fiche from './Fiche.jsx';
 import FicheConge from './FicheConge.jsx';
 import ALouer, { PermisLouer } from './ALouer.jsx';
+import Biens from './Biens.jsx';
 import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
@@ -108,9 +109,9 @@ function Connexion() {
 
 // Menu de navigation : rubriques regroupées, page courante gardée dans l'adresse (#regles) pour le retour arrière et le rechargement
 const MENU = [
-  ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['alouer', 'À louer', '⌂']]],
+  ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['biens', 'Biens', '▦'], ['alouer', 'À louer', '⌂']]],
   ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['cles', 'Clés', '⚿'], ['sinistres', 'Tickets', '⚠'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
-  ['Commercial', [['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
+  ['Commercial', [['remunerations', 'Rémunérations à valider', '✓'], ['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
   ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['permis', 'Communes du permis de louer', '⚖'], ['equipe', 'Équipe', '☺']]],
 ];
 const lireHash = () => (typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '') || 'jour';
@@ -143,7 +144,7 @@ function Espace() {
     <main><div className="card"><h1>Accès non ouvert</h1><p className="sub">Votre compte existe mais n’a pas encore accès au pilotage. Demandez à Nicolas de vous ajouter dans l’onglet Équipe.</p>
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
-  const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, permis: moi.voit_reglages, cles: true,
+  const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, biens: true, remunerations: moi.role === 'direction', permis: moi.voit_reglages, cles: true,
     mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
     obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true };
   const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
@@ -181,12 +182,14 @@ function Espace() {
         {page === 'dg' && <SortiesDG />}
         {page === 'compta' && <Compta />}
         {page === 'impayes' && <Impayes />}
+        {page === 'biens' && <Biens moi={moi} />}
         {page === 'alouer' && <ALouer />}
         {page === 'permis' && <PermisLouer />}
         {page === 'cles' && <Cles />}
         {page === 'reprise' && <Reprise moi={moi} />}
         {page === 'baux' && <SuiviBaux moi={moi} />}
         {page === 'mandats' && <Mandats />}
+        {page === 'remunerations' && <><div className="entete"><div><h1>Rémunérations à valider</h1><p className="sub">Dossiers validés par la gestion : vérifier la commission calculée, la corriger si besoin, puis valider.</p></div></div><RecapRemuneration page /></>}
         {page === 'commissions' && <Commissions />}
         {page === 'obligations' && <Obligations />}
         {page === 'regles' && <Regles />}
