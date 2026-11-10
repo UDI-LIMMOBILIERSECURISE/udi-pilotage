@@ -20,13 +20,14 @@ const MODELES: [string, string, 'hebdo' | 'mensuel'][] = [
   ['LeasingContract', '/api/v1/leasing_contracts', 'hebdo'],
   ['Profile', '/api/v1/profiles', 'hebdo'],
   ['Incident', '/api/v1/incidents', 'hebdo'],
+  // Facturation (135) : lignes (honoraires, premier mois, refacturations) et taux (gestion, GLI) de tous les baux.
+  // Jusqu'ici reçues par webhook seulement (282 lignes sur 3 167 dans Rivage le 10/11) : le contrôle des honoraires en dépend.
+  // Lue avant les pièces : la liste des pièces est longue (53 000) et ses dernières pages ont échoué le 08/11 et le 10/11.
+  ['BillingLine', '/api/v1/billing_lines', 'hebdo'],
+  ['BillingRate', '/api/v1/billing_rates', 'hebdo'],
   // Pièces (068-069) : jusqu'ici reçues par webhook seulement ; à la bascule, le stock de production n'a envoyé aucun webhook.
   // Un échec de cette liste n'interrompt pas la synchronisation (compteur négatif = code HTTP).
   ['Upload', '/api/v1/uploads', 'hebdo'],
-  // Facturation (135) : lignes (honoraires, premier mois, refacturations) et taux (gestion, GLI) de tous les baux.
-  // Jusqu'ici reçues par webhook seulement (282 lignes sur 3 167 dans Rivage le 10/11) : le contrôle des honoraires en dépend.
-  ['BillingLine', '/api/v1/billing_lines', 'hebdo'],
-  ['BillingRate', '/api/v1/billing_rates', 'hebdo'],
   ['AccountingEventGroup', '/api/v1/accounting_event_groups', 'mensuel'],
   ['AccountingAccount', '/api/v1/accounting_accounts', 'mensuel'],
 ]
@@ -259,9 +260,12 @@ Deno.serve(async (req) => {
         // Lecture du détail lot par lot, dans la limite de temps de la fonction (environ 60 s) ; le reste au passage suivant,
         // dans un ordre mélangé pour que tous les lots soient couverts au fil des passages. Les webhooks complètent.
         if (modele === 'Asset') lot = await details(lot)
-        if (lot.length) {
-          const { error } = await service.rpc('pilotage_sync_appliquer', { p_modele: modele, p_objets: lot })
-          if (error) throw new Error(`${modele} : ${error.message}`)
+        // Enregistrement par paquets de 25 (135) : un paquet de 100 pièces a dépassé le délai de la base le 10/11 (page 530).
+        // Pour les pièces, un paquet en échec est compté et la synchronisation continue ; pour le reste, elle s'arrête.
+        for (let k = 0; k < lot.length; k += 25) {
+          const { error } = await service.rpc('pilotage_sync_appliquer', { p_modele: modele, p_objets: lot.slice(k, k + 25) })
+          if (error && modele !== 'Upload') throw new Error(`${modele} : ${error.message}`)
+          if (error) compteurs['Upload_paquets_en_echec'] = (compteurs['Upload_paquets_en_echec'] || 0) + 1
         }
         n += lot.length
         const s = suivant(j, page)
