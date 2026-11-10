@@ -24,18 +24,24 @@ export default function Biens({ moi }) {
   const [filtre, setFiltre] = useState('tous'); // tous | entree | location | bail | sortie | a_moi | a_cloturer | hors
   const [q, setQ] = useState('');
   const [ouvert, setOuvert] = useState(null);
-  const charger = () => rpc('pilotage_biens').then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { charger(); }, []);
+  const charger = (premier = false) => rpc('pilotage_biens').then((x) => {
+    setD(x);
+    // 137 : la page s'ouvre sur « À moi » quand j'ai des étapes à traiter
+    if (premier && x?.compteurs?.a_moi > 0) setFiltre('a_moi');
+  }).catch((e) => setErr(e.message));
+  useEffect(() => { charger(true); }, []);
   const lots = useMemo(() => {
     if (!d) return [];
-    return d.lots.filter((l) => {
+    const liste = d.lots.filter((l) => {
       if (filtre === 'tous' && l.phase === 'hors') return false;
       if (['entree', 'location', 'bail', 'sortie', 'hors'].includes(filtre) && l.phase !== filtre) return false;
       if (filtre === 'a_moi' && !(l.a_moi && l.phase !== 'hors')) return false;
       if (filtre === 'a_cloturer' && !(l.a_cloturer > 0)) return false;
       return !q || correspond(texteRecherche(l.lot && 'lot ' + l.lot, l.adresse, l.bailleur, l.mandat && 'mandat ' + l.mandat,
-        l.bail && 'bail ' + l.bail, l.locataires, l.commercial, nature(l.nature), LIBELLE[l.phase]), q);
+        l.bail && 'bail ' + l.bail, l.locataires, l.commercial, nature(l.nature), LIBELLE[l.phase], l.a_faire?.action, l.a_faire?.prenom), q);
     });
+    // « À moi » : les étapes en retard d'abord
+    return filtre === 'a_moi' ? [...liste].sort((a, b) => Number(!!b.a_faire?.urgent) - Number(!!a.a_faire?.urgent)) : liste;
   }, [d, filtre, q]);
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
@@ -51,7 +57,7 @@ export default function Biens({ moi }) {
     <div className="tuiles">
       {tuile('tous', 'En gestion', enGestion, 'Tous les lots gérés')}
       {PHASES.map(([k, l]) => tuile(k, l, c[k]))}
-      {tuile('a_moi', 'À moi', c.a_moi, 'Lots dont je suis le commercial, ou avec une alerte qui m’est adressée')}
+      {tuile('a_moi', 'À moi', c.a_moi, 'Biens dont l’étape en cours est à moi de traiter')}
     </div>
     <div className="row" style={{ marginBottom: 10 }}>
       <input className="recherche" style={{ flex: 1, minWidth: 220, marginBottom: 0 }} placeholder="Rechercher : lot, adresse, bailleur, locataire, mandat, bail, commercial"
@@ -71,6 +77,7 @@ export default function Biens({ moi }) {
 
 function LigneBien({ l, ouvrir }) {
   const etape = l.etape != null ? (l.etapes || [])[l.etape] : null;
+  const af = l.a_faire;
   const alerte = (l.etapes || []).some((e) => e.etat === 'alerte');
   return <div className={'kcarte bien ' + (alerte ? 'haute' : 'normale')} role="button" tabIndex={0} onClick={ouvrir}
     onKeyDown={(e) => { if (e.key === 'Enter') ouvrir(); }}>
@@ -88,7 +95,10 @@ function LigneBien({ l, ouvrir }) {
     </div>
     <Frise phase={l.phase} />
     {l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
-    {etape?.info && <div className="muted" style={{ marginTop: 4 }}>{etape.libelle} : {etape.info}</div>}
+    {af && <div className={'a-faire' + (l.a_moi ? ' moi' : '') + (af.urgent ? ' urgent' : '')}>
+      <strong>{l.a_moi ? 'À vous' : 'À faire par ' + af.prenom}</strong> : {af.action}{etape?.info ? ' · ' + etape.info : ''}
+    </div>}
+    {!af && etape?.info && <div className="muted" style={{ marginTop: 4 }}>{etape.libelle} : {etape.info}</div>}
   </div>;
 }
 

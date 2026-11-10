@@ -255,3 +255,6 @@ tr.sel td { background: #EEF4FA; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .frise-phase .court { display: none; }
 @media (max-width: 640px) { .frise-phase { font-size: 11px; padding: 4px 4px 4px 10px; } .frise-phase .long { display: none; } .frise-phase .court { display: inline; } }
+.a-faire { margin-top: 8px; font-size: 13px; padding: 6px 10px; border-radius: 6px; background: #EEF1F4; color: var(--ink2); }
+.a-faire.moi { background: var(--blue-bg); color: var(--blue); }
+.a-faire.urgent { background: var(--amber-bg); color: var(--amber); }
