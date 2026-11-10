@@ -68,14 +68,14 @@ export default function Biens({ moi }) {
     </div>
     <p className="muted" style={{ margin: '0 0 8px' }}>{lots.length} lot{lots.length > 1 ? 's' : ''}{filtre !== 'tous' ? ' · filtre : ' + ({ a_moi: 'À moi', a_cloturer: 'Baux à clôturer dans Rivage' }[filtre] || LIBELLE[filtre]) : ''}</p>
     {!lots.length ? <div className="card">Aucun bien ne correspond.</div>
-      : <div className="stack" style={{ gap: 8 }}>{lots.map((l) => <LigneBien key={l.id} l={l} ouvrir={() => setOuvert(l)} />)}</div>}
+      : <div className="stack" style={{ gap: 8 }}>{lots.map((l) => <LigneBien key={l.id} l={l} ouvrir={() => setOuvert(l)} peut={d.peut} apres={() => charger()} />)}</div>}
     {ouvert && <Fiche titre={'Lot ' + (ouvert.lot || '') + ' · ' + (ouvert.adresse || '')} fermer={() => setOuvert(null)}>
       <FicheBien l={ouvert} peut={d.peut} moi={moi} apres={charger} />
     </Fiche>}
   </>;
 }
 
-function LigneBien({ l, ouvrir }) {
+function LigneBien({ l, ouvrir, peut, apres }) {
   const etape = l.etape != null ? (l.etapes || [])[l.etape] : null;
   const af = l.a_faire;
   const alerte = (l.etapes || []).some((e) => e.etat === 'alerte');
@@ -99,6 +99,33 @@ function LigneBien({ l, ouvrir }) {
       <strong>{l.a_moi ? 'À vous' : 'À faire par ' + af.prenom}</strong> : {af.action}{etape?.info ? ' · ' + etape.info : ''}
     </div>}
     {!af && etape?.info && <div className="muted" style={{ marginTop: 4 }}>{etape.libelle} : {etape.info}</div>}
+    {peut && af?.action?.startsWith('Mettre le lot') && <MettreEnLocation l={l} apres={apres} />}
+  </div>;
+}
+
+// Mise en location depuis la ligne du bien (même effet que le bouton de la page « À louer ») : gestion et direction
+function MettreEnLocation({ l, apres }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [f, setF] = useState({ dispo: new Date().toISOString().slice(0, 10), loyer: '' });
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const stop = (e) => e.stopPropagation();
+  const valider = async () => {
+    setErr(''); setBusy(true);
+    try {
+      await rpc('pilotage_a_louer_maj', { p_asset: l.id, p_action: 'ajouter', p_disponible: f.dispo || null,
+        p_loyer: f.loyer === '' ? null : Number(String(f.loyer).replace(',', '.')), p_motif: 'Mis en location depuis la page Biens', p_note: null });
+      setOuvert(false); apres();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return <div className="row" style={{ marginTop: 8, gap: 8 }} onClick={stop} onKeyDown={stop}>
+    {!ouvert ? <button className="btn plein" onClick={() => setOuvert(true)}>Mettre en location</button> : <>
+      <label className="muted">Disponible le <input type="date" value={f.dispo} onChange={(e) => setF({ ...f, dispo: e.target.value })} /></label>
+      <label className="muted">Loyer CC <input type="number" inputMode="decimal" value={f.loyer} onChange={(e) => setF({ ...f, loyer: e.target.value })} style={{ width: 90 }} /></label>
+      <button className="btn plein" disabled={busy} onClick={valider}>{busy ? 'Enregistrement…' : 'Valider'}</button>
+      <button className="btn gris" onClick={() => setOuvert(false)}>Annuler</button>
+    </>}
+    {err && <span className="err">{err}</span>}
   </div>;
 }
 
