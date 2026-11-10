@@ -120,9 +120,10 @@ select (select count(*) from pilotage.controle_questions where cle in ('h_rv_app
 create or replace function pilotage.cle_nom(t text) returns text
 language sql immutable as $$ select nullif(regexp_replace(pilotage.sans_accents(trim(coalesce(t, ''))), '\s+', ' ', 'g'), '') $$;
 
-create or replace function pilotage.euros(c numeric) returns text
+create or replace function pilotage.euros_centimes(c numeric) returns text
 language sql immutable as $$ select translate(to_char(round(c / 100, 2), 'FM999G999G990D00'), ',.', ' ,') || ' €' $$;
 
+-- euros_centimes : montant Rivage en centimes. Ne pas confondre avec pilotage.euros(p), qui prend des euros (6 fonctions l'utilisent).
 -- Points « Rivage » du bail ajoutés par le 134 : renvoie {detail, vide, anomalie, ok}
 create or replace function pilotage.controle_rivage_bail(p_bail text, p_ref text, o jsonb, p_portee text) returns jsonb
 language plpgsql stable security definer set search_path to 'pilotage', 'public' as $$
@@ -146,7 +147,7 @@ begin
            || case coalesce(o->>'frequency_in_months', '1') when '1' then ', mensuel' when '3' then ', trimestriel' else ', tous les ' || (o->>'frequency_in_months') || ' mois' end
            || case when nullif(o->>'gli_provider_id', '') is not null
                    then ' · GLI ' || coalesce((select nullif(g.data->>'name', '') from pilotage.objets g where g.type = 'GliProvider' and g.id = o->>'gli_provider_id'), 'renseignée')
-                        || coalesce(', seuil d''impayé ' || pilotage.euros(nullif((o->>'unpaid_threshold_amount_in_cents')::numeric, 0)), ', seuil d''impayé non renseigné')
+                        || coalesce(', seuil d''impayé ' || pilotage.euros_centimes(nullif((o->>'unpaid_threshold_amount_in_cents')::numeric, 0)), ', seuil d''impayé non renseigné')
                    else ' · sans GLI' end;
     vide := nullif(o->>'rent_due_day', '') is null or nullif(e->>'rent_call_timing', '') is null
          or (nullif(o->>'gli_provider_id', '') is not null and coalesce((o->>'unpaid_threshold_amount_in_cents')::numeric, 0) = 0);
@@ -179,11 +180,11 @@ begin
   when 'parts' then
     total := coalesce((o->>'rent_in_cents')::numeric, 0) + coalesce((o->>'charges_in_cents')::numeric, 0) + coalesce((o->>'rent_supplement_in_cents')::numeric, 0);
     select sum((c->>'rent_due_in_cents')::numeric) into somme from jsonb_array_elements(pcs) c where nullif(c->>'rent_due_in_cents', '') is not null;
-    detail := coalesce((select string_agg(coalesce(pilotage.nom_profil(c->>'profile_id'), 'locataire') || ' ' || coalesce(pilotage.euros(nullif(c->>'rent_due_in_cents', '')::numeric), 'non réparti'), ' · ')
+    detail := coalesce((select string_agg(coalesce(pilotage.nom_profil(c->>'profile_id'), 'locataire') || ' ' || coalesce(pilotage.euros_centimes(nullif(c->>'rent_due_in_cents', '')::numeric), 'non réparti'), ' · ')
                           from jsonb_array_elements(pcs) c), 'Aucun locataire')
-           || ' · loyer + charges ' || pilotage.euros(total);
+           || ' · loyer + charges ' || pilotage.euros_centimes(total);
     if somme is not null and total > 0 and abs(somme - total) >= 1 then
-      anomalie := true; detail := detail || ' : total des parts ' || pilotage.euros(somme) || ' au lieu de ' || pilotage.euros(total);
+      anomalie := true; detail := detail || ' : total des parts ' || pilotage.euros_centimes(somme) || ' au lieu de ' || pilotage.euros_centimes(total);
     end if;
     ok := not anomalie;
 
@@ -198,8 +199,8 @@ begin
     select coalesce(sum((b.data->>'amount_in_cents')::numeric), 0) into bi from pilotage.objets b
      where b.type = 'BillingLine' and b.supprime_le is null and b.data->>'leasing_contract_id' = p_bail and b.data->>'type' = 'landlord'
        and pilotage.sans_accents(b.data->>'name') ~ '(etat des lieux|edl)';
-    detail := 'Locataire : location ' || pilotage.euros(tl) || ', état des lieux ' || pilotage.euros(ti)
-           || ' · Bailleur : location ' || pilotage.euros(bl) || ', état des lieux ' || pilotage.euros(bi)
+    detail := 'Locataire : location ' || pilotage.euros_centimes(tl) || ', état des lieux ' || pilotage.euros_centimes(ti)
+           || ' · Bailleur : location ' || pilotage.euros_centimes(bl) || ', état des lieux ' || pilotage.euros_centimes(bi)
            || case when surface > 0 and v_mandat is not null and (coalesce((v_mandat->>'rental_fees_per_sqm_in_cents')::numeric, 0) > 0 or coalesce((v_mandat->>'inventory_fees_per_sqm_in_cents')::numeric, 0) > 0)
                    then ' · mandat ' || replace(round((v_mandat->>'rental_fees_per_sqm_in_cents')::numeric / 100, 2)::text, '.', ',') || ' et '
                         || replace(round((v_mandat->>'inventory_fees_per_sqm_in_cents')::numeric / 100, 2)::text, '.', ',') || ' €/m² × ' || replace(surface::text, '.', ',') || ' m²'
@@ -215,10 +216,10 @@ begin
       if bi > 0 and ti > bi then pb := pb || 'part du locataire supérieure à celle du bailleur (état des lieux)'::text; end if;
       if surface > 0 and coalesce((v_mandat->>'rental_fees_per_sqm_in_cents')::numeric, 0) > 0
          and tl > round((v_mandat->>'rental_fees_per_sqm_in_cents')::numeric * surface) + 1 then
-        pb := pb || ('location du locataire au-delà de ' || pilotage.euros(round((v_mandat->>'rental_fees_per_sqm_in_cents')::numeric * surface)))::text; end if;
+        pb := pb || ('location du locataire au-delà de ' || pilotage.euros_centimes(round((v_mandat->>'rental_fees_per_sqm_in_cents')::numeric * surface)))::text; end if;
       if surface > 0 and coalesce((v_mandat->>'inventory_fees_per_sqm_in_cents')::numeric, 0) > 0
          and ti > round((v_mandat->>'inventory_fees_per_sqm_in_cents')::numeric * surface) + 1 then
-        pb := pb || ('état des lieux du locataire au-delà de ' || pilotage.euros(round((v_mandat->>'inventory_fees_per_sqm_in_cents')::numeric * surface)))::text; end if;
+        pb := pb || ('état des lieux du locataire au-delà de ' || pilotage.euros_centimes(round((v_mandat->>'inventory_fees_per_sqm_in_cents')::numeric * surface)))::text; end if;
     end if;
     if exists (select 1 from pilotage.objets b where b.type = 'BillingLine' and b.supprime_le is null and b.data->>'leasing_contract_id' = p_bail
                 and b.data->>'name' ~ '&(#[0-9]+|amp|quot|apos);') then
@@ -259,7 +260,7 @@ begin
 
   when 'precedent' then
     if nullif(o->>'previous_tenant_last_rent_in_cents', '') is not null then
-      detail := 'Dernier loyer du précédent locataire : ' || pilotage.euros((o->>'previous_tenant_last_rent_in_cents')::numeric)
+      detail := 'Dernier loyer du précédent locataire : ' || pilotage.euros_centimes((o->>'previous_tenant_last_rent_in_cents')::numeric)
              || coalesce(', payé le ' || to_char((o->>'previous_tenant_last_rent_paid_on')::date, 'DD/MM/YYYY'), '');
       ok := true;
     else
