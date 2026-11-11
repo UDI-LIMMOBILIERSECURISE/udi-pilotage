@@ -75,7 +75,7 @@ export function EnvoiGroupe({ alertes, fermer, apres }) {
       </div>
       <p className="muted" style={{ margin: '6px 0 12px' }}>Mails envoyés depuis votregestionnaire@udi-immo.com, SMS depuis UDI GESTION. Décochez ce qui ne doit pas partir ; un clic sur une ligne montre le texte. Chaque envoi réussi marque l’étape faite.</p>
       {err && <div className="banner">{err}</div>}
-      {!lignes ? <p className="muted">Préparation des relances…</p> : !lignes.length ? <p>Aucune relance prévue aujourd’hui sur ces baux.</p> :
+      {!lignes ? <p className="muted">Préparation des relances…</p> : !lignes.length ? <p>Rien à envoyer aujourd’hui sur ces baux : la relance du jour est déjà faite, ou la prochaine étape tombe plus tard (elle est visible dans la fiche du bail).</p> :
         <div className="stack" style={{ gap: 6, maxHeight: '55vh', overflow: 'auto' }}>
           {lignes.map((l) => <div key={l.cle} className={'eg-ligne' + (l.ok ? ' ok' : l.echec ? ' ko' : '')}>
             <div className="row" style={{ gap: 8, alignItems: 'flex-start', flexWrap: 'nowrap' }}>
