@@ -12,6 +12,7 @@ import Fiche from './Fiche.jsx';
 import FicheConge from './FicheConge.jsx';
 import ALouer, { PermisLouer } from './ALouer.jsx';
 import Biens, { FicheBien, PHASES, SUITES } from './Biens.jsx';
+import { EnvoiGroupe, REGLES_RELANCE } from './ActionsGroupees.jsx';
 import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
@@ -235,6 +236,8 @@ function Journee({ moi }) {
   const [type, setType] = useState('tous'); // 102 : filtre par type d'alerte (règle), ex. « Facture fournisseur à traiter »
   const [biens, setBiens] = useState(null); // 139 : frise des biens, pour les étapes à moi et le filtre par phase
   const [bien, setBien] = useState(null);
+  const [sel, setSel] = useState(() => new Set()); // 142 : alertes cochées pour une action groupée
+  const [envoi, setEnvoi] = useState(false);
   const [ouvert, setOuvert] = useState(null);
   const [fiche, setFiche] = useState(null);
   const [err, setErr] = useState('');
@@ -259,6 +262,10 @@ function Journee({ moi }) {
     .sort((x, y) => y.n - x.n || x.libelle.localeCompare(y.libelle));
   const typeActif = types.some((t) => t.regle === type) ? type : 'tous';
   const visibles = dansCat.filter((a) => typeActif === 'tous' || a.regle === typeActif);
+  const cocher = (id, oui) => setSel((x) => { const n = new Set(x); if (oui) n.add(id); else n.delete(id); return n; });
+  const tousCoches = visibles.length > 0 && visibles.every((a) => sel.has(a.id));
+  const choisies = (alertes || []).filter((a) => sel.has(a.id) && a.statut === 'ouverte');
+  const traiterGroupe = async () => { for (const a of choisies) { try { await rpc('pilotage_traiter', { p_alerte: a.id, p_traitee: true }); } catch (e) { setErr(e.message); break; } } setSel(new Set()); charger(); };
   // 139 : une seule liste, une carte par bien : l'étape de la frise qui m'attend et les alertes du même bien sont réunies
   const lotsParId = useMemo(() => Object.fromEntries((biens?.lots || []).map((l) => [l.id, l])), [biens]);
   const dossiers = useMemo(() => {
@@ -326,6 +333,19 @@ function Journee({ moi }) {
         <button className={'chip' + (typeActif === 'tous' ? ' on' : '')} onClick={() => setType('tous')}>Tous<span className="n">{dansCat.length}</span></button>
         {types.map((t) => <button key={t.regle} className={'chip' + (typeActif === t.regle ? ' on' : '')} onClick={() => setType(t.regle)}>{t.libelle}<span className="n">{t.n}</span></button>)}
       </div>}
+      {visibles.length > 0 && <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+        <label className="row" style={{ gap: 6, cursor: 'pointer', minHeight: 32 }}><input type="checkbox" checked={tousCoches}
+          onChange={(e) => setSel((x) => { const n = new Set(x); visibles.forEach((a) => (e.target.checked ? n.add(a.id) : n.delete(a.id))); return n; })} />
+          Tout sélectionner ({visibles.length} alerte{visibles.length > 1 ? 's' : ''} affichée{visibles.length > 1 ? 's' : ''})</label>
+      </div>}
+      {sel.size > 0 && <div className="barre-groupe" role="region" aria-label="Action groupée">
+        <span><b>{choisies.length}</b> alerte{choisies.length > 1 ? 's' : ''} cochée{choisies.length > 1 ? 's' : ''}</span>
+        <button className="btn plein" disabled={!choisies.some((a) => REGLES_RELANCE.includes(a.regle))} onClick={() => setEnvoi(true)}
+          title="Mails et SMS prévus par le suivi des baux (assurance, entretien…)">Envoyer les relances prévues</button>
+        <button className="btn" onClick={traiterGroupe}>Marquer traitées</button>
+        <button className="btn gris" onClick={() => setSel(new Set())}>Tout décocher</button>
+      </div>}
+      {envoi && <EnvoiGroupe alertes={choisies} fermer={() => setEnvoi(false)} apres={() => { setSel(new Set()); charger(); }} />}
       {alertes === null ? <p className="sub">Chargement…</p> : dossiers.length === 0 ? <div className="card">Rien à traiter pour {nomCible}.</div> : (
         <div className="stack">
           {dossiers.map((d) => (
@@ -360,11 +380,14 @@ function Journee({ moi }) {
                   {d.etape.urgent && <span className="etq rose">En retard</span>}
                 </button>}
                 {d.alertes.filter((a) => !(d.etape && DOUBLON_ETAPE[a.regle] && (d.etape.action || '').includes(DOUBLON_ETAPE[a.regle]))).map((a) => (
-                  <div key={a.id} className={'alerte ' + a.gravite}>
-                    <button className="head" aria-expanded={ouvert === a.id} onClick={() => setOuvert(ouvert === a.id ? null : a.id)}>
+                  <div key={a.id} className={'alerte ' + a.gravite + (sel.has(a.id) ? ' cochee' : '')}>
+                    <div className="row" style={{ flexWrap: 'nowrap', gap: 0 }}>
+                    {a.statut === 'ouverte' && <input type="checkbox" className="coche-alerte" aria-label={'Sélectionner : ' + a.titre} checked={sel.has(a.id)} onChange={(e) => cocher(a.id, e.target.checked)} />}
+                    <button className="head" style={{ flex: 1 }} aria-expanded={ouvert === a.id} onClick={() => setOuvert(ouvert === a.id ? null : a.id)}>
                       <span className="row"><span className={'tag ' + a.categorie}>{NOM_FAMILLE[a.famille] || CAT[a.categorie]}</span><strong style={{ fontSize: 14 }}>{a.titre}</strong></span>
                       <span className="muted">depuis le {date(a.depuis)}</span>
                     </button>
+                    </div>
                     {/* 103 : facture fournisseur, à qui elle incombe et notes Rivage qui en parlent, visibles sans ouvrir l'alerte */}
                     {a.regle === 'facture_a_traiter' && a.detail?.includes('\n') && <div style={{ padding: '0 12px 8px', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{a.detail.split('\n')[0]}</div>}
                     {ouvert === a.id && (
