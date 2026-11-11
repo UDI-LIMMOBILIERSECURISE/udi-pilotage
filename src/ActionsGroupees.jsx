@@ -27,6 +27,14 @@ async function preparerRelances(alertes) {
     try { d = await rpc('pilotage_bail_dossier', { p_bail: a.objet_id }); } catch (e) { lignes.push({ cle: a.objet_id, a, erreur: e.message }); continue; }
     const b = { bail_id: a.objet_id, reference: a.dossier?.ref, locataires: a.dossier?.locataires, adresse: a.dossier?.adresse, bailleur: a.bailleur };
     const ctx = { bail: b, fiche: d.fiche || {}, ech: d.echeance || {}, contacts: d.contacts || {}, moi: ctxMoi };
+    // En retard alors que toutes les relances prévues sont faites : rien à envoyer, on le dit au lieu d'une fenêtre vide
+    for (const ob of (d.obligations || []).filter((o) => o.actif && !o.a_faire && o.en_retard)) {
+      const faites = (ob.etapes || []).filter((e) => e.fait_le);
+      const der = faites.length ? date(faites.map((e) => e.fait_le).sort().pop()) : null;
+      lignes.push({ cle: ob.cle + ':info', a, b, ob, canal: 'info', titre: ob.libelle + ' : en retard',
+        manuel: ob.suivante ? `Prochaine relance prévue le ${date(ob.suivante.date)} (${ob.suivante.libelle})`
+          : `Toutes les relances prévues sont faites${der ? ' (dernière le ' + der + ')' : ''} : il reste à obtenir le justificatif et le déposer dans la fiche du bail, ou à décider de la suite avec le bailleur. Rien à envoyer.` });
+    }
     for (const ob of (d.obligations || []).filter((o) => o.actif && o.a_faire)) {
       const f = ob.a_faire;
       const base = { cle: ob.cle + ':' + f.ordre, a, b, ob, etape: { cle: ob.cle, etape: String(f.ordre), detail: f.libelle } };
@@ -79,12 +87,12 @@ export function EnvoiGroupe({ alertes, fermer, apres }) {
         <div className="stack" style={{ gap: 6, maxHeight: '55vh', overflow: 'auto' }}>
           {lignes.map((l) => <div key={l.cle} className={'eg-ligne' + (l.ok ? ' ok' : l.echec ? ' ko' : '')}>
             <div className="row" style={{ gap: 8, alignItems: 'flex-start', flexWrap: 'nowrap' }}>
-              <input type="checkbox" aria-label="Envoyer cette relance" checked={!!l.coche && !l.manuel} disabled={!!l.manuel || l.ok || encours}
-                onChange={(e) => maj(l.cle, { coche: e.target.checked })} style={{ marginTop: 4 }} />
+              {l.canal !== 'info' && <input type="checkbox" aria-label="Envoyer cette relance" checked={!!l.coche && !l.manuel} disabled={!!l.manuel || l.ok || encours}
+                onChange={(e) => maj(l.cle, { coche: e.target.checked })} style={{ marginTop: 4 }} />}
               <button className="eg-texte" onClick={() => setOuverte(ouverte === l.cle ? null : l.cle)} aria-expanded={ouverte === l.cle}>
-                <b>{l.canal === 'sms' ? 'SMS' : l.canal === 'mail' ? 'Mail' : 'Recommandé'} · {l.ob?.a_faire?.libelle || l.ob?.libelle}</b>
+                <b>{l.canal === 'info' ? 'À suivre · ' + l.titre : `${l.canal === 'sms' ? 'SMS' : l.canal === 'mail' ? 'Mail' : 'Recommandé'} · ${l.ob?.a_faire?.libelle || l.ob?.libelle}`}</b>
                 <span className="muted">Bail {l.b?.reference || '?'} · {l.b?.locataires || ''}{l.dest ? ' · à ' + l.dest : ''}</span>
-                {l.manuel && <span className="muted" style={{ color: 'var(--red)' }}>{l.manuel}</span>}
+                {l.manuel && <span className="muted" style={l.canal === 'info' ? {} : { color: 'var(--red)' }}>{l.manuel}</span>}
                 {l.erreur && <span style={{ color: 'var(--red)' }}>{l.erreur}</span>}
               </button>
               <span style={{ flex: 'none', fontSize: 13 }}>{l.etat || (l.ok ? 'Envoyé ✓' : '')}</span>
