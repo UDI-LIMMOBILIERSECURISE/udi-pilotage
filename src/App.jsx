@@ -341,11 +341,11 @@ function Journee({ moi }) {
       {sel.size > 0 && <div className="barre-groupe" role="region" aria-label="Action groupée">
         <span><b>{choisies.length}</b> alerte{choisies.length > 1 ? 's' : ''} cochée{choisies.length > 1 ? 's' : ''}</span>
         <button className="btn plein" disabled={!choisies.some((a) => REGLES_RELANCE.includes(a.regle))} onClick={() => setEnvoi(true)}
-          title="Mails et SMS prévus par le suivi des baux (assurance, entretien…)">Envoyer les relances prévues</button>
+          title="Mails et SMS prévus par le suivi des baux (assurance, entretien…) et mail d’échéance au bailleur">Envoyer les relances prévues</button>
         <button className="btn" onClick={traiterGroupe}>Marquer traitées</button>
         <button className="btn gris" onClick={() => setSel(new Set())}>Tout décocher</button>
         {!choisies.some((a) => REGLES_RELANCE.includes(a.regle)) && <span className="muted" style={{ flexBasis: '100%', fontSize: 13 }}>
-          Pas de relance automatique pour ces alertes : seules les alertes « suivi du bail » (assurance, entretien…) en ont. Traitez-les depuis la fiche, puis « Marquer traitées ».</span>}
+          Pas de relance automatique pour ces alertes : seules les alertes « suivi du bail » (assurance, entretien…) et « échéance du bail » en ont. Traitez-les depuis la fiche, puis « Marquer traitées ».</span>}
       </div>}
       {envoi && <EnvoiGroupe alertes={choisies} fermer={() => setEnvoi(false)} apres={() => { setSel(new Set()); charger(); }} />}
       {alertes === null ? <p className="sub">Chargement…</p> : dossiers.length === 0 ? <div className="card">Rien à traiter pour {nomCible}.</div> : (

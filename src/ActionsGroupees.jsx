@@ -6,7 +6,10 @@ import { supabase, rpc } from './supabase.js';
 import { preparer, SMS, avecMentionRgpd } from './mails.js';
 import { chargerModeles, texteSmsGestion } from './messages.js';
 
-export const REGLES_RELANCE = ['bail_suivi', 'bail_suivi_retard'];
+export const REGLES_RELANCE = ['bail_suivi', 'bail_suivi_retard', 'bail_echeance', 'bail_echeance_urgente'];
+const SUIVI = ['bail_suivi', 'bail_suivi_retard'], ECHEANCE = ['bail_echeance', 'bail_echeance_urgente'];
+// Échéance : seules l'information du bailleur et sa relance ont un mail type ; le reste (choix, congé, acte) se fait depuis la fiche
+const MAIL_ECHEANCE = { informer: ['echeance_info', 'informe', 'Bailleur informé'], relancer: ['echeance_relance', 'relance', 'Bailleur relancé'] };
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '');
 
 async function erreurFonction(data, error) {
@@ -27,6 +30,27 @@ async function preparerRelances(alertes) {
     try { d = await rpc('pilotage_bail_dossier', { p_bail: a.objet_id }); } catch (e) { lignes.push({ cle: a.objet_id, a, erreur: e.message }); continue; }
     const b = { bail_id: a.objet_id, reference: a.dossier?.ref, locataires: a.dossier?.locataires, adresse: a.dossier?.adresse, bailleur: a.bailleur };
     const ctx = { bail: b, fiche: d.fiche || {}, ech: d.echeance || {}, contacts: d.contacts || {}, moi: ctxMoi };
+    const regles = alertes.filter((x) => x.objet_id === a.objet_id).map((x) => x.regle);
+    if (regles.some((r) => ECHEANCE.includes(r))) {
+      const ech = d.echeance || {}; const me = MAIL_ECHEANCE[ech.action];
+      if (me) {
+        const m = preparer(me[0], ctx);
+        lignes.push({ cle: (ech.cle || a.objet_id) + ':' + me[1], a, b, ob: { libelle: ech.action_libelle }, canal: 'mail', mail: m, dest: (m?.to || []).join(', '),
+          coche: !!m && (m.to || []).length > 0, etape: { cle: ech.cle, etape: me[1], detail: me[2] }, rafraichir: true,
+          manuel: !m ? 'Modèle de mail introuvable' : !(m.to || []).length ? 'Aucune adresse e-mail du bailleur dans Rivage' : null });
+      } else if (ech.action) {
+        lignes.push({ cle: a.objet_id + ':ech', a, b, canal: 'info', titre: ech.action_libelle || 'Échéance', manuel: 'Pas de mail type pour cette étape : à faire depuis la fiche du bail (onglet échéance).' });
+      }
+    }
+    if (!regles.some((r) => SUIVI.includes(r))) continue;
+    // En retard alors que toutes les relances prévues sont faites : rien à envoyer, on le dit au lieu d'une fenêtre vide
+    for (const ob of (d.obligations || []).filter((o) => o.actif && !o.a_faire && o.en_retard)) {
+      const faites = (ob.etapes || []).filter((e) => e.fait_le);
+      const der = faites.length ? date(faites.map((e) => e.fait_le).sort().pop()) : null;
+      lignes.push({ cle: ob.cle + ':info', a, b, ob, canal: 'info', titre: ob.libelle + ' : en retard',
+        manuel: ob.suivante ? `Prochaine relance prévue le ${date(ob.suivante.date)} (${ob.suivante.libelle})`
+          : `Toutes les relances prévues sont faites${der ? ' (dernière le ' + der + ')' : ''} : il reste à obtenir le justificatif et le déposer dans la fiche du bail, ou à décider de la suite avec le bailleur. Rien à envoyer.` });
+    }
     for (const ob of (d.obligations || []).filter((o) => o.actif && o.a_faire)) {
       const f = ob.a_faire;
       const base = { cle: ob.cle + ':' + f.ordre, a, b, ob, etape: { cle: ob.cle, etape: String(f.ordre), detail: f.libelle } };
@@ -62,7 +86,10 @@ export function EnvoiGroupe({ alertes, fermer, apres }) {
         : { fn: 'pilotage-mail', body: { bail: l.b.bail_id, to: l.mail.to, objet: l.mail.objet, corps: avecMentionRgpd(l.mail.corps), ...l.etape } };
       const { data, error } = await supabase.functions.invoke(corps.fn, { body: corps.body });
       if (error || !data?.ok) maj(l.cle, { etat: null, echec: await erreurFonction(data, error) });
-      else maj(l.cle, { etat: null, ok: true, echec: null });
+      else {
+        maj(l.cle, { etat: null, ok: true, echec: null });
+        if (l.rafraichir) await rpc('pilotage_bail_rafraichir', { p_bail: l.b.bail_id }).catch(() => {});
+      }
     }
     setEncours(false);
     apres && apres();
@@ -79,12 +106,12 @@ export function EnvoiGroupe({ alertes, fermer, apres }) {
         <div className="stack" style={{ gap: 6, maxHeight: '55vh', overflow: 'auto' }}>
           {lignes.map((l) => <div key={l.cle} className={'eg-ligne' + (l.ok ? ' ok' : l.echec ? ' ko' : '')}>
             <div className="row" style={{ gap: 8, alignItems: 'flex-start', flexWrap: 'nowrap' }}>
-              <input type="checkbox" aria-label="Envoyer cette relance" checked={!!l.coche && !l.manuel} disabled={!!l.manuel || l.ok || encours}
-                onChange={(e) => maj(l.cle, { coche: e.target.checked })} style={{ marginTop: 4 }} />
+              {l.canal !== 'info' && <input type="checkbox" aria-label="Envoyer cette relance" checked={!!l.coche && !l.manuel} disabled={!!l.manuel || l.ok || encours}
+                onChange={(e) => maj(l.cle, { coche: e.target.checked })} style={{ marginTop: 4 }} />}
               <button className="eg-texte" onClick={() => setOuverte(ouverte === l.cle ? null : l.cle)} aria-expanded={ouverte === l.cle}>
-                <b>{l.canal === 'sms' ? 'SMS' : l.canal === 'mail' ? 'Mail' : 'Recommandé'} · {l.ob?.a_faire?.libelle || l.ob?.libelle}</b>
+                <b>{l.canal === 'info' ? 'À suivre · ' + l.titre : `${l.canal === 'sms' ? 'SMS' : l.canal === 'mail' ? 'Mail' : 'Recommandé'} · ${l.ob?.a_faire?.libelle || l.ob?.libelle}`}</b>
                 <span className="muted">Bail {l.b?.reference || '?'} · {l.b?.locataires || ''}{l.dest ? ' · à ' + l.dest : ''}</span>
-                {l.manuel && <span className="muted" style={{ color: 'var(--red)' }}>{l.manuel}</span>}
+                {l.manuel && <span className="muted" style={l.canal === 'info' ? {} : { color: 'var(--red)' }}>{l.manuel}</span>}
                 {l.erreur && <span style={{ color: 'var(--red)' }}>{l.erreur}</span>}
               </button>
               <span style={{ flex: 'none', fontSize: 13 }}>{l.etat || (l.ok ? 'Envoyé ✓' : '')}</span>
