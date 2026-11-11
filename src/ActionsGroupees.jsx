@@ -98,6 +98,12 @@ export function EnvoiGroupe({ alertes, fermer, apres }) {
               </div>)}
           </div>)}
         </div>}
+      {lignes && lignes.some((l) => l.ok || l.echec) && !encours && (() => {
+        const ok = lignes.filter((l) => l.ok).length, ko = lignes.filter((l) => l.echec && !l.ok).length;
+        return <div className={ko ? 'banner' : 'eg-bilan'} role="status" style={{ marginTop: 12 }}>
+          {ok} relance{ok > 1 ? 's' : ''} envoyée{ok > 1 ? 's' : ''}{ko ? ` · ${ko} en échec (en rouge ci-dessus, vous pouvez réessayer)` : ' · les étapes sont marquées faites dans le suivi des baux'}
+        </div>;
+      })()}
       <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
         <button className="btn plein" disabled={encours || !aEnvoyer.length} onClick={envoyer}>{encours ? 'Envoi en cours…' : `Envoyer ${aEnvoyer.length} relance${aEnvoyer.length > 1 ? 's' : ''}`}</button>
       </div>
