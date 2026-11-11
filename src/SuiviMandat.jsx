@@ -10,6 +10,7 @@ import MessagesDossier from './MessagesDossier.jsx';
 import OrduresLots, { useOrdures } from './Ordures.jsx';
 import PermisMandat from './Permis.jsx';
 import { ClesLots } from './Cles.jsx';
+import ResumeControle, { Comparaison } from './ResumeControle.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const court = (t) => (t || '').split(' · ')[0];
@@ -69,6 +70,7 @@ export default function DossierMandat({ m, apres, etapesMessages }) {
     <DeposerRivage cible_type="ManagementContract" cible_id={m.id} apres={async () => { await charger(); apres && apres(); }} />
     <MessagesDossier objet="mandat" id={m.id} apres={apres} etapes={etapesMessages} />
     {synthese ? <Synthese {...ctx} parametrer={() => setParametrer(true)} /> : <>
+      <ResumeControle c={c} objet="mandat" />
       <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
         {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}</> : <>{c.restant} point(s) à traiter avant la validation{c.lecture_le ? ` · mandat lu par l’IA le ${date(c.lecture_le)}` : lecture.charge ? ' · lecture du mandat par l’IA en cours…' : ''}</>}
         <div className="row" style={{ marginTop: 6 }}>
@@ -227,8 +229,9 @@ function PointRivage({ i, repondre, lien }) {
         {ecart && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase' }}>⚠ {type} · à traiter</div>}
         <span style={{ fontWeight: 600 }}>{i.libelle}</span>
         {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
+        {ecart && i.ia ? <Comparaison rivage={i.detail} document={i.ia.valeur} page={i.ia.page} extrait={i.ia.extrait} doc="mandat" /> : <>
         <div style={{ fontSize: 13 }}>Rivage : {i.detail}</div>
-        {i.ia?.extrait && <div className="muted" style={{ fontSize: 12 }}>✦ « {i.ia.extrait} »{i.ia.page ? ` (page ${i.ia.page})` : ''}</div>}
+        {i.ia?.extrait && <div className="muted" style={{ fontSize: 12 }}>✦ « {i.ia.extrait} »{i.ia.page ? ` (page ${i.ia.page})` : ''}</div>}</>}
       </div>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         {motif ? <>
