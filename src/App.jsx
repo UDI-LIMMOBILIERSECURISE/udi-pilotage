@@ -256,18 +256,27 @@ function Journee({ moi }) {
     .sort((x, y) => y.n - x.n || x.libelle.localeCompare(y.libelle));
   const typeActif = types.some((t) => t.regle === type) ? type : 'tous';
   const visibles = dansCat.filter((a) => typeActif === 'tous' || a.regle === typeActif);
+  // 139 : une seule liste, une carte par bien : l'étape de la frise qui m'attend et les alertes du même bien sont réunies
+  const lotsParId = useMemo(() => Object.fromEntries((biens?.lots || []).map((l) => [l.id, l])), [biens]);
   const dossiers = useMemo(() => {
     const m = new Map();
+    const groupe = (k, init) => { if (!m.has(k)) m.set(k, { cle: k, alertes: [], ...init }); return m.get(k); };
     visibles.forEach((a) => {
-      const k = ['bail', 'lot', 'ticket', 'donnee'].includes(a.dossier?.type) ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
-      if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, bailleur: a.bailleur, mandat_id: a.mandat_id, alertes: [] });
-      m.get(k).alertes.push(a);
-      if (a.objet_type === 'LeasingContract') m.get(k).bail_id = a.objet_id;
+      const lot = a.dossier?.asset_id && lotsParId[a.dossier.asset_id];
+      const k = lot && !a.regle.startsWith('impaye_') ? 'a' + lot.id
+        : ['bail', 'lot', 'ticket', 'donnee'].includes(a.dossier?.type) ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
+      const g = groupe(k, { dossier: a.dossier, mandat: a.mandat, bailleur: a.bailleur, mandat_id: a.mandat_id, lot: lot || null });
+      g.alertes.push(a);
+      if (a.objet_type === 'LeasingContract') g.bail_id = a.objet_id;
+    });
+    if (typeActif === 'tous') etapesVues.forEach((l) => {
+      const g = groupe('a' + l.id, { dossier: { type: 'lot', ref: l.lot, adresse: l.adresse, asset_id: l.id, locataires: l.locataires }, bailleur: l.bailleur, mandat_id: l.mandat_id, lot: l });
+      g.etape = l.a_faire;
     });
     const rang = { critique: 0, haute: 1, normale: 2 };
-    return [...m.values()].map((d) => ({ ...d, pire: d.alertes.reduce((p, a) => Math.min(p, rang[a.gravite]), 2) }))
-      .sort((x, y) => x.pire - y.pire || y.alertes.length - x.alertes.length);
-  }, [alertes, cat, typeActif]);
+    return [...m.values()].map((d) => ({ ...d, pire: Math.min(d.alertes.reduce((p, a) => Math.min(p, rang[a.gravite]), 2), d.etape ? (d.etape.urgent ? 1 : 2) : 2) }))
+      .sort((x, y) => x.pire - y.pire || (y.alertes.length + (y.etape ? 1 : 0)) - (x.alertes.length + (x.etape ? 1 : 0)));
+  }, [alertes, cat, typeActif, biens, cible]);
   const nomCible = cible === moi.user_id ? moi.prenom : (membres.find((m) => m.user_id === cible)?.prenom || '');
   const gravNom = ['critique', 'haute', 'normale'];
 
@@ -306,14 +315,6 @@ function Journee({ moi }) {
           </div>
         </div>
       </div>
-      {etapesVues.length > 0 && <section className="card" style={{ marginBottom: 14 }}>
-        <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Étapes des biens qui vous attendent <span className="muted" style={{ fontWeight: 400, fontSize: 14 }}>({etapesVues.length})</span></h2>
-        <div className="stack" style={{ gap: 6 }}>{etapesVues.map((l) => <button key={l.id} className={'j-etape' + (l.a_faire?.urgent ? ' urgent' : '')} onClick={() => setBien(l)}>
-          <span className={'etq phase-' + l.phase}>{LIB_PHASE[l.phase]}</span>
-          <span className="j-etape-quoi"><b>{l.a_faire?.action}</b><span className="muted">Lot {l.lot || '?'} · {l.adresse}{l.locataires ? ' · ' + l.locataires : ''}</span></span>
-          {l.a_faire?.urgent && <span className="etq rose">En retard</span>}
-        </button>)}</div>
-      </section>}
       {bien && <Fiche titre={'Lot ' + (bien.lot || '') + ' · ' + (bien.adresse || '')} fermer={() => setBien(null)}>
         <FicheBien l={bien} peut={!!biens?.peut} moi={moi} apres={() => { charger(); chargerBiens(); }} />
       </Fiche>}
@@ -329,16 +330,17 @@ function Journee({ moi }) {
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
-                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.dossier?.type === 'invoice' ? 'Facture fournisseur' : d.dossier?.type === 'ticket' ? `Ticket n°${d.dossier.ref}${d.dossier.titre ? ' · ' + d.dossier.titre : ''}` : d.dossier?.type === 'donnee' ? 'Donnée à corriger' : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
+                  {d.lot && <span className={'etq phase-' + d.lot.phase} style={{ marginLeft: 6 }}>{LIB_PHASE[d.lot.phase]}</span>}
+                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.lot ? `Lot ${d.lot.lot || '?'}` : d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.dossier?.type === 'invoice' ? 'Facture fournisseur' : d.dossier?.type === 'ticket' ? `Ticket n°${d.dossier.ref}${d.dossier.titre ? ' · ' + d.dossier.titre : ''}` : d.dossier?.type === 'donnee' ? 'Donnée à corriger' : d.mandat || 'Dossier'}{d.lot ? ` · ${d.lot.adresse}` : d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
                   <div className="grid2">
                     {d.bailleur && <><span>Bailleur</span><span>{d.bailleur}</span></>}
-                    {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
+                    {(d.lot?.locataires || d.dossier?.locataires) && <><span>Locataire</span><span>{d.lot?.locataires || d.dossier.locataires}</span></>}
                     {d.mandat && <><span>Mandat</span><span>{d.mandat}</span></>}
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                   {/* 139 : la fiche s'ouvre sur la fiche unique du bien quand le lot est connu (sauf impayés : fiche impayé) */}
-                  {(() => { const lot = d.dossier?.asset_id && (biens?.lots || []).find((l) => l.id === d.dossier.asset_id);
+                  {(() => { const lot = d.lot;
                     const impaye = d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'));
                     if (lot && !impaye) return <button className="btn" onClick={() => setBien(lot)}>Ouvrir la fiche</button>;
                     return (d.bail_id || d.mandat_id || d.dossier?.type === 'organisme') && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
@@ -350,6 +352,10 @@ function Journee({ moi }) {
                 </div>
               </div>
               <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+                {d.etape && <button className={'j-etape' + (d.etape.urgent ? ' urgent' : '')} onClick={() => setBien(d.lot)}>
+                  <span className="j-etape-quoi"><span className="muted" style={{ fontSize: 12 }}>Étape de la frise · {LIB_PHASE[d.lot.phase]}</span><b>{d.etape.action}</b></span>
+                  {d.etape.urgent && <span className="etq rose">En retard</span>}
+                </button>}
                 {d.alertes.map((a) => (
                   <div key={a.id} className={'alerte ' + a.gravite}>
                     <button className="head" aria-expanded={ouvert === a.id} onClick={() => setOuvert(ouvert === a.id ? null : a.id)}>
