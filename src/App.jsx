@@ -344,6 +344,8 @@ function Journee({ moi }) {
           title="Mails et SMS prévus par le suivi des baux (assurance, entretien…)">Envoyer les relances prévues</button>
         <button className="btn" onClick={traiterGroupe}>Marquer traitées</button>
         <button className="btn gris" onClick={() => setSel(new Set())}>Tout décocher</button>
+        {!choisies.some((a) => REGLES_RELANCE.includes(a.regle)) && <span className="muted" style={{ flexBasis: '100%', fontSize: 13 }}>
+          Pas de relance automatique pour ces alertes : seules les alertes « suivi du bail » (assurance, entretien…) en ont. Traitez-les depuis la fiche, puis « Marquer traitées ».</span>}
       </div>}
       {envoi && <EnvoiGroupe alertes={choisies} fermer={() => setEnvoi(false)} apres={() => { setSel(new Set()); charger(); }} />}
       {alertes === null ? <p className="sub">Chargement…</p> : dossiers.length === 0 ? <div className="card">Rien à traiter pour {nomCible}.</div> : (

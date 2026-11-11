@@ -75,7 +75,7 @@ export function EnvoiGroupe({ alertes, fermer, apres }) {
       </div>
       <p className="muted" style={{ margin: '6px 0 12px' }}>Mails envoyés depuis votregestionnaire@udi-immo.com, SMS depuis UDI GESTION. Décochez ce qui ne doit pas partir ; un clic sur une ligne montre le texte. Chaque envoi réussi marque l’étape faite.</p>
       {err && <div className="banner">{err}</div>}
-      {!lignes ? <p className="muted">Préparation des relances…</p> : !lignes.length ? <p>Aucune relance prévue aujourd’hui sur ces baux.</p> :
+      {!lignes ? <p className="muted">Préparation des relances…</p> : !lignes.length ? <p>Rien à envoyer aujourd’hui sur ces baux : la relance du jour est déjà faite, ou la prochaine étape tombe plus tard (elle est visible dans la fiche du bail).</p> :
         <div className="stack" style={{ gap: 6, maxHeight: '55vh', overflow: 'auto' }}>
           {lignes.map((l) => <div key={l.cle} className={'eg-ligne' + (l.ok ? ' ok' : l.echec ? ' ko' : '')}>
             <div className="row" style={{ gap: 8, alignItems: 'flex-start', flexWrap: 'nowrap' }}>
@@ -98,6 +98,12 @@ export function EnvoiGroupe({ alertes, fermer, apres }) {
               </div>)}
           </div>)}
         </div>}
+      {lignes && lignes.some((l) => l.ok || l.echec) && !encours && (() => {
+        const ok = lignes.filter((l) => l.ok).length, ko = lignes.filter((l) => l.echec && !l.ok).length;
+        return <div className={ko ? 'banner' : 'eg-bilan'} role="status" style={{ marginTop: 12 }}>
+          {ok} relance{ok > 1 ? 's' : ''} envoyée{ok > 1 ? 's' : ''}{ko ? ` · ${ko} en échec (en rouge ci-dessus, vous pouvez réessayer)` : ' · les étapes sont marquées faites dans le suivi des baux'}
+        </div>;
+      })()}
       <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
         <button className="btn plein" disabled={encours || !aEnvoyer.length} onClick={envoyer}>{encours ? 'Envoi en cours…' : `Envoyer ${aEnvoyer.length} relance${aEnvoyer.length > 1 ? 's' : ''}`}</button>
       </div>
