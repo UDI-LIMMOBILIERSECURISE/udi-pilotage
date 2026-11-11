@@ -23,6 +23,9 @@ const FAMILLES = [['entree', 'Contrôles d’entrée'], ['sinistres', 'Sinistres
   ['impayes', 'Impayés'], ['permis', 'Permis de louer'], ['assurance', 'Assurance'], ['suivis', 'Entretiens et suivis'], ['sorties', 'Congés, sorties et DG'],
   ['echeances', 'Échéances et révisions'], ['cles', 'Clés'], ['facturation', 'Facturation'], ['controles', 'Contrôles Rivage'], ['donnees', 'Données à corriger']];
 const NOM_FAMILLE = Object.fromEntries(FAMILLES);
+// 139 : alerte déjà dite par l'étape de la frise affichée en tête de la même carte (masquée pour ne pas la lire deux fois)
+const DOUBLON_ETAPE = { edl_sortie_a_commander: 'EDL de sortie', edl_entree_a_organiser: 'EDL d', mandat_controle_entree: 'dossier du mandat',
+  bail_dossier_a_completer: 'contrôle d', bail_go_restants_gestion: 'GO du contrôle' };
 const LIB_PHASE = { entree: 'Entrée en gestion', location: 'Mise en location', bail: 'Bail en cours', sortie: 'Sortie', travaux: 'Travaux', fin: 'Fin de gestion' };
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
 const ROLES = { direction: 'Direction', superviseur: 'Superviseur', gestionnaire: 'Gestionnaire', comptable: 'Comptable', negociateur: 'Négociateur' };
@@ -318,7 +321,7 @@ function Journee({ moi }) {
       {bien && <Fiche titre={'Lot ' + (bien.lot || '') + ' · ' + (bien.adresse || '')} fermer={() => setBien(null)}>
         <FicheBien l={bien} peut={!!biens?.peut} moi={moi} apres={() => { charger(); chargerBiens(); }} />
       </Fiche>}
-      {types.length > 1 && <div className="row" role="group" aria-label="Type d’alerte" style={{ marginTop: -6, marginBottom: 14, gap: 6 }}>
+      {types.length > 1 && cat !== 'toutes' && !cat.startsWith('phase:') && <div className="row" role="group" aria-label="Type d’alerte" style={{ marginTop: -6, marginBottom: 14, gap: 6 }}>
         <span className="muted" style={{ fontSize: 12 }}>Type :</span>
         <button className={'chip' + (typeActif === 'tous' ? ' on' : '')} onClick={() => setType('tous')}>Tous<span className="n">{dansCat.length}</span></button>
         {types.map((t) => <button key={t.regle} className={'chip' + (typeActif === t.regle ? ' on' : '')} onClick={() => setType(t.regle)}>{t.libelle}<span className="n">{t.n}</span></button>)}
@@ -356,7 +359,7 @@ function Journee({ moi }) {
                   <span className="j-etape-quoi"><span className="muted" style={{ fontSize: 12 }}>Étape de la frise · {LIB_PHASE[d.lot.phase]}</span><b>{d.etape.action}</b></span>
                   {d.etape.urgent && <span className="etq rose">En retard</span>}
                 </button>}
-                {d.alertes.map((a) => (
+                {d.alertes.filter((a) => !(d.etape && DOUBLON_ETAPE[a.regle] && (d.etape.action || '').includes(DOUBLON_ETAPE[a.regle]))).map((a) => (
                   <div key={a.id} className={'alerte ' + a.gravite}>
                     <button className="head" aria-expanded={ouvert === a.id} onClick={() => setOuvert(ouvert === a.id ? null : a.id)}>
                       <span className="row"><span className={'tag ' + a.categorie}>{NOM_FAMILLE[a.famille] || CAT[a.categorie]}</span><strong style={{ fontSize: 14 }}>{a.titre}</strong></span>
