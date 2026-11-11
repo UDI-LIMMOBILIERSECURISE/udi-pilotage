@@ -285,13 +285,6 @@ function Journee({ moi }) {
         )}
       </div>
       {err && <div className="banner">{err}</div>}
-      {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
-      {/* 124 : journée d'un membre de l'équipe : son bloc de dossiers tel qu'il le voit */}
-      {cible !== moi.user_id && (() => { const m = membres.find((x) => x.user_id === cible); return m && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(m.role) && <MesDossiers key={cible} moi={moi} pour={m} />; })()}
-      {cible === moi.user_id && ['gestionnaire', 'negociateur'].includes(moi.role) && <MessagesAEnvoyer />}
-      {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
-      {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
-      {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}
       {/* 139 : filtres qui font les vues, par phase du bien puis par type de dossier */}
       <div className="j-filtres">
         <div className="j-groupe" role="group" aria-label="Phase du bien">
@@ -344,9 +337,12 @@ function Journee({ moi }) {
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                  {(d.bail_id || d.mandat_id || d.dossier?.type === 'organisme') && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
-                    onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>{fiche === d.cle ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>}
-                  {d.dossier?.asset_id && (biens?.lots || []).some((l) => l.id === d.dossier.asset_id) && <button className="btn" onClick={() => setBien(biens.lots.find((l) => l.id === d.dossier.asset_id))}>Fiche du bien</button>}
+                  {/* 139 : la fiche s'ouvre sur la fiche unique du bien quand le lot est connu (sauf impayés : fiche impayé) */}
+                  {(() => { const lot = d.dossier?.asset_id && (biens?.lots || []).find((l) => l.id === d.dossier.asset_id);
+                    const impaye = d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'));
+                    if (lot && !impaye) return <button className="btn" onClick={() => setBien(lot)}>Ouvrir la fiche</button>;
+                    return (d.bail_id || d.mandat_id || d.dossier?.type === 'organisme') && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
+                      onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>{fiche === d.cle ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>; })()}
                   {d.dossier?.lien && <a className="btn gris" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
                   {d.dossier?.type === 'donnee' && ['direction', 'superviseur'].includes(moi.role) && <button className="btn plein" onClick={async () => {
                     const rep = window.prompt('Correction faite dans Rivage ? Note (facultatif) :', ''); if (rep === null) return;
@@ -390,6 +386,16 @@ function Journee({ moi }) {
           ))}
         </div>
       )}
+      {/* 139 : listes de travail complémentaires, sous les actions du jour */}
+      <div style={{ marginTop: 18 }}>
+      {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
+      {/* 124 : journée d'un membre de l'équipe : son bloc de dossiers tel qu'il le voit */}
+      {cible !== moi.user_id && (() => { const m = membres.find((x) => x.user_id === cible); return m && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(m.role) && <MesDossiers key={cible} moi={moi} pour={m} />; })()}
+      {cible === moi.user_id && ['gestionnaire', 'negociateur'].includes(moi.role) && <MessagesAEnvoyer />}
+      {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
+      {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
+      {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}
+      </div>
       {traitees.length > 0 && (
         <details style={{ marginTop: 18 }}><summary style={{ cursor: 'pointer', color: 'var(--teal)' }}>Traité ces 7 derniers jours ({traitees.length})</summary>
           <ul style={{ fontSize: 13, color: 'var(--ink2)' }}>{traitees.map((a) => <li key={a.id}>{a.titre} · par {a.traitee_par} le {date(a.traitee_le)} <button className="btn gris" style={{ minHeight: 28 }} onClick={() => traiter(a, false)}>Rouvrir</button></li>)}</ul>
