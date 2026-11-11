@@ -191,8 +191,8 @@ export function FicheBien({ l, peut, moi, apres }) {
       {l.suite && <p className="fb-suite">Suite prévue : <b>{l.suite}</b></p>}
       <div className="fb-deux">
         <div>{l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
-          {(l.etapes || []).filter((e) => e.info).length > 0 && <ul className="muted" style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-            {l.etapes.filter((e) => e.info).map((e, n) => <li key={n}>{e.libelle} : {e.info}</li>)}</ul>}</div>
+          {(l.etapes || []).filter((e) => e.info || e.info_direction).length > 0 && <ul className="muted" style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            {l.etapes.filter((e) => e.info || e.info_direction).map((e, n) => <li key={n}>{e.libelle} : {e.info_direction || e.info}</li>)}</ul>}</div>
         {af && <div className={'fb-action' + (af.urgent ? ' urgent' : '') + (l.a_moi ? ' moi' : '')}>
           <div className="fb-action-qui">{l.a_moi ? 'À vous, maintenant' : 'À faire par ' + af.prenom}</div>
           <div className="fb-action-quoi">{af.action}</div>
