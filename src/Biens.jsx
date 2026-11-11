@@ -14,14 +14,16 @@ export const PHASES = [
   ['bail', 'Bail en cours'],
   ['sortie', 'Sortie'],
 ];
-const COURT = { entree: 'Entrée', location: 'Location', bail: 'Bail', sortie: 'Sortie' };
-const LIBELLE = Object.fromEntries([...PHASES, ['hors', 'Hors gestion']]);
+// 140 : après la sortie, deux phases possibles en plus de la remise en location
+export const SUITES = [['travaux', 'Travaux avant relocation'], ['fin', 'Fin de gestion']];
+const COURT = { entree: 'Entrée', location: 'Location', bail: 'Bail', sortie: 'Sortie', travaux: 'Travaux', fin: 'Fin' };
+const LIBELLE = Object.fromEntries([...PHASES, ...SUITES, ['hors', 'Hors gestion']]);
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '');
 
 export default function Biens({ moi }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
-  const [filtre, setFiltre] = useState('tous'); // tous | entree | location | bail | sortie | a_moi | a_cloturer | hors
+  const [filtre, setFiltre] = useState('tous'); // tous | phase | a_moi | a_cloturer | hors
   const [q, setQ] = useState('');
   const [ouvert, setOuvert] = useState(null);
   const charger = (premier = false) => rpc('pilotage_biens').then((x) => {
@@ -34,7 +36,7 @@ export default function Biens({ moi }) {
     if (!d) return [];
     const liste = d.lots.filter((l) => {
       if (filtre === 'tous' && l.phase === 'hors') return false;
-      if (['entree', 'location', 'bail', 'sortie', 'hors'].includes(filtre) && l.phase !== filtre) return false;
+      if (['entree', 'location', 'bail', 'sortie', 'travaux', 'fin', 'hors'].includes(filtre) && l.phase !== filtre) return false;
       if (filtre === 'a_moi' && !(l.a_moi && l.phase !== 'hors')) return false;
       if (filtre === 'a_cloturer' && !(l.a_cloturer > 0)) return false;
       return !q || correspond(texteRecherche(l.lot && 'lot ' + l.lot, l.adresse, l.bailleur, l.mandat && 'mandat ' + l.mandat,
@@ -49,14 +51,15 @@ export default function Biens({ moi }) {
   const tuile = (k, libelle, n, aide) => <button key={k} className={'tuile tuile-filtre' + (filtre === k ? ' on' : '')} onClick={() => setFiltre(filtre === k ? 'tous' : k)}
     aria-pressed={filtre === k} title={aide}>
     <div className="muted">{libelle}</div><div className="tuile-n">{n || 0}</div></button>;
-  const enGestion = PHASES.reduce((t, [k]) => t + (c[k] || 0), 0);
+  const enGestion = [...PHASES, ...SUITES].reduce((t, [k]) => t + (c[k] || 0), 0);
   return <>
     <div className="entete"><div><h1>Biens</h1>
-      <p className="sub">Chaque lot sur sa frise : entrée en gestion, mise en location, bail en cours, sortie. Tout est déduit de Rivage ; un clic ouvre la fiche.</p></div></div>
+      <p className="sub">Chaque lot sur sa frise : entrée en gestion, mise en location, bail en cours, sortie, puis travaux, relocation ou fin de gestion. Tout est déduit de Rivage ; un clic ouvre la fiche.</p></div></div>
     {err && <div className="banner">{err}</div>}
     <div className="tuiles">
       {tuile('tous', 'En gestion', enGestion, 'Tous les lots gérés')}
       {PHASES.map(([k, l]) => tuile(k, l, c[k]))}
+      {SUITES.map(([k, l]) => tuile(k, l, c[k]))}
       {tuile('a_moi', 'À moi', c.a_moi, 'Biens dont l’étape en cours est à moi de traiter')}
     </div>
     <div className="row" style={{ marginBottom: 10 }}>
@@ -89,7 +92,7 @@ function LigneBien({ l, ouvrir, peut, apres }) {
       <div className="row" style={{ gap: 6 }}>
         {l.alertes_moi > 0 && <span className="etq rose">{l.alertes_moi} alerte{l.alertes_moi > 1 ? 's' : ''} pour moi</span>}
         {l.fin_gestion && <span className="etq violet">Fin de gestion le {date(l.fin_gestion)}</span>}
-        {l.relocation && <span className="etq ok">{l.relocation}</span>}
+        {(l.suite || l.relocation) && <span className="etq ok">{l.suite || l.relocation}</span>}
         {l.a_cloturer > 0 && <span className="etq rose" title="Bail resté en sortie dans Rivage plus de 2 mois après le départ">{l.a_cloturer} bail à clôturer</span>}
       </div>
     </div>
@@ -129,14 +132,22 @@ function MettreEnLocation({ l, apres }) {
   </div>;
 }
 
-// Les quatre phases, la phase en cours marquée
-export function Frise({ phase }) {
+// Les quatre phases, la phase en cours marquée ; après la sortie, la suite (travaux, relocation, fin de gestion)
+export function Frise({ phase, issues = false }) {
   if (phase === 'hors') return <div className="frise"><span className="frise-phase hors">Hors gestion</span></div>;
-  const i = PHASES.findIndex(([k]) => k === phase);
-  return <ol className="frise" aria-label={'Phase : ' + LIBELLE[phase]}>
-    {PHASES.map(([k, lib], n) => <li key={k} className={'frise-phase ' + (n < i ? 'passee' : n === i ? 'courante' : 'a-venir')}
-      aria-current={n === i ? 'step' : undefined}><span className="long">{lib}</span><span className="court" aria-hidden="true">{COURT[k]}</span></li>)}
-  </ol>;
+  const suite = phase === 'travaux' || phase === 'fin';
+  const i = suite ? PHASES.length : PHASES.findIndex(([k]) => k === phase);
+  return <div className="frise-bloc">
+    <ol className="frise" aria-label={'Phase : ' + LIBELLE[phase]}>
+      {PHASES.map(([k, lib], n) => <li key={k} className={'frise-phase ' + (n < i ? 'passee' : n === i ? 'courante' : 'a-venir')}
+        aria-current={n === i ? 'step' : undefined}><span className="long">{lib}</span><span className="court" aria-hidden="true">{COURT[k]}</span></li>)}
+      {suite && <li className={'frise-phase courante ' + phase} aria-current="step"><span className="long">{LIBELLE[phase]}</span><span className="court" aria-hidden="true">{COURT[phase]}</span></li>}
+    </ol>
+    {issues && (phase === 'sortie' || phase === 'bail') && <div className="issues" aria-label="Suites possibles après la sortie">
+      <span className="muted">Après la sortie :</span>
+      <span className="issue travaux">Travaux avant relocation</span><span className="issue relouer">Relouer</span><span className="issue fin">Fin de gestion</span>
+    </div>}
+  </div>;
 }
 
 // Détail de la phase en cours : chaque étape avec son état (fait, en cours, à venir, alerte)
@@ -152,17 +163,118 @@ export function Etapes({ etapes, courante }) {
   </ol>;
 }
 
-function FicheBien({ l, peut, moi, apres }) {
+// Fiche unique du bien (refonte du 11/11/2026) : en-tête, frise et suites, action en cours, dossiers ouverts, puis le dossier complet
+export function FicheBien({ l, peut, moi, apres }) {
+  const [x, setX] = useState(null);
+  const [err, setErr] = useState('');
+  const charger = () => rpc('pilotage_bien', { p_asset: l.id }).then(setX).catch((e) => setErr(e.message));
+  useEffect(() => { charger(); }, [l.id]);
+  const etape = l.etape != null ? (l.etapes || [])[l.etape] : null;
+  const af = l.a_faire;
+  return <div className="fiche-bien">
+    <div className="fb-etiquettes">
+      <span className={'etq phase-' + l.phase}>{LIBELLE[l.phase]}</span>
+      {(x?.tickets || []).find((t) => t.occupation) && <span className="etq neutre">Logement {(x.tickets.find((t) => t.occupation)).occupation}</span>}
+      {l.fin_gestion && <span className="etq violet">Fin de gestion le {date(l.fin_gestion)}</span>}
+    </div>
+    <dl className="fb-faits">
+      <div><dt>Bailleur</dt><dd>{l.bailleur || '—'}</dd></div>
+      <div><dt>{l.phase === 'sortie' ? 'Locataire sortant' : 'Locataire'}</dt><dd>{l.locataires || '—'}</dd></div>
+      {l.depart && <div><dt>Départ</dt><dd>{date(l.depart)}</dd></div>}
+      <div><dt>Mandat</dt><dd>{l.mandat ? 'n° ' + l.mandat : '—'}</dd></div>
+      {l.commercial && <div><dt>Commercial</dt><dd>{l.commercial}</dd></div>}
+      {l.bail && <div><dt>Bail</dt><dd>{l.bail}</dd></div>}
+    </dl>
+    <section className="fb-bloc">
+      <h3 className="fb-titre">Où en est le bien</h3>
+      <Frise phase={l.phase} issues />
+      {l.suite && <p className="fb-suite">Suite prévue : <b>{l.suite}</b></p>}
+      <div className="fb-deux">
+        <div>{l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
+          {(l.etapes || []).filter((e) => e.info).length > 0 && <ul className="muted" style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            {l.etapes.filter((e) => e.info).map((e, n) => <li key={n}>{e.libelle} : {e.info}</li>)}</ul>}</div>
+        {af && <div className={'fb-action' + (af.urgent ? ' urgent' : '') + (l.a_moi ? ' moi' : '')}>
+          <div className="fb-action-qui">{l.a_moi ? 'À vous, maintenant' : 'À faire par ' + af.prenom}</div>
+          <div className="fb-action-quoi">{af.action}</div>
+          {etape?.info && <div className="muted">{etape.info}</div>}
+          {peut && af.action?.startsWith('Mettre le lot') && <MettreEnLocation l={l} apres={apres} />}
+        </div>}
+      </div>
+    </section>
+    {err && <div className="banner">{err}</div>}
+    <section className="fb-bloc">
+      <h3 className="fb-titre">Dossiers ouverts sur ce bien</h3>
+      {!x ? <p className="muted">Chargement…</p> : <Dossiers x={x} l={l} recharger={charger} />}
+    </section>
+    <details className="fb-bloc fb-complet" open={!!(af && (af.action || '').match(/contrôle|dossier|GO/i))}>
+      <summary>Dossier complet du {l.bail_id ? 'bail' : 'mandat'} (contrôle, suivis, messages)</summary>
+      {l.bail_id
+        ? <DossierBail b={{ bail_id: l.bail_id, reference: l.bail, locataires: l.locataires, adresse: l.adresse, bailleur: l.bailleur, mandat: l.mandat ? 'Mandat n°' + l.mandat : null, mandat_id: l.mandat_id }}
+            peut={peut} moi={moi} apres={apres} />
+        : l.mandat_id ? <DossierMandat m={{ id: l.mandat_id }} apres={apres} />
+        : <p className="muted">Aucun mandat ni bail rattaché à ce lot dans Rivage.</p>}
+    </details>
+  </div>;
+}
+
+// Étapes d'un ticket Sinistre ou Travaux, lues dans Rivage (artisan sélectionné = devis accepté par le bailleur)
+const ETAPES_TICKET = [['declare', 'Déclaré'], ['devis_a_demander', 'Devis à demander'], ['devis_demande', 'Devis demandé'], ['devis_accepte', 'Devis accepté'],
+  ['planifie', 'Planifié'], ['en_cours', 'En cours'], ['fait', 'Faits'], ['facture', 'Facturé']];
+const rangTicket = (e) => (e === 'fin_depassee' ? 5 : ETAPES_TICKET.findIndex(([k]) => k === e));
+
+function Dossiers({ x, l, recharger }) {
+  const cartes = [];
+  (x.tickets || []).forEach((t) => {
+    const types = [t.sinistre && 'Sinistre', t.travaux && 'Travaux', t.permis && (t.tags.includes('pl') ? 'Permis de louer' : 'Déclaration de mise en location')].filter(Boolean);
+    const r = rangTicket(t.etape);
+    cartes.push(<article key={t.id} className="fb-carte">
+      <header><div><h4>{types.length ? types.join(' + ') : 'Ticket à classer'} · n°{t.numero}</h4><div className="muted">{t.titre}</div></div>
+        <a className="lien" href={t.lien} target="_blank" rel="noreferrer">Ouvrir dans Rivage ↗</a></header>
+      {(t.sinistre || t.travaux) && <ol className="fb-pas" aria-label={'Étape : ' + t.etape_libelle}>
+        {ETAPES_TICKET.map(([k, lib], n) => <li key={k} className={n < r ? 'fait' : n === r ? 'cour' : ''}>{lib}</li>)}</ol>}
+      <div className="fb-carte-pied">
+        <span>{t.etape_libelle}{t.action && (t.sinistre || t.travaux) ? ' · ' + t.action : ''}</span>
+        {t.retard >= 0 && (t.sinistre || t.travaux) && <span className="etq rose">Relance : sans changement depuis le {date(t.depuis)}</span>}
+        {!types.length && <span className="etq rose">Poser le tag Sinistre, Travaux, PL ou DMEL dans Rivage</span>}
+        {t.a_facturer && <span className="etq violet">À facturer (Audrey et gestion)</span>}
+        {t.occupation && <span className="etq neutre">Logement {t.occupation}</span>}
+      </div>
+    </article>);
+  });
+  if (x.impaye) cartes.push(<article key="impaye" className="fb-carte"><header><div><h4>Impayé</h4><div className="muted">Suivi : Audrey (comptabilité)</div></div></header>
+    <div className="fb-carte-pied"><span>{x.impaye.montant != null ? String(x.impaye.montant).replace('.', ',') + ' € dus' : 'Montant à vérifier'}{x.impaye.depuis ? ' · ouvert le ' + date(x.impaye.depuis) : ''}</span></div></article>);
+  if (x.assurance) cartes.push(<article key="assurance" className="fb-carte"><header><div><h4>Assurance habitation du locataire</h4><div className="muted">Relance automatique</div></div></header>
+    <div className="fb-carte-pied"><span>Prochaine échéance le {date(x.assurance.prochaine)}</span>
+      {new Date(x.assurance.prochaine) <= new Date(Date.now() + 45 * 864e5) && <span className="etq rose">Relances en cours</span>}</div></article>);
+  cartes.push(<article key="cles" className="fb-carte fb-carte-mini"><header><div><h4>Clés</h4>
+    <div className="muted">{x.trousseaux ? x.trousseaux + ' trousseau(x) enregistré(s) à l’agence' : 'Aucun trousseau enregistré à l’agence'}</div></div></header></article>);
   return <>
-    <Frise phase={l.phase} />
-    {l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
-    {(l.etapes || []).filter((e) => e.info).length > 0 && <ul className="muted" style={{ margin: '8px 0 12px', paddingLeft: 18 }}>
-      {l.etapes.filter((e) => e.info).map((e, n) => <li key={n}>{e.libelle} : {e.info}</li>)}
-    </ul>}
-    {l.bail_id
-      ? <DossierBail b={{ bail_id: l.bail_id, reference: l.bail, locataires: l.locataires, adresse: l.adresse, bailleur: l.bailleur, mandat: l.mandat ? 'Mandat n°' + l.mandat : null, mandat_id: l.mandat_id }}
-          peut={peut} moi={moi} apres={apres} />
-      : l.mandat_id ? <DossierMandat m={{ id: l.mandat_id }} apres={apres} />
-      : <p className="muted">Aucun mandat ni bail rattaché à ce lot dans Rivage.</p>}
+    <div className="fb-cartes">{cartes}</div>
+    {cartes.length === 1 && <p className="muted">Ni ticket, ni impayé, ni relance d’assurance : les cartes n’apparaissent que s’il y a un dossier.</p>}
+    <DonneesACorriger l={l} liste={x.donnees || []} recharger={recharger} />
   </>;
+}
+
+// Données Rivage douteuses : signalées à Nicolas (direction), qui les fait corriger
+function DonneesACorriger({ l, liste, recharger }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [motif, setMotif] = useState('');
+  const [err, setErr] = useState('');
+  const envoyer = async () => {
+    setErr('');
+    try { await rpc('pilotage_donnee_signaler', { p_objet_type: 'Asset', p_objet_id: l.id, p_motif: motif }); setMotif(''); setOuvert(false); recharger(); }
+    catch (e) { setErr(e.message); }
+  };
+  const ouvertes = liste.filter((d) => !d.corrige_le);
+  return <div className="fb-donnees">
+    {ouvertes.map((d) => <div key={d.id} className="fb-donnee"><b>Donnée à corriger</b> · {d.motif} <span className="muted">(signalé{d.par ? ' par ' + d.par : ''} le {date(d.le)}, suivi par la direction)</span></div>)}
+    {!ouvert ? <button className="lien" onClick={() => setOuvert(true)}>Signaler une donnée Rivage douteuse sur ce bien</button>
+      : <div className="row" style={{ gap: 8 }}>
+        <label className="sr" htmlFor={'dc-' + l.id}>Ce qui semble faux</label>
+        <input id={'dc-' + l.id} style={{ flex: 1, minWidth: 240 }} placeholder="Ce qui semble faux dans Rivage (ex. loué mais aucun bail sur ce lot)" value={motif} onChange={(e) => setMotif(e.target.value)} />
+        <button className="btn plein" disabled={!motif.trim()} onClick={envoyer}>Envoyer à la direction</button>
+        <button className="btn gris" onClick={() => setOuvert(false)}>Annuler</button>
+      </div>}
+    {err && <div className="err">{err}</div>}
+  </div>;
 }

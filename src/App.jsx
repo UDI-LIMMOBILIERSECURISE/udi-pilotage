@@ -11,13 +11,19 @@ import MessagesDossier, { MessagesAEnvoyer, etapesDesAlertes } from './MessagesD
 import Fiche from './Fiche.jsx';
 import FicheConge from './FicheConge.jsx';
 import ALouer, { PermisLouer } from './ALouer.jsx';
-import Biens from './Biens.jsx';
+import Biens, { FicheBien, PHASES, SUITES } from './Biens.jsx';
 import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
+// 139 : familles de dossiers de Ma journée (calculées par pilotage.famille_alerte)
+const FAMILLES = [['entree', 'Contrôles d’entrée'], ['sinistres', 'Sinistres'], ['travaux', 'Travaux'], ['a_classer', 'Tickets à classer'], ['tickets', 'Rappels de tickets'],
+  ['impayes', 'Impayés'], ['permis', 'Permis de louer'], ['assurance', 'Assurance'], ['suivis', 'Entretiens et suivis'], ['sorties', 'Congés, sorties et DG'],
+  ['echeances', 'Échéances et révisions'], ['cles', 'Clés'], ['facturation', 'Facturation'], ['controles', 'Contrôles Rivage'], ['donnees', 'Données à corriger']];
+const NOM_FAMILLE = Object.fromEntries(FAMILLES);
+const LIB_PHASE = { entree: 'Entrée en gestion', location: 'Mise en location', bail: 'Bail en cours', sortie: 'Sortie', travaux: 'Travaux', fin: 'Fin de gestion' };
 const SEV = { critique: 'Critique', haute: 'Haute', normale: 'Normale' };
 const ROLES = { direction: 'Direction', superviseur: 'Superviseur', gestionnaire: 'Gestionnaire', comptable: 'Comptable', negociateur: 'Négociateur' };
 const euro = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }));
@@ -114,6 +120,14 @@ const MENU = [
   ['Commercial', [['remunerations', 'Rémunérations à valider', '✓'], ['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
   ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['permis', 'Communes du permis de louer', '⚖'], ['equipe', 'Équipe', '☺']]],
 ];
+// 139 : menu réduit par métier ; les autres pages restent accessibles sous « Toutes les pages »
+const PRINCIPAL = {
+  gestionnaire: ['jour', 'biens', 'alouer', 'sinistres', 'cles', 'dg'],
+  negociateur: ['jour', 'biens', 'alouer', 'commissions'],
+  comptable: ['jour', 'impayes', 'compta', 'dg', 'biens'],
+  direction: ['jour', 'agence', 'biens', 'remunerations', 'impayes'],
+  superviseur: ['jour', 'agence', 'biens', 'alouer', 'sinistres'],
+};
 const lireHash = () => (typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '') || 'jour';
 
 function Espace() {
@@ -147,7 +161,10 @@ function Espace() {
   const droit = { jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, biens: true, remunerations: moi.role === 'direction', permis: moi.voit_reglages, cles: true,
     mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
     obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true };
-  const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k])]).filter(([, items]) => items.length);
+  const principal = (PRINCIPAL[moi.role] || ['jour', 'biens']).filter((k) => droit[k]);
+  const tous = MENU.flatMap(([, items]) => items);
+  const menuPrincipal = principal.map((k) => tous.find(([x]) => x === k)).filter(Boolean);
+  const menu = MENU.map(([g, items]) => [g, items.filter(([k]) => droit[k] && !principal.includes(k))]).filter(([, items]) => items.length);
   const page = droit[onglet] ? onglet : 'jour';
   const titre = MENU.flatMap(([, items]) => items).find(([k]) => k === page)?.[1] || '';
   return (
@@ -163,11 +180,18 @@ function Espace() {
           <button className="menu-fermer" aria-label="Fermer le menu" onClick={() => setMenuOuvert(false)}>×</button>
         </div>
         <nav className="menu-liste">
-          {menu.map(([g, items]) => <div key={g} className="menu-groupe">
-            <div className="menu-groupe-titre">{g}</div>
-            {items.map(([k, l, ic]) => <button key={k} className={'menu-item' + (page === k ? ' on' : '')} aria-current={page === k ? 'page' : undefined} onClick={() => setOnglet(k)}>
+          <div className="menu-groupe">
+            {menuPrincipal.map(([k, l, ic]) => <button key={k} className={'menu-item' + (page === k ? ' on' : '')} aria-current={page === k ? 'page' : undefined} onClick={() => setOnglet(k)}>
               <span className="menu-ic" aria-hidden="true">{ic}</span>{l}</button>)}
-          </div>)}
+          </div>
+          {menu.length > 0 && <details className="menu-plus" open={menu.some(([, items]) => items.some(([k]) => k === page))}>
+            <summary className="menu-groupe-titre">Toutes les pages</summary>
+            {menu.map(([g, items]) => <div key={g} className="menu-groupe">
+              <div className="menu-groupe-titre">{g}</div>
+              {items.map(([k, l, ic]) => <button key={k} className={'menu-item' + (page === k ? ' on' : '')} aria-current={page === k ? 'page' : undefined} onClick={() => setOnglet(k)}>
+                <span className="menu-ic" aria-hidden="true">{ic}</span>{l}</button>)}
+            </div>)}
+          </details>}
         </nav>
         <div className="menu-pied">
           <div><strong>{moi.prenom}</strong><div className="menu-role">{ROLES[moi.role]}</div></div>
@@ -204,19 +228,29 @@ function Journee({ moi }) {
   const [membres, setMembres] = useState([]);
   const [cible, setCible] = useState(moi.user_id);
   const [alertes, setAlertes] = useState(null);
-  const [cat, setCat] = useState('toutes');
+  const [cat, setCat] = useState('toutes'); // 139 : famille de dossier (sinistres, travaux, impayés…) ou « phase:… »
   const [type, setType] = useState('tous'); // 102 : filtre par type d'alerte (règle), ex. « Facture fournisseur à traiter »
+  const [biens, setBiens] = useState(null); // 139 : frise des biens, pour les étapes à moi et le filtre par phase
+  const [bien, setBien] = useState(null);
   const [ouvert, setOuvert] = useState(null);
   const [fiche, setFiche] = useState(null);
   const [err, setErr] = useState('');
   const charger = () => rpc('pilotage_journee', { p_user: cible }).then(setAlertes).catch((e) => setErr(e.message));
   useEffect(() => { if (moi.voit_equipe) rpc('pilotage_membres').then(setMembres).catch(() => {}); }, []);
   useEffect(() => { setAlertes(null); charger(); }, [cible]);
+  const chargerBiens = () => rpc('pilotage_biens').then(setBiens).catch(() => setBiens({ lots: [] }));
+  useEffect(() => { chargerBiens(); }, []);
+  const phaseDuLot = useMemo(() => Object.fromEntries((biens?.lots || []).map((l) => [l.id, l.phase])), [biens]);
+  const phaseAlerte = (a) => phaseDuLot[a.dossier?.asset_id] || null;
+  const etapesMoi = cible === moi.user_id ? (biens?.lots || []).filter((l) => l.a_moi && l.phase !== 'hors')
+    .sort((x, y) => Number(!!y.a_faire?.urgent) - Number(!!x.a_faire?.urgent)) : [];
   const traiter = async (a, oui) => { try { await rpc('pilotage_traiter', { p_alerte: a.id, p_traitee: oui }); setOuvert(null); charger(); } catch (e) { setErr(e.message); } };
 
   const ouvertes = (alertes || []).filter((a) => a.statut === 'ouverte');
   const traitees = (alertes || []).filter((a) => a.statut === 'traitee');
-  const dansCat = ouvertes.filter((a) => cat === 'toutes' || a.categorie === cat);
+  const enPhase = cat.startsWith('phase:') ? cat.slice(6) : null;
+  const dansCat = ouvertes.filter((a) => cat === 'toutes' || (enPhase ? phaseAlerte(a) === enPhase : (a.famille || 'controles') === cat));
+  const etapesVues = enPhase ? etapesMoi.filter((l) => l.phase === enPhase) : cat === 'toutes' ? etapesMoi : [];
   // Types d'alerte présents dans la catégorie choisie, du plus fréquent au moins fréquent
   const types = Object.values(dansCat.reduce((m, a) => { (m[a.regle] = m[a.regle] || { regle: a.regle, libelle: a.libelle || a.regle, n: 0 }).n += 1; return m; }, {}))
     .sort((x, y) => y.n - x.n || x.libelle.localeCompare(y.libelle));
@@ -225,7 +259,7 @@ function Journee({ moi }) {
   const dossiers = useMemo(() => {
     const m = new Map();
     visibles.forEach((a) => {
-      const k = ['bail', 'lot', 'ticket'].includes(a.dossier?.type) ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
+      const k = ['bail', 'lot', 'ticket', 'donnee'].includes(a.dossier?.type) ? a.dossier.type + a.dossier.ref : 'm' + (a.mandat_id || a.id);
       if (!m.has(k)) m.set(k, { cle: k, dossier: a.dossier, mandat: a.mandat, bailleur: a.bailleur, mandat_id: a.mandat_id, alertes: [] });
       m.get(k).alertes.push(a);
       if (a.objet_type === 'LeasingContract') m.get(k).bail_id = a.objet_id;
@@ -242,7 +276,7 @@ function Journee({ moi }) {
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
         <div>
           <h1>{cible === moi.user_id ? `Bonjour ${moi.prenom}` : `Journée de ${nomCible}`}</h1>
-          <p className="sub">{new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {ouvertes.length} alerte{ouvertes.length > 1 ? 's' : ''} à traiter</p>
+          <p className="sub">{new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {ouvertes.length + etapesMoi.length} action{ouvertes.length + etapesMoi.length > 1 ? 's' : ''} à traiter</p>
         </div>
         {moi.voit_equipe && membres.length > 1 && (
           <div className="row" role="group" aria-label="Voir la journée de">
@@ -258,11 +292,38 @@ function Journee({ moi }) {
       {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
       {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
       {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}
-      <div className="row" style={{ marginBottom: 14 }}>
-        {[['toutes', 'Toutes']].concat(Object.entries(CAT)).map(([k, l]) => (
-          <button key={k} className={'chip' + (cat === k ? ' on' : '')} onClick={() => { setCat(k); setType('tous'); }}>{l}<span className="n">{k === 'toutes' ? ouvertes.length : ouvertes.filter((a) => a.categorie === k).length}</span></button>
-        ))}
+      {/* 139 : filtres qui font les vues, par phase du bien puis par type de dossier */}
+      <div className="j-filtres">
+        <div className="j-groupe" role="group" aria-label="Phase du bien">
+          <div className="j-groupe-titre">Phase du bien</div>
+          <div className="tuiles">
+            <button className={'tuile tuile-filtre' + (cat === 'toutes' ? ' on' : '')} aria-pressed={cat === 'toutes'} onClick={() => { setCat('toutes'); setType('tous'); }}>
+              <div className="muted">Tout</div><div className="tuile-n">{ouvertes.length + etapesMoi.length}</div></button>
+            {[...PHASES, ...SUITES].map(([k, l]) => { const n = etapesMoi.filter((x) => x.phase === k).length + ouvertes.filter((a) => phaseAlerte(a) === k).length;
+              return <button key={k} className={'tuile tuile-filtre' + (cat === 'phase:' + k ? ' on' : '')} aria-pressed={cat === 'phase:' + k}
+                onClick={() => { setCat(cat === 'phase:' + k ? 'toutes' : 'phase:' + k); setType('tous'); }}><div className="muted">{l}</div><div className="tuile-n">{n}</div></button>; })}
+          </div>
+        </div>
+        <div className="j-groupe" role="group" aria-label="Type de dossier">
+          <div className="j-groupe-titre">Dossiers</div>
+          <div className="row" style={{ gap: 6 }}>
+            {FAMILLES.map(([k, l]) => { const n = ouvertes.filter((a) => (a.famille || 'controles') === k).length;
+              return n > 0 && <button key={k} className={'chip' + (cat === k ? ' on' : '') + (k === 'donnees' ? ' chip-alerte' : '')} aria-pressed={cat === k}
+                onClick={() => { setCat(cat === k ? 'toutes' : k); setType('tous'); }}>{l}<span className="n">{n}</span></button>; })}
+          </div>
+        </div>
       </div>
+      {etapesVues.length > 0 && <section className="card" style={{ marginBottom: 14 }}>
+        <h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Étapes des biens qui vous attendent <span className="muted" style={{ fontWeight: 400, fontSize: 14 }}>({etapesVues.length})</span></h2>
+        <div className="stack" style={{ gap: 6 }}>{etapesVues.map((l) => <button key={l.id} className={'j-etape' + (l.a_faire?.urgent ? ' urgent' : '')} onClick={() => setBien(l)}>
+          <span className={'etq phase-' + l.phase}>{LIB_PHASE[l.phase]}</span>
+          <span className="j-etape-quoi"><b>{l.a_faire?.action}</b><span className="muted">Lot {l.lot || '?'} · {l.adresse}{l.locataires ? ' · ' + l.locataires : ''}</span></span>
+          {l.a_faire?.urgent && <span className="etq rose">En retard</span>}
+        </button>)}</div>
+      </section>}
+      {bien && <Fiche titre={'Lot ' + (bien.lot || '') + ' · ' + (bien.adresse || '')} fermer={() => setBien(null)}>
+        <FicheBien l={bien} peut={!!biens?.peut} moi={moi} apres={() => { charger(); chargerBiens(); }} />
+      </Fiche>}
       {types.length > 1 && <div className="row" role="group" aria-label="Type d’alerte" style={{ marginTop: -6, marginBottom: 14, gap: 6 }}>
         <span className="muted" style={{ fontSize: 12 }}>Type :</span>
         <button className={'chip' + (typeActif === 'tous' ? ' on' : '')} onClick={() => setType('tous')}>Tous<span className="n">{dansCat.length}</span></button>
@@ -275,7 +336,7 @@ function Journee({ moi }) {
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <span className={'sev ' + gravNom[d.pire]}>{SEV[gravNom[d.pire]]}</span>
-                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.dossier?.type === 'invoice' ? 'Facture fournisseur' : d.dossier?.type === 'ticket' ? `Ticket n°${d.dossier.ref}${d.dossier.titre ? ' · ' + d.dossier.titre : ''}` : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
+                  <h2 style={{ fontSize: 17, margin: '4px 0 2px' }}>{d.dossier?.type === 'bail' ? `Bail ${d.dossier.ref}` : d.dossier?.type === 'lot' ? `Lot ${d.dossier.ref}` : d.dossier?.type === 'organisme' ? `Impayés · ${ORGANISMES[d.dossier.ref] || d.dossier.ref}` : d.dossier?.type === 'invoice' ? 'Facture fournisseur' : d.dossier?.type === 'ticket' ? `Ticket n°${d.dossier.ref}${d.dossier.titre ? ' · ' + d.dossier.titre : ''}` : d.dossier?.type === 'donnee' ? 'Donnée à corriger' : d.mandat || 'Dossier'}{d.dossier?.adresse ? ` · ${d.dossier.adresse}` : ''}</h2>
                   <div className="grid2">
                     {d.bailleur && <><span>Bailleur</span><span>{d.bailleur}</span></>}
                     {d.dossier?.locataires && <><span>Locataire</span><span>{d.dossier.locataires}</span></>}
@@ -285,14 +346,18 @@ function Journee({ moi }) {
                 <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                   {(d.bail_id || d.mandat_id || d.dossier?.type === 'organisme') && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
                     onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>{fiche === d.cle ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>}
+                  {d.dossier?.asset_id && (biens?.lots || []).some((l) => l.id === d.dossier.asset_id) && <button className="btn" onClick={() => setBien(biens.lots.find((l) => l.id === d.dossier.asset_id))}>Fiche du bien</button>}
                   {d.dossier?.lien && <a className="btn gris" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
+                  {d.dossier?.type === 'donnee' && ['direction', 'superviseur'].includes(moi.role) && <button className="btn plein" onClick={async () => {
+                    const rep = window.prompt('Correction faite dans Rivage ? Note (facultatif) :', ''); if (rep === null) return;
+                    try { await rpc('pilotage_donnee_corrigee', { p_id: Number(d.dossier.ref), p_reponse: rep }); charger(); } catch (e) { setErr(e.message); } }}>Corrigée</button>}
                 </div>
               </div>
               <div className="stack" style={{ gap: 6, marginTop: 10 }}>
                 {d.alertes.map((a) => (
                   <div key={a.id} className={'alerte ' + a.gravite}>
                     <button className="head" aria-expanded={ouvert === a.id} onClick={() => setOuvert(ouvert === a.id ? null : a.id)}>
-                      <span className="row"><span className={'tag ' + a.categorie}>{CAT[a.categorie]}</span><strong style={{ fontSize: 14 }}>{a.titre}</strong></span>
+                      <span className="row"><span className={'tag ' + a.categorie}>{NOM_FAMILLE[a.famille] || CAT[a.categorie]}</span><strong style={{ fontSize: 14 }}>{a.titre}</strong></span>
                       <span className="muted">depuis le {date(a.depuis)}</span>
                     </button>
                     {/* 103 : facture fournisseur, à qui elle incombe et notes Rivage qui en parlent, visibles sans ouvrir l'alerte */}

@@ -9,6 +9,7 @@ import { preparer, SMS, nomSms, smsFactures, lienGmail, TYPES_BAIL, DECISIONS, C
 import { chargerModeles, texteSmsGestion, MOYEN as MOYEN_MSG } from './messages.js';
 import MessagesDossier from './MessagesDossier.jsx';
 import FicheConge from './FicheConge.jsx';
+import ResumeControle, { Comparaison } from './ResumeControle.jsx';
 import { ClesLots } from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
 
@@ -434,6 +435,7 @@ function Controle({ d, b, peut, circuit, agir, ouvrirMail, recharger }) {
       <h3 style={{ margin: 0 }}>Contrôle d’entrée {c.portee === 'commercial' ? '(bail commercial)' : '(habitation)'}</h3>
       <button className="lien" onClick={() => setOuvert(!ouvert)}>{ouvert ? 'Replier' : 'Déplier'}</button>
     </div>
+    <ResumeControle c={c} objet="bail" />
     <div className={'mini-alerte ' + (c.go_le ? 'normale' : c.restant ? 'haute' : 'normale')}>
       {c.go_le ? <>GO donné le {date(c.go_le)} par {c.go_par || '—'}{c.anomalies ? ` · ${c.anomalies} anomalie(s) acceptée(s)` : ''}</>
         : <>{c.restant} point(s) à traiter{(() => { const r = c.items.filter((i) => i.a_traiter); const g = r.filter((i) => i.qui === 'gestion').length;
@@ -639,10 +641,11 @@ function Question({ i, d, b, peut, agir }) {
           : <span className="muted" style={{ marginLeft: 8, fontSize: 11, whiteSpace: 'nowrap' }}>· géré dans Rivage</span>}
         {i.aide && <div className="muted" style={{ fontSize: 12 }}>{i.aide}</div>}
         {parRivage && <div style={{ fontSize: 13 }}>D’après {i.detail.replace(/^Rivage : /, 'Rivage : ')}{peut && <button className="lien" onClick={() => setCorriger(true)}>Corriger</button>}</div>}
+        {ecart && i.bloc === 'rivage' && i.ia ? <Comparaison rivage={i.detail} document={i.ia.valeur} page={i.ia.page} extrait={i.ia.extrait} doc="bail" /> : <>
         {i.detail && i.mode !== 'fiche' && !parRivage && <div style={{ fontSize: 13 }}>{i.mode === 'rivage' ? 'Rivage : ' : ''}{i.detail}</div>}
         {i.ia && (i.bloc !== 'rivage' || ecart) && !(i.bloc === 'pieces' && !i.ia.valeur) && <div style={{ fontSize: 13, background: 'var(--blue-bg)', padding: '4px 8px', borderRadius: 6, marginTop: 4 }}>
           ✦ Lu dans le bail : {i.ia.valeur || (i.ia.trouve === false ? 'non trouvé' : '—')}{i.ia.page ? ` (page ${i.ia.page})` : ''}
-          {i.ia.extrait && <div className="muted" style={{ fontSize: 12 }}>« {i.ia.extrait} »</div>}</div>}
+          {i.ia.extrait && <div className="muted" style={{ fontSize: 12 }}>« {i.ia.extrait} »</div>}</div>}</>}
         {i.mode === 'fiche' && !parRivage && <div style={{ marginTop: 4 }}><ChampFiche b={b} fiche={d.fiche} champ={i.ref} peut={peut} agir={agir} /></div>}
         {i.repondu && <div className="muted" style={{ fontSize: 12 }}>Répondu par {i.par || '—'} le {date(i.le)}{i.commentaire ? ' · ' + i.commentaire : ''}</div>}
         {i.repondu && ecart && i.statut === 'ok' && !i.commentaire && <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>Écart validé sans justification : revenez sur la réponse pour l’expliquer ou corriger Rivage.</div>}
