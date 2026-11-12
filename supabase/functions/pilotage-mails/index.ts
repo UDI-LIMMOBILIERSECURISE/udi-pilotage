@@ -137,7 +137,14 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
   const corps = (texte.plain.trim() || sansHtml(texte.html)).slice(0, 60000)
   // 146 : référence [UDI L.. T..] insérée dans le texte par le module Gmail, prise en compte comme dans l'objet
   const refCorps = /\[UDI\s+L/i.test(objet) ? null : (corps.match(/\[UDI\s+L[A-Za-z0-9-]+(?:\s+T\d+)?\]/i) || [null])[0]
-  const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: refCorps ? `${objet} ${refCorps}` : objet, p_thread: g.threadId })
+  // 148 : mail envoyé — choix du dossier fait dans le module Gmail ; consommé dans tous les cas, utilisé seulement si la référence a disparu du mail
+  let refChoix: string | null = null
+  if (lab.includes('SENT')) {
+    const { data: ch } = await service.rpc('pilotage_mails_choix_prendre', { p_boite: boite, p_le: le, p_dest: externes, p_objet: objet, p_message_id: messageId })
+    if (ch && !refCorps && !/\[UDI\s+L/i.test(objet)) refChoix = ch as string
+  }
+  const refAjout = refCorps || refChoix
+  const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: refAjout ? `${objet} ${refAjout}` : objet, p_thread: g.threadId })
   if (error) throw new Error(error.message)
   if (!prep?.garder) return 'hors_rivage'
   const sens = lab.includes('SENT') ? 'envoye' : 'recu'

@@ -178,7 +178,9 @@ function surRedaction(e) { return [carteRecherche('', true, null)]; }
 // Référence ajoutée en bas du texte du mail, en petit et en gris (l'objet reste libre). Le pilotage la lit dans le texte comme dans l'objet,
 // et elle reste dans le texte cité des réponses.
 function insererRef(e) {
-  var r = e.parameters.ref;
+  var r = e.parameters.ref, md = e.draftMetadata || {};
+  // 148 : choix gardé côté pilotage (sécurité si la ligne est effacée) — sans effet sur le brouillon si l'appel échoue
+  try { appel('choisir', { ref: r, emails: [].concat(md.toRecipients || [], md.ccRecipients || [], md.bccRecipients || []), objet: md.subject || '' }); } catch (err) { }
   var html = '<div style="clear:both;display:block;text-align:left;white-space:nowrap;color:#9aa0a6;font-size:11px;margin-top:12px">Réf. dossier : ' + r + '</div>';
   return CardService.newUpdateDraftActionResponseBuilder()
     .setUpdateDraftBodyAction(CardService.newUpdateDraftBodyAction().addUpdateContent(html, CardService.ContentType.MUTABLE_HTML)

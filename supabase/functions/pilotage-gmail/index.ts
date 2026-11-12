@@ -1,7 +1,8 @@
 // Module « Pilotage UDI » dans Gmail (146) : appelé par le module Apps Script (dossier gmail-addon/) avec le jeton d'identité Google
 // de la personne (ScriptApp.getIdentityToken). Le jeton est vérifié auprès de Google (émetteur, adresse vérifiée, domaine udi-immo.com,
 // destinataire = le module si GMAIL_ADDON_AUD est renseigné) ; les droits sont ensuite ceux du membre du pilotage qui a cette adresse.
-// Actions : contexte (mail ouvert), chercher (lot / bail / ticket), classer (rattacher un mail à un lot, et à un ticket).
+// Actions : contexte (mail ouvert), chercher (lot / bail / ticket), classer (rattacher un mail à un lot, et à un ticket),
+// choisir (148 : dossier choisi à la rédaction, gardé pour ranger le mail envoyé même si la référence est effacée).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 
 const DOMAINE = 'udi-immo.com'
@@ -21,7 +22,7 @@ async function identite(jeton: string): Promise<string> {
 Deno.serve(async (req) => {
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   if (req.method !== 'POST') return rep(405, { error: 'Méthode non autorisée' })
-  let c: { id_token?: string; action?: string; message_id?: string; emails?: string[]; q?: string; mail_id?: number; lot_id?: string; ticket_id?: string | null } = {}
+  let c: { id_token?: string; action?: string; message_id?: string; emails?: string[]; q?: string; mail_id?: number; lot_id?: string; ticket_id?: string | null; ref?: string; objet?: string } = {}
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   let email: string
   try { email = await identite(c.id_token || '') } catch (e) { return rep(401, { error: e instanceof Error ? e.message : 'Non autorisé' }) }
@@ -42,6 +43,10 @@ Deno.serve(async (req) => {
       // Libellé Gmail « Pilotage/Classé » posé par la fonction de lecture des boîtes
       await fetch(`${url}/functions/v1/pilotage-mails`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cle}` },
         body: JSON.stringify({ action: 'etiqueter', id: c.mail_id }) }).catch(() => {})
+      return rep(200, { ok: true })
+    }
+    if (c.action === 'choisir') {
+      await appel('pilotage_addon_choisir', { p_email: email, p_ref: c.ref || '', p_dest: (c.emails || []).slice(0, 50), p_objet: c.objet || '' })
       return rep(200, { ok: true })
     }
     return rep(400, { error: 'Action inconnue' })
