@@ -2,7 +2,8 @@
 // de la personne (ScriptApp.getIdentityToken). Le jeton est vérifié auprès de Google (émetteur, adresse vérifiée, domaine udi-immo.com,
 // destinataire = le module si GMAIL_ADDON_AUD est renseigné) ; les droits sont ensuite ceux du membre du pilotage qui a cette adresse.
 // Actions : contexte (mail ouvert), chercher (lot / bail / ticket), classer (rattacher un mail à un lot, et à un ticket),
-// choisir (148 : dossier choisi à la rédaction, gardé pour ranger le mail envoyé même si la référence est effacée).
+// choisir (148 : dossier choisi à la rédaction, gardé pour ranger le mail envoyé même si la référence est effacée),
+// importer (148 : « Ajouter au pilotage » pour un mail arrivé avant le branchement de la boîte).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 
 const DOMAINE = 'udi-immo.com'
@@ -22,7 +23,7 @@ async function identite(jeton: string): Promise<string> {
 Deno.serve(async (req) => {
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   if (req.method !== 'POST') return rep(405, { error: 'Méthode non autorisée' })
-  let c: { id_token?: string; action?: string; message_id?: string; emails?: string[]; q?: string; mail_id?: number; lot_id?: string; ticket_id?: string | null; ref?: string; objet?: string } = {}
+  let c: { id_token?: string; action?: string; message_id?: string; emails?: string[]; q?: string; mail_id?: number; lot_id?: string; ticket_id?: string | null; ref?: string; objet?: string; gmail_id?: string } = {}
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   let email: string
   try { email = await identite(c.id_token || '') } catch (e) { return rep(401, { error: e instanceof Error ? e.message : 'Non autorisé' }) }
@@ -44,6 +45,14 @@ Deno.serve(async (req) => {
       await fetch(`${url}/functions/v1/pilotage-mails`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cle}` },
         body: JSON.stringify({ action: 'etiqueter', id: c.mail_id }) }).catch(() => {})
       return rep(200, { ok: true })
+    }
+    if (c.action === 'importer') {
+      // 148 : mail arrivé avant le branchement de la boîte — lu et rangé à la demande, dans la boîte de la personne
+      if (!(await appel('pilotage_mails_boite_active', { p_boite: email }))) return rep(400, { error: 'Votre boîte n\'est pas branchée au pilotage' })
+      const r = await fetch(`${url}/functions/v1/pilotage-mails`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cle}` },
+        body: JSON.stringify({ action: 'importer', boite: email, gmail_id: c.gmail_id || '' }) })
+      const j = await r.json().catch(() => ({}))
+      return rep(r.ok ? 200 : 400, j)
     }
     if (c.action === 'choisir') {
       await appel('pilotage_addon_choisir', { p_email: email, p_ref: c.ref || '', p_dest: (c.emails || []).slice(0, 50), p_objet: c.objet || '' })

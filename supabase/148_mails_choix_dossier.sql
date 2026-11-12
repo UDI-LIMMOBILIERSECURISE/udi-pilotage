@@ -60,3 +60,58 @@ revoke all on function public.pilotage_addon_choisir(text, text, text[], text), 
   from public, anon, authenticated;
 grant execute on function public.pilotage_addon_choisir(text, text, text[], text), public.pilotage_mails_choix_prendre(text, timestamptz, text[], text, text)
   to service_role;
+
+-- ===================== Ajout d'un ancien mail depuis le module Gmail, et reprise de 6 mois d'historique =====================
+-- « Ajouter au pilotage » (module Gmail) : un mail arrivé avant le branchement de la boîte est lu et rangé à la demande
+--  (même règles que les autres : correspondant connu de Rivage et lié à un lot ou un bail, sinon rien n'est gardé).
+-- Reprise d'historique : la fonction pilotage-mails remonte chaque boîte du plus récent au plus ancien, jusqu'à la date « depuis »,
+--  avec le temps qui reste après les nouveaux mails à chaque passage (toutes les 5 min). Un mail sans correspondant connu de Rivage
+--  est écarté sur ses seuls en-têtes (expéditeur, destinataires) : son texte n'est ni téléchargé ni lu.
+
+create table if not exists pilotage.mails_reprise (
+  boite text primary key references pilotage.mails_boites(adresse) on delete cascade,
+  depuis timestamptz not null,               -- date la plus ancienne reprise
+  curseur timestamptz not null,              -- prochain lot : mails envoyés ou reçus avant cette date
+  vus integer not null default 0,
+  gardes integer not null default 0,
+  fini_le timestamptz,
+  maj_le timestamptz not null default now()
+);
+alter table pilotage.mails_reprise enable row level security;
+revoke all on pilotage.mails_reprise from public, anon, authenticated;
+
+-- Un correspondant au moins est-il connu de Rivage (toutes périodes) ?
+create or replace function public.pilotage_mails_connus(p_emails text[]) returns boolean
+language sql stable security definer set search_path to 'pilotage', 'public' as $$
+  select exists (select 1 from pilotage.mails_annuaire(p_emails))
+$$;
+
+-- Reprise en cours (une boîte à la fois, boîtes actives seulement)
+create or replace function public.pilotage_mails_reprise_suivante() returns setof pilotage.mails_reprise
+language sql stable security definer set search_path to 'pilotage', 'public' as $$
+  select r.* from pilotage.mails_reprise r join pilotage.mails_boites b on b.adresse = r.boite and b.actif
+   where r.fini_le is null order by r.boite limit 1
+$$;
+create or replace function public.pilotage_mails_reprise_maj(p_boite text, p_curseur timestamptz, p_vus integer, p_gardes integer, p_fini boolean)
+returns void language sql security definer set search_path to 'pilotage', 'public' as $$
+  update pilotage.mails_reprise set curseur = least(curseur, p_curseur), vus = vus + p_vus, gardes = gardes + p_gardes,
+         fini_le = case when p_fini then now() end, maj_le = now() where boite = p_boite
+$$;
+
+-- Une boîte peut-elle être lue (branchée et active) ?
+create or replace function public.pilotage_mails_boite_active(p_boite text) returns boolean
+language sql stable security definer set search_path to 'pilotage', 'public' as $$
+  select exists (select 1 from pilotage.mails_boites where adresse = lower(trim(p_boite)) and actif)
+$$;
+
+revoke all on function public.pilotage_mails_connus(text[]), public.pilotage_mails_reprise_suivante(),
+  public.pilotage_mails_reprise_maj(text, timestamptz, integer, integer, boolean), public.pilotage_mails_boite_active(text) from public, anon, authenticated;
+grant execute on function public.pilotage_mails_connus(text[]), public.pilotage_mails_reprise_suivante(),
+  public.pilotage_mails_reprise_maj(text, timestamptz, integer, integer, boolean), public.pilotage_mails_boite_active(text) to service_role;
+
+-- Reprise de 6 mois demandée par Nicolas le 12/11/2026 : boîtes de service et boîte de Nicolas.
+-- Boîtes de Marion Gatti et Nicolas Sleman : à ajouter de la même façon quand elles sont informées de la reprise d'historique.
+insert into pilotage.mails_reprise (boite, depuis, curseur)
+select adresse, now() - interval '6 months', now() from pilotage.mails_boites
+ where adresse in ('votregestionnaire@udi-immo.com', 'votrecomptable@udi-immo.com', 'nvedrines@udi-immo.com')
+on conflict (boite) do nothing;

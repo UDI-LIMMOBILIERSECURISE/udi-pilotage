@@ -58,8 +58,10 @@ function surMessage(e) {
   var s1 = CardService.newCardSection().setHeader('Ce mail');
   if (!d.mail) {
     s1.addWidget(CardService.newTextParagraph().setText((d.parties || []).length
-      ? 'Pas encore dans le pilotage (boîte non branchée, ou passage dans les 5 minutes).'
+      ? 'Pas encore dans le pilotage.'
       : 'Aucun correspondant connu de Rivage : ce mail n\'est pas repris.'));
+    if ((d.parties || []).length) s1.addWidget(CardService.newTextButton().setText('Ajouter au pilotage')
+      .setOnClickAction(CardService.newAction().setFunctionName('importer').setParameters({ gmail_id: String(e.gmail.messageId) })));
     // Mail non repris mais portant une référence [UDI L<lot> T<ticket>] : on affiche quand même le dossier, pour information
     var r = String(m.getSubject() || '').match(/\[UDI L([^\]\s]+)(?: T(\d+))?\]/);
     if (r) {
@@ -113,6 +115,18 @@ function surMessage(e) {
   if (d.mail && d.peut_classer) c.addSection(sectionRecherche('', false, d.mail.id));
   c.addSection(CardService.newCardSection().addWidget(lienPilotage()));
   return c.build();
+}
+
+// 148 : mail arrivé avant le branchement de la boîte — le pilotage le lit et le range, puis le panneau est réaffiché
+function importer(e) {
+  var st;
+  try { st = appel('importer', { gmail_id: e.parameters.gmail_id }).statut; }
+  catch (err) { return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(String(err.message || err))).build(); }
+  var msg = { classe: 'Ajouté et rangé dans le dossier.', a_verifier: 'Ajouté : choisissez le dossier ci-dessous.', doublon: 'Déjà dans le pilotage.',
+    exclu: 'Mail marqué « Privé » : non repris.', interne: 'Échange interne : non repris.', hors_rivage: 'Aucun correspondant lié à un lot ou un bail : non repris.' }[st]
+    || 'Ce mail n\'a pas pu être repris.';
+  return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(msg))
+    .setNavigation(CardService.newNavigation().updateCard(surMessage(e))).build();
 }
 
 function classer(e) {
