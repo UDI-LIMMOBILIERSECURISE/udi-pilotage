@@ -11,7 +11,7 @@ const ORIGINES = ['https://udi-pilotage.vercel.app', 'http://localhost:5173', 'h
 const DOMAINE_INTERNE = /@udi-immo\.com$/i
 const LIB_CLASSE = 'Pilotage/Classé', LIB_VERIFIER = 'Pilotage/À vérifier', LIB_PRIVE = 'Privé'
 const MODELE = Deno.env.get('PILOTAGE_MODELE_MAILS') || 'claude-haiku-4-5-20251001'
-const MAX_PJ = 15 * 1024 * 1024, MAX_MAILS_PASSAGE = 60, SEUIL = 0.8
+const MAX_PJ = 15 * 1024 * 1024, BUDGET_MS = 200_000, SEUIL = 0.8
 
 function cors(req: Request) {
   const o = req.headers.get('origin') || ''
@@ -173,6 +173,7 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
 }
 
 async function synchroniser(service: SupabaseClient) {
+  const debut = Date.now()
   const { data: boites } = await service.rpc('pilotage_mails_boites')
   const bilan: Record<string, unknown> = {}
   for (const b of (boites || []) as { adresse: string; history_id: string | null; import_jours: number }[]) {
@@ -202,14 +203,18 @@ async function synchroniser(service: SupabaseClient) {
         } while (page)
       }
       ids = [...new Set(ids)]
-      // Rattrapage par paquets : le curseur n'avance que si tout le paquet est traité
-      const reste = ids.length > MAX_MAILS_PASSAGE
-      for (const id of ids.slice(0, MAX_MAILS_PASSAGE).reverse()) {
-        const r = await traiterMessage(service, b.adresse, id, prive); compte[r] = (compte[r] || 0) + 1
+      if (!b.history_id) ids.reverse()  // reprise d'historique : du plus ancien au plus récent
+      // Budget de temps par passage : si tout n'est pas traité, le curseur n'avance pas ; au passage suivant les mails déjà vus
+      // (gardés ou écartés) repassent vite et le traitement reprend plus loin
+      let traites = 0
+      for (const id of ids) {
+        if (Date.now() - debut > BUDGET_MS) break
+        const r = await traiterMessage(service, b.adresse, id, prive); compte[r] = (compte[r] || 0) + 1; traites++
       }
-      if (reste && b.history_id) nouveau = null  // repasse au prochain cycle depuis le même curseur (les mails déjà vus sont reconnus)
+      const reste = ids.length - traites
+      if (reste > 0) nouveau = null
       await service.rpc('pilotage_mails_boite_maj', { p_adresse: b.adresse, p_history: nouveau, p_erreur: null })
-      bilan[b.adresse] = { ...compte, restant: reste ? ids.length - MAX_MAILS_PASSAGE : 0 }
+      bilan[b.adresse] = { ...compte, restant: reste }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       console.error('[pilotage-mails]', b.adresse, msg)
