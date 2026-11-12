@@ -5,6 +5,8 @@ import React, { useEffect, useState } from 'react';
 import { rpc } from './supabase.js';
 import { REGIME } from './Permis.jsx';
 import { texteRecherche, correspond } from './cartes.jsx';
+import Fiche from './Fiche.jsx';
+import { LigneLot, FicheLot, useBiens, titreLot } from './Biens.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const euro = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €');
@@ -14,6 +16,8 @@ export default function ALouer() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [q, setQ] = useState(''); // recherche sur toute la page : lots à louer, propositions, suivi du permis de louer
+  const [ouvert, setOuvert] = useState(null);
+  const biens = useBiens();
   const charger = () => rpc('pilotage_a_louer').then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
@@ -37,7 +41,12 @@ export default function ALouer() {
     </div>
     {!d.lots.length ? <div className="card">Aucun lot en recherche de locataire.</div>
       : !lots.length ? <div className="card">Aucun lot à louer ne correspond à « {q} ».</div>
-      : <div className="stack" style={{ gap: 8 }}>{[...lots].sort(parDispo).map((l) => <LotALouer key={l.asset_id} l={l} peut={d.peut} agir={agir} />)}</div>}
+      : <div className="stack" style={{ gap: 8 }}>{[...lots].sort(parDispo).map((l) => <LigneLot key={l.asset_id} l={biens.parId[l.asset_id]} ouvrir={() => setOuvert(l.asset_id)}
+          gravite={l.pret?.dpe && l.pret?.erp && l.pret?.permis ? 'normale' : 'haute'} titre={'Lot ' + l.lot + ' · ' + (l.adresse || '')}
+          complement={<LotALouer l={l} peut={d.peut} agir={agir} ligne />} />)}</div>}
+    {ouvert && (() => { const l = d.lots.find((x) => x.asset_id === ouvert); return <Fiche titre={titreLot(biens.parId[ouvert], 'Lot ' + (l?.lot || ''))} fermer={() => setOuvert(null)}>
+      <FicheLot l={biens.parId[ouvert]} titre="Mise en location" peut={biens.peut} apres={() => { charger(); biens.recharger(); }}>
+        {l ? <LotALouer l={l} peut={d.peut} agir={agir} /> : <p className="muted">Le lot n’est plus dans la liste « À louer ».</p>}</FicheLot></Fiche>; })()}
     {d.peut && propositions.length > 0 && <details className="replie" style={{ marginTop: 20 }}>
       <summary style={{ cursor: 'pointer' }} className="muted">Lots qui pourraient être mis en location ({propositions.length})</summary>
       <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>Congé qui arrive à sa fin ou lot d’un mandat sans bail : « Mettre en location » l’ajoute à la liste.</div>
@@ -77,16 +86,18 @@ function Pastille({ ok, oui, non }) {
   return <span className={'etq ' + (ok ? 'ok' : 'rose')} style={{ marginRight: 4 }}>{ok ? '✓ ' + oui : '✗ ' + non}</span>;
 }
 
-function LotALouer({ l, peut, agir }) {
+function LotALouer({ l, peut, agir, ligne }) {
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState({ dispo: l.disponible_le || '', loyer: l.loyer_prevu ?? '', note: l.note || '' });
   const pret = l.pret || {};
   const soumisPermis = l.permis?.regime === 'autorisation';
-  return <article className={'card ' + (pret.dpe && pret.erp && pret.permis ? 'normale' : 'haute')} style={{ padding: 12 }}>
+  // 12/11 : dans la ligne du lot (nouvel affichage), sans cadre ni en-tête ; un clic sur un bouton n'ouvre pas la fiche
+  const stop = (e) => e.stopPropagation();
+  return <article className={ligne ? '' : 'card ' + (pret.dpe && pret.erp && pret.permis ? 'normale' : 'haute')} style={ligne ? undefined : { padding: 12 }}>
     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
       <div>
-        <div className="kcarte-titre">Lot {l.lot} · {NATURE[l.nature] || l.nature}{l.surface ? ` · ${l.surface} m²` : ''}</div>
-        <div className="muted">{l.adresse} · bailleur : {l.bailleur || '—'}</div>
+        {!ligne && <><div className="kcarte-titre">Lot {l.lot} · {NATURE[l.nature] || l.nature}{l.surface ? ` · ${l.surface} m²` : ''}</div>
+        <div className="muted">{l.adresse} · bailleur : {l.bailleur || '—'}</div></>}
         <div style={{ fontSize: 13, marginTop: 4 }}>Disponible le {date(l.disponible_le)} · loyer prévu {euro(l.loyer_prevu)} · en liste depuis le {date(l.depuis)}{l.motif ? ' · ' + l.motif : ''}</div>
         <div style={{ marginTop: 6 }}>
           <Pastille ok={pret.dpe} oui={'DPE' + (pret.dpe_classe ? ' ' + pret.dpe_classe : '')} non="DPE manquant ou expiré" />
@@ -99,12 +110,12 @@ function LotALouer({ l, peut, agir }) {
           : <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 4 }}>DPE classé {pret.dpe_classe} : vérifier les interdictions de location applicables aux logements énergivores.</div>}
         {l.note && <div className="muted" style={{ fontSize: 12 }}>{l.note}</div>}
       </div>
-      {peut && <div className="row">
+      {peut && <div className="row" onClick={stop} onKeyDown={stop}>
         <button className="btn" onClick={() => setEdit(!edit)}>Modifier</button>
         <button className="btn gris" onClick={() => agir({ p_asset: l.asset_id, p_action: 'retirer', p_disponible: null, p_loyer: null, p_motif: 'Retiré par la gestion', p_note: null })}>Retirer</button>
       </div>}
     </div>
-    {edit && <div className="row" style={{ marginTop: 6 }}>
+    {edit && <div className="row" style={{ marginTop: 6 }} onClick={stop} onKeyDown={stop}>
       <label className="muted">Disponible le <input type="date" value={f.dispo} onChange={(e) => setF({ ...f, dispo: e.target.value })} /></label>
       <label className="muted">Loyer CC <input type="number" value={f.loyer} onChange={(e) => setF({ ...f, loyer: e.target.value })} style={{ width: 90 }} /></label>
       <input placeholder="Note pour les commerciaux" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} style={{ width: 240 }} />

@@ -12,6 +12,8 @@ import FicheConge from './FicheConge.jsx';
 import ResumeControle, { Comparaison } from './ResumeControle.jsx';
 import { ClesLots } from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
+import Fiche from './Fiche.jsx';
+import { LigneLot, FicheLot, useBiens, titreLot } from './Biens.jsx';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const auj = () => new Date().toISOString().slice(0, 10);
@@ -47,6 +49,7 @@ export default function SuiviBaux({ moi }) {
   const [filtre, setFiltre] = useState('traiter');
   const [sel, setSel] = useState(null);
   const [cherche, setCherche] = useState('');
+  const biens = useBiens();
   const charger = () => { rpc('pilotage_infos_cartes').then((x) => setInfos(x?.baux || {})).catch(() => {}); return rpc('pilotage_baux').then(setD).catch((e) => setErr(e.message)); };
   useEffect(() => { charger(); }, []);
   if (err && !d) return <div className="banner">{err}</div>;
@@ -77,33 +80,30 @@ export default function SuiviBaux({ moi }) {
         ['douze', 'Échéance < 12 mois', baux.filter(dans12).length], ['commerciaux', 'Commerciaux', baux.filter(commercial).length], ['tous', 'Tous', baux.length]]} />
       <input className="recherche" placeholder="Rechercher : nom, adresse, téléphone, e-mail, n° de bail" value={cherche} onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un bail" />
     </div>
-    {s ? <section className="panneau" style={{ marginTop: 8 }}>
-      <button className="btn" onClick={() => setSel(null)}>← Retour à la liste</button>
-      <div style={{ maxWidth: 980, marginTop: 10 }}><DossierBail b={s} peut={d.peut} moi={moi} apres={charger} /></div>
-    </section> : <>
-      <div className="grille-cartes grille-baux">{vus.map((b) => {
-        const e = b.echeance || {}; const g = grave(b) ? 'critique' : aFaire(b) ? 'haute' : 'normale';
-        const prochaine = e.action_libelle || b.obligations.find((o) => o.a_faire)?.a_faire?.libelle;
-        return <Carte key={b.bail_id} className={'kcarte ' + (sel === b.bail_id ? 'sel ' : '') + g} onClick={() => { setSel(b.bail_id); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <span className="mono muted">Bail {b.reference} · {TYPES_BAIL[e.type] || 'type ?'}{e.type && !e.type_confirme ? ' (suggéré)' : ''}</span>
-            {b.controle?.go_le ? <span className="sev normale">GO</span> : b.controle?.soumis ? <span className="sev haute">À valider</span> : <span className="muted" title="Bail repris : contrôlé par l’audit (onglet Reprise)">Reprise</span>}
+    {/* 12/11 : une ligne par bail sur la frise de son lot ; la fiche du bien s'ouvre en grand avec le dossier du bail */}
+    <p className="muted" style={{ margin: '0 0 8px', fontSize: 13 }}>Clique sur un bail pour ouvrir la fiche du bien et le dossier du bail.</p>
+    <div className="stack" style={{ gap: 8 }}>{vus.map((b) => {
+      const e = b.echeance || {}; const g = grave(b) ? 'critique' : aFaire(b) ? 'haute' : 'normale';
+      const prochaine = e.action_libelle || b.obligations.find((o) => o.a_faire)?.a_faire?.libelle;
+      return <LigneLot key={b.bail_id} l={biens.lot(b.lot)} sel={sel === b.bail_id} gravite={g} ouvrir={() => setSel(b.bail_id)}
+        titre={(infos[b.bail_id]?.adresse || b.adresse || 'Adresse ?') + (b.lot ? ' (lot ' + b.lot + ')' : '')}
+        entete={<>Bail {b.reference} · {TYPES_BAIL[e.type] || 'type ?'}{e.type && !e.type_confirme ? ' (suggéré)' : ''} · {b.locataires || '—'}</>}
+        etiquettes={b.controle?.go_le ? <span className="sev normale">GO</span> : b.controle?.soumis ? <span className="sev haute">À valider</span> : <span className="muted" title="Bail repris : contrôlé par l’audit (onglet Reprise)">Reprise</span>}
+        complement={<>
+          <div className="row" style={{ gap: 14 }}>
+            <span>Échéance : {e.echeance ? date(e.echeance) + (e.mode === 'prolongation' ? ' (prolongation)' : '') : '—'}</span>
+            <span>Situation : {ETATS[e.etat] || e.etat || '—'}</span>
+            {!b.controle?.go_le && b.controle?.restant > 0 && <span className="muted">{b.controle.restant} point(s) de contrôle à traiter</span>}
           </div>
-          <div className="kcarte-titre">{b.locataires || '—'}</div>
-          <div className="muted">{nature(infos[b.bail_id]?.nature)}{infos[b.bail_id]?.surface ? ` · ${infos[b.bail_id].surface} m²` : ''} · {infos[b.bail_id]?.adresse || b.adresse}</div>
-          <Parties titre="Locataires" liste={infos[b.bail_id]?.parties?.locataires} />
-          <Parties titre="Bailleurs" liste={infos[b.bail_id]?.parties?.bailleurs} max={1} />
-          <div className="grid2" style={{ marginTop: 6 }}>
-            <span className="muted">Bailleur</span><span>{b.bailleur || '—'}</span>
-            <span className="muted">Échéance</span><span>{e.echeance ? date(e.echeance) + (e.mode === 'prolongation' ? ' (prolongation)' : '') : '—'}</span>
-            <span className="muted">Situation</span><span>{ETATS[e.etat] || e.etat || '—'}</span>
-          </div>
-          {prochaine && <div style={{ marginTop: 6, fontSize: 13, color: g === 'critique' ? 'var(--red)' : 'var(--amber)' }}>→ {prochaine}</div>}
-          {!b.controle?.go_le && b.controle?.restant > 0 && <div className="muted" style={{ marginTop: 4 }}>{b.controle.restant} point(s) de contrôle à traiter</div>}
-        </Carte>; })}</div>
-      {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} bail(s) trouvé(s) sur tous les baux.</div>}
-      {!vus.length && <div className="card">Aucun bail avec ce filtre.</div>}
-    </>}
+          {prochaine && <div style={{ color: g === 'critique' ? 'var(--red)' : 'var(--amber)' }}>→ {prochaine}</div>}
+        </>} />; })}</div>
+    {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} bail(s) trouvé(s) sur tous les baux.</div>}
+    {!vus.length && <div className="card">Aucun bail avec ce filtre.</div>}
+    {s && <Fiche titre={titreLot(biens.lot(s.lot), 'Bail ' + s.reference)} fermer={() => setSel(null)}>
+      <FicheLot l={biens.lot(s.lot)} titre={'Dossier du bail ' + s.reference} peut={d.peut} apres={() => { charger(); biens.recharger(); }} sansDossier>
+        <DossierBail b={s} peut={d.peut} moi={moi} apres={charger} />
+      </FicheLot>
+    </Fiche>}
   </>;
 }
 

@@ -9,6 +9,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { rpc } from './supabase.js';
 import { nature, normaliser, correspond } from './cartes.jsx';
 import Fiche from './Fiche.jsx';
+import { LigneLot, FicheLot, useBiens, titreLot } from './Biens.jsx';
 
 export const MOTIFS = { edl_entree: 'EDL d’entrée', edl_sortie: 'EDL de sortie', visite: 'Visite', diagnostic: 'Diagnostic', travaux: 'Travaux',
   remise_locataire: 'Remise au locataire', restitution_locataire: 'Restitution par le locataire', autre: 'Autre' };
@@ -37,6 +38,7 @@ export default function Cles() {
   const [tri, setTri] = useState('lot');
   const [ouvert, setOuvert] = useState(null); // clé de l'entrée ouverte : asset_id du lot, ou « t<id> » pour des clés sans lot
   const [ajout, setAjout] = useState(false);
+  const biens = useBiens();
   const charger = () => rpc('pilotage_cles_liste').then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
 
@@ -87,40 +89,35 @@ export default function Cles() {
     </div>
     {!lots.length ? <div className="card">Aucune clé enregistrée.{d.peut ? ' « + Ajouter des clés » pour commencer.' : ''}</div>
       : !vus.length ? <div className="card">Rien avec ces filtres.</div>
-      : <div className="stack" style={{ gap: 8 }}>{vus.map((l) => <CarteLot key={l.cle} l={l} ouvrir={() => setOuvert(l.cle)} />)}</div>}
+      : <div className="stack" style={{ gap: 8 }}>{vus.map((l) => <CarteLot key={l.cle} l={l} lot={l.libre ? null : biens.parId[l.asset_id]} ouvrir={() => setOuvert(l.cle)} />)}</div>}
     {d.peut && d.weroof.length > 0 && <ClesWeroof d={d} apres={charger} onErreur={setErr} />}
-    {ouvert && <Fiche titre={titreEntree(lots.find((l) => l.cle === ouvert))} fermer={() => { setOuvert(null); charger(); }}>
-      {ouvert.startsWith('t') ? <ClesLots trousseau={Number(ouvert.slice(1))} ouvert /> : <ClesLots assets={[ouvert]} ouvert />}</Fiche>}
+    {ouvert && <Fiche titre={ouvert.startsWith('t') ? titreEntree(lots.find((l) => l.cle === ouvert)) : titreLot(biens.parId[ouvert], titreEntree(lots.find((l) => l.cle === ouvert)))} fermer={() => { setOuvert(null); charger(); }}>
+      {ouvert.startsWith('t') ? <ClesLots trousseau={Number(ouvert.slice(1))} ouvert />
+        : biens.parId[ouvert] ? <FicheLot l={biens.parId[ouvert]} peut={biens.peut} apres={biens.recharger} /> : <ClesLots assets={[ouvert]} ouvert />}</Fiche>}
   </>;
 }
 
 const titreEntree = (l) => (!l ? 'Clés' : l.libre ? 'Clés · ' + l.libelle : 'Clés · lot ' + l.lot);
 
-function CarteLot({ l, ouvrir }) {
+// 12/11 : ligne du lot sur sa frise (nouvel affichage), avec les trousseaux et qui détient les clés
+function CarteLot({ l, lot, ouvrir }) {
   const [lib, cls] = ETAT[l._etat];
   const dehors = detenteurs(l);
-  return <article className={'card ' + (dehors.some((e) => jours(e.date) > 30) ? 'haute' : 'normale')} style={{ padding: 12, cursor: 'pointer' }} onClick={ouvrir}>
-    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-      <div style={{ flex: 1, minWidth: 220 }}>
-        {l.libre ? <><div className="kcarte-titre" style={{ marginTop: 0 }}>{l.libelle}</div><div className="muted">Clés sans lot Rivage (nom saisi à la main)</div></>
-          : <><div className="kcarte-titre" style={{ marginTop: 0 }}>Lot {l.lot} · {nature(l.nature)}{situationLot(l) ? ' · ' + situationLot(l) : ''}</div>
-            <div className="muted">{l.adresse}</div>
-            <div className="muted">Bailleur : {l.bailleur || '—'}{l.mandat ? ' · mandat ' + l.mandat : ''}</div></>}
-        <div className="row" style={{ marginTop: 6, gap: 6 }}>
-          {(l.trousseaux || []).map((t) => <span key={t.id} className="etq info" style={{ maxWidth: 'none' }}>{trousseauTxt(t)}</span>)}
-          {!(l.trousseaux || []).length && <span className="muted">Aucun trousseau enregistré</span>}
-          {(l.trousseaux || []).some((t) => t.a_verifier) && <span className="sev haute">Reprise WeRoof à vérifier</span>}
-          {(l.trousseaux || []).some((t) => (t.aussi_sur || []).length) && <span className="sev haute">N° aussi sur un autre lot</span>}
-        </div>
+  return <LigneLot l={lot} ouvrir={ouvrir} gravite={dehors.some((e) => jours(e.date) > 30) ? 'haute' : undefined}
+    titre={l.libre ? l.libelle : 'Lot ' + l.lot + ' · ' + (l.adresse || '')}
+    entete={l.libre ? 'Clés sans lot Rivage (nom saisi à la main)' : [situationLot(l), l.mandat && 'mandat ' + l.mandat].filter(Boolean).join(' · ') || null}
+    etiquettes={<span className={'etq ' + cls}>{lib}</span>}
+    complement={<>
+      <div className="row" style={{ gap: 6 }}>
+        {(l.trousseaux || []).map((t) => <span key={t.id} className="etq info" style={{ maxWidth: 'none' }}>{trousseauTxt(t)}</span>)}
+        {!(l.trousseaux || []).length && <span className="muted">Aucun trousseau enregistré</span>}
+        {(l.trousseaux || []).some((t) => t.a_verifier) && <span className="sev haute">Reprise WeRoof à vérifier</span>}
+        {(l.trousseaux || []).some((t) => (t.aussi_sur || []).length) && <span className="sev haute">N° aussi sur un autre lot</span>}
       </div>
-      <div style={{ textAlign: 'right', minWidth: 160 }}>
-        <span className={'etq ' + cls}>{lib}</span>
-        {dehors.map((e, i) => <div key={i} style={{ fontSize: 13, marginTop: 4 }}>Chez <b>{e.detenteur}</b> depuis le {date(e.date)}{e.motif ? ' · ' + MOTIFS[e.motif] : ''}
-          {jours(e.date) > 30 && <span className="muted"> ({jours(e.date)} j)</span>}</div>)}
-        {!dehors.length && l.dernier && <div className="muted" style={{ marginTop: 4 }}>Rendues le {date(l.dernier.date)}</div>}
-      </div>
-    </div>
-  </article>;
+      {dehors.map((e, i) => <div key={i}>Chez <b>{e.detenteur}</b> depuis le {date(e.date)}{e.motif ? ' · ' + MOTIFS[e.motif] : ''}
+        {jours(e.date) > 30 && <span className="muted"> ({jours(e.date)} j)</span>}</div>)}
+      {!dehors.length && l.dernier && <div className="muted">Rendues le {date(l.dernier.date)}</div>}
+    </>} />;
 }
 
 // Bloc des clés pour une liste de lots (fiche du mandat) ou pour le lot d'un bail ; replié par défaut, ouvert dans la page Clés
@@ -233,10 +230,21 @@ function Situation({ l, d, apres, onErreur }) {
   </div>;
 }
 
+// 12/11 : numéros de trousseau 1 à 100 ; les numéros libres de l'agence choisie sont proposés (Nicolas : « on a 100 clés »)
+const NB_NUMEROS = 100;
 function FormTrousseau({ t, asset, libre = false, d, agir, annuler }) {
   const [rattacher, setRattacher] = useState(null); // clés sans lot : lot Rivage choisi pour les y rattacher
   const [f, setF] = useState({ libelle: t?.libelle || '', numero: t?.numero || '', agence: t?.agence || (d.agences[0]?.code || ''), composition: t?.composition || '', note: t?.note || '' });
   const ch = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const [pris, setPris] = useState(null);
+  useEffect(() => {
+    rpc('pilotage_cles_liste').then((x) => setPris((x?.lots || []).flatMap((l) => (l.trousseaux || []).map((tr) => ({ n: String(tr.numero || '').trim(), agence: tr.agence || '', id: tr.id, lot: l.libre ? l.libelle : 'lot ' + l.lot })))))
+      .catch(() => setPris([]));
+  }, []);
+  const autres = (pris || []).filter((p) => p.id !== t?.id && p.agence === (f.agence || ''));
+  const libres = pris ? Array.from({ length: NB_NUMEROS }, (_, i) => String(i + 1)).filter((n) => !autres.some((p) => p.n === n)) : [];
+  const occupe = f.numero.trim() ? autres.find((p) => p.n === f.numero.trim()) : null;
+  const idLibres = 'num-libres-' + (t?.id || 'nouveau') + '-' + (asset || 'libre');
   const valide = (f.numero.trim() || f.composition.trim()) && (!libre || f.libelle.trim() || rattacher);
   const args = (supprimer) => ({ p_id: t?.id || null, p_asset: rattacher?.id || asset || null, p_libelle: libre ? f.libelle : null, p_numero: f.numero,
     p_agence: f.agence || null, p_composition: f.composition, p_note: f.note, p_supprimer: supprimer });
@@ -244,18 +252,25 @@ function FormTrousseau({ t, asset, libre = false, d, agir, annuler }) {
     {libre && <label className="muted" style={{ display: 'block', marginBottom: 6 }}>Nom des clés<br /><input value={f.libelle} onChange={ch('libelle')}
       placeholder="Ex. Local vélos, 10 rue de Villoison" style={{ width: '100%' }} /></label>}
     <div className="row" style={{ alignItems: 'flex-end' }}>
-      <label className="muted">N° du trousseau<br /><input value={f.numero} onChange={ch('numero')} placeholder="Ex. 37" style={{ width: 110 }} /></label>
+      <label className="muted">N° du trousseau<br /><input value={f.numero} onChange={ch('numero')} placeholder={libres[0] ? 'Libre : ' + libres[0] : 'Ex. 37'} list={idLibres} style={{ width: 110 }} /></label>
+      <datalist id={idLibres}>{libres.map((n) => <option key={n} value={n} />)}</datalist>
       <label className="muted">Agence où il est rangé<br /><select value={f.agence} onChange={ch('agence')}><option value="">Non renseignée</option>
         {d.agences.map((a) => <option key={a.code} value={a.code}>{a.nom}</option>)}</select></label>
       <label className="muted" style={{ flex: 1, minWidth: 200 }}>Contenu<br /><input value={f.composition} onChange={ch('composition')} placeholder="Ex. 3 clés, 1 bip, 1 badge" style={{ width: '100%' }} /></label>
     </div>
+    {pris && <div style={{ marginTop: 6, fontSize: 13 }}>
+      {occupe ? <div style={{ color: 'var(--red)' }}>N° {f.numero.trim()} déjà pris dans cette agence ({occupe.lot}). Choisir un numéro libre.</div>
+        : <div className="row" style={{ gap: 4 }}><span className="muted">N° libres{f.agence ? '' : ' (sans agence)'} : {libres.length} sur {NB_NUMEROS}</span>
+          {libres.slice(0, 12).map((n) => <button key={n} type="button" className={'chip' + (f.numero.trim() === n ? ' on' : '')} onClick={() => setF({ ...f, numero: n })}>{n}</button>)}
+          {libres.length > 12 && <span className="muted">… (liste complète dans le champ)</span>}</div>}
+    </div>}
     <label className="muted" style={{ display: 'block', marginTop: 6 }}>Note<br /><input value={f.note} onChange={ch('note')} style={{ width: '100%' }} /></label>
     {t?.a_verifier && <div className="muted" style={{ marginTop: 4 }}>Enregistrer valide la reprise WeRoof : la mention « à vérifier » disparaît.</div>}
     {libre && t && <div style={{ marginTop: 8 }}>{rattacher
       ? <div className="muted">Rattachées au lot {rattacher.lot} · {rattacher.adresse} à l’enregistrement, avec leur historique. <button className="lien" onClick={() => setRattacher(null)}>Annuler</button></div>
       : <ChoixLot d={d} libelle="Rattacher ces clés à un lot Rivage (facultatif)" choisir={setRattacher} />}</div>}
     <div className="row" style={{ marginTop: 8 }}>
-      <button className="btn plein" disabled={!valide} onClick={() => agir('pilotage_cles_trousseau', args(false))}>Enregistrer</button>
+      <button className="btn plein" disabled={!valide || !!occupe} onClick={() => agir('pilotage_cles_trousseau', args(false))}>Enregistrer</button>
       <button className="btn gris" onClick={annuler}>Annuler</button>
       {t && <button className="lien" onClick={() => window.confirm('Supprimer ce trousseau ? Son historique reste dans le journal du lot.') && agir('pilotage_cles_trousseau', { ...args(true), p_asset: null })}>Supprimer le trousseau</button>}
     </div>
