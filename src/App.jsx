@@ -1342,10 +1342,18 @@ function SuiviReversement({ s }) {
     </div>
     {bailleur && <div style={{ marginTop: 6 }}>
       <div className="muted">{suivi.recu_le ? `Reversement reçu le ${date(suivi.recu_le)} : restituer au locataire.` : suivi.demande_le ? `Reversement demandé le ${date(suivi.demande_le)}${suivi.relance_le ? `, relancé le ${date(suivi.relance_le)}` : ''}.` : 'Reversement à demander au bailleur.'}</div>
-      {!suivi.recu_le && <div className="row" style={{ marginTop: 4 }}>
-        <button className="btn" onClick={() => ouvrir(suivi.demande_le ? 'dg_reversement_relance' : 'dg_reversement_demande', suivi.demande_le ? 'relance_le' : 'demande_le')}>{suivi.demande_le ? 'Relancer le bailleur' : 'Demander le reversement au bailleur'}</button>
-        <label className="muted">Reçu le <input type="date" onBlur={(e) => e.target.value && maj('recu_le', e.target.value)} /></label>
-      </div>}
+      {/* 12/11 : demande faite (bouton ou mail envoyé et rangé, 156) : plus de bouton ; relance proposée seulement 7 jours après
+          la dernière demande ou relance. La réception se lit dans la comptabilité Rivage (plus de saisie à la main). */}
+      {!suivi.recu_le && (() => {
+        const derniere = suivi.relance_le || suivi.demande_le;
+        const relancer = derniere && (Date.now() - new Date(derniere).getTime()) / 864e5 >= 7;
+        return <div style={{ marginTop: 4 }}>
+          {(!suivi.demande_le || relancer) && <button className="btn" onClick={() => ouvrir(suivi.demande_le ? 'dg_reversement_relance' : 'dg_reversement_demande', suivi.demande_le ? 'relance_le' : 'demande_le')}>
+            {suivi.demande_le ? 'Relancer le bailleur' : 'Demander le reversement au bailleur'}</button>}
+          {suivi.demande_le && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Réception du dépôt : relevée automatiquement dans la comptabilité Rivage (encaissement au compte du bailleur).</div>}
+        </div>; })()}
+      {suivi.recu_le && suivi.recu_compta === 'auto' && <div className="muted" style={{ fontSize: 12 }}>Relevé dans la comptabilité Rivage.{' '}
+        <button className="lien" onClick={() => maj('recu_le', '')}>Ce n’est pas le dépôt</button></div>}
     </div>}
     {(detenu === 'agence' || suivi.recu_le) && <div className="row" style={{ marginTop: 6 }}>
       <button className="btn" onClick={() => ouvrir('dg_restitution', 'restitution_mail_le')}>Mail de restitution au locataire</button>
