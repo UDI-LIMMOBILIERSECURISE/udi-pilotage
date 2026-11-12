@@ -975,6 +975,9 @@ function Sinistres() {
   // Colonne « Clos » repliée au départ (plus de 200 dossiers repris de Monday et WeRoof) ; un clic sur l'en-tête replie ou ouvre une colonne
   const [replie, setReplie] = useState({ clos: true });
   const biens = useBiens();
+  // 152 : tickets créés sur un immeuble sans lot : immeuble et lots (ligne et fiche de l'immeuble)
+  const [immeubles, setImmeubles] = useState({});
+  useEffect(() => { rpc('pilotage_tickets_immeubles').then((x) => setImmeubles(x || {})).catch(() => {}); }, []);
   if (err) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
   const ouverts = d.filter((x) => !x.clos);
@@ -1029,7 +1032,7 @@ function Sinistres() {
       onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un ticket" />
     {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) avec les filtres choisis.</div>}
     <div style={{ height: 8 }} />
-    <AvecDetail cle={sel} fermer={() => setSel(null)} titre={s ? titreLot(biens.lot(s.lot), s.titre || 'Ticket') : ''} vide="Clique sur un ticket pour ouvrir la fiche du bien." detail={s && <FicheLot l={biens.lot(s.lot)} peut={biens.peut} apres={biens.recharger}
+    <AvecDetail cle={sel} fermer={() => setSel(null)} titre={s ? (immeubles[s.id] && !s.lot ? immeubles[s.id].libelle : titreLot(biens.lot(s.lot), s.titre || 'Ticket')) : ''} vide="Clique sur un ticket pour ouvrir la fiche du bien." detail={s && <FicheTicketLieu l={biens.lot(s.lot)} imm={!s.lot ? immeubles[s.id] : null} biens={biens}
       titre={s.source === 'monday' ? 'Dossier repris de ' + ORIGINE(s) : 'Ticket n°' + s.numero}>
       <div className="muted">{s.source === 'monday' ? `Repris de ${ORIGINE(s)}${s.reference ? ' · ' + s.reference : ''} · ${s.clos ? 'Clos' : 'En cours'}${s.statut_monday ? ' (' + ORIGINE(s) + ' : ' + s.statut_monday + ')' : ''}`
         : `Incident n°${s.numero} · ${ST_INC[s.statut] || s.statut}${s.repris ? ` · repris de ${ORIGINE(s.repris)}${s.repris.reference ? ' ' + s.repris.reference : ''} (ouvert le ${date(s.repris.ouvert_le)})` : ''}`}</div>
@@ -1058,7 +1061,7 @@ function Sinistres() {
       <Historique items={s.historique} libStatut={ST_INC} />
       <SuiviSinistre key={s.id} dossier={s} recharger={recharger} />
       {s.lien && <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={s.lien} target="_blank" rel="noreferrer">{s.source === 'monday' ? 'Ouvrir dans Monday' : 'Ouvrir dans Rivage'}</a></div>}
-    </FicheLot>}>
+    </FicheTicketLieu>}>
       {/* 12/11 : une section par statut (avant : colonnes), une ligne par ticket sur la frise de son lot */}
       {colonnes.map(([k, l, items]) => { const ferme = !!replie[k] && !q && statut !== k; return <section key={k} className="groupe-imp">
         <button type="button" className="groupe-tete" aria-expanded={!ferme} onClick={() => setReplie({ ...replie, [k]: !ferme })}>
@@ -1066,8 +1069,8 @@ function Sinistres() {
         {!ferme && !items.length && <div className="muted" style={{ padding: '4px 4px 10px' }}>Rien ici avec ce filtre.</div>}
         {!ferme && <div className="stack" style={{ gap: 8, marginBottom: 12 }}>{items.map((x) => { const u = URG[x.urgence] || [x.urgence, 'normale'];
           return <LigneLot key={x.id} l={biens.lot(x.lot)} sel={sel === x.id} gravite={!x.clos && x.jours > 15 ? 'critique' : u[1]} ouvrir={() => setSel(x.id)}
-            titre={x.adresse || 'Immeuble, pas de lot précis'}
-            entete={(x.source === 'monday' ? ORIGINE(x) + (x.reference ? ' · ' + x.reference : '') : 'Ticket #' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type || 'type ?')) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}
+            titre={x.adresse || immeubles[x.id]?.libelle || 'Immeuble, pas de lot précis'}
+            entete={(immeubles[x.id] && !x.lot ? 'Ticket d’immeuble · ' : '') + (x.source === 'monday' ? ORIGINE(x) + (x.reference ? ' · ' + x.reference : '') : 'Ticket #' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type || 'type ?')) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}
             etiquettes={<><span className={'statut-inc ' + colonneDe(x)}>{x.clos ? (ST_INC[x.statut] || 'Clos') : x.statut_monday || ST_INC[x.statut] || x.statut}</span>{u[0] && <span className={'sev ' + u[1]}>{u[0]}</span>}</>}
             complement={<>
               <div><b>{x.titre}</b></div>
@@ -1082,6 +1085,20 @@ function Sinistres() {
       </section>; })}
     </AvecDetail>
   </>;
+}
+
+// 152 : fiche d'un ticket : fiche du bien pour un ticket de lot ; pour un ticket d'immeuble (sans lot, parties communes : aucun lot
+// concerné, règle de Nicolas du 12/11), l'immeuble puis le dossier du ticket (fil, mails rattachés)
+function FicheTicketLieu({ l, imm, biens, titre, children }) {
+  if (l || !imm) return <FicheLot l={l} titre={titre} peut={biens.peut} apres={biens.recharger}>{children}</FicheLot>;
+  return <div className="fiche-bien">
+    <div className="fb-etiquettes"><span className="etq neutre">Ticket d’immeuble</span></div>
+    <section className="fb-bloc">
+      <h3 className="fb-titre">{imm.libelle}</h3>
+      <p className="muted" style={{ margin: 0 }}>Ticket créé dans Rivage sur l’immeuble (parties communes), sans lot concerné. Les mails rattachés à ce ticket sont dans son fil ci-dessous.</p>
+    </section>
+    <section className="fb-bloc fb-page">{titre && <h3 className="fb-titre">{titre}</h3>}{children}</section>
+  </div>;
 }
 
 // Rappel pour soi, ou notification à un collègue : arrive dans Ma journée de la personne (le jour choisi pour un rappel, tout de suite pour une notification)
