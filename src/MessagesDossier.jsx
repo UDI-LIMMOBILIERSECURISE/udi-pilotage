@@ -315,8 +315,10 @@ function SmsGestion({ m, bail, noter }) {
 }
 
 // Ma journée (091) : dossiers dont l'étape en cours a des messages pas encore faits (commercial du dossier, à défaut la gestionnaire)
-export function MessagesAEnvoyer() {
-  const [liste, setListe] = useState(null);
+export function MessagesAEnvoyer({ exclure } = {}) {
+  const [tous, setListe] = useState(null);
+  // 12/11 : les baux déjà en carte dans la journée (dossier d'entrée à finaliser) ont leurs messages dans le parcours du dossier
+  const liste = tous && tous.filter((x) => !(x.objet === 'bail' && exclure?.has(x.id)));
   const [err, setErr] = useState('');
   const [sel, setSel] = useState(null);
   const charger = () => rpc('pilotage_messages_a_envoyer').then(setListe).catch((e) => setErr(e.message));

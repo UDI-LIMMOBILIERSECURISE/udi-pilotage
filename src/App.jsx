@@ -253,8 +253,16 @@ function Journee({ moi }) {
   const chargerBiens = () => rpc('pilotage_biens').then(setBiens).catch(() => setBiens({ lots: [] }));
   // 12/11 : dossiers du circuit (« Mes dossiers », plus bas) : leur alerte « dossier à compléter » et l'étape « Compléter le contrôle
   // d'entrée » ne sont pas répétées dans les cartes du jour (Nicolas : « les alertes sont en double dans des blocs différents »)
-  const [circuit, setCircuit] = useState(() => new Set());
-  useEffect(() => { rpc('pilotage_mes_dossiers').then((x) => setCircuit(new Set((x?.dossiers || []).filter((y) => y.etat !== 'valide').map((y) => y.id)))).catch(() => {}); }, [cible]);
+  const [mesDossiers, setMesDossiers] = useState([]);
+  useEffect(() => { rpc('pilotage_mes_dossiers').then((x) => setMesDossiers(x?.dossiers || [])).catch(() => {}); }, [cible]);
+  const circuit = useMemo(() => new Set(mesDossiers.filter((y) => y.etat !== 'valide').map((y) => y.id)), [mesDossiers]);
+  // 12/11 (« on a toujours les 2 blocs ») : pour un commercial, le bail à finaliser devient une ligne de la carte du lot (une carte par bail) ;
+  // il ne figure plus ni dans « Mes dossiers » ni dans « Messages à envoyer » (ses messages sont dans le parcours d'entrée du dossier)
+  const roleCible = cible === moi.user_id ? moi.role : membres.find((m) => m.user_id === cible)?.role;
+  const prenomCible = cible === moi.user_id ? moi.prenom : membres.find((m) => m.user_id === cible)?.prenom;
+  const aFinaliser = roleCible === 'negociateur' ? mesDossiers.filter((x) => x.objet === 'bail' && x.etat === 'a_finaliser' && !x.a_attribuer
+    && (cible === moi.user_id || x.commercial === prenomCible)) : [];
+  const integres = useMemo(() => new Set(aFinaliser.map((x) => x.id)), [mesDossiers, roleCible, prenomCible]);
   const REGLES_CIRCUIT = ['bail_dossier_a_completer', 'mandat_controle_entree'];
   const dansCircuit = (a) => REGLES_CIRCUIT.includes(a.regle) && circuit.has(a.objet_id);
   const etapeCircuit = (l) => /contrôle d.entrée|dossier du mandat/i.test(l.a_faire?.action || '') && (circuit.has(l.bail_id) || circuit.has(l.mandat_id));
@@ -292,14 +300,20 @@ function Journee({ moi }) {
       g.alertes.push(a);
       if (a.objet_type === 'LeasingContract') g.bail_id = a.objet_id;
     });
+    if (typeActif === 'tous' && !enPhase && cat === 'toutes') aFinaliser.forEach((x) => {
+      const lot = (biens?.lots || []).find((l) => l.bail_id === x.id);
+      const g = groupe(lot ? 'a' + lot.id : 'bail' + (x.ligne?.reference || x.id), { dossier: { type: 'bail', ref: x.ligne?.reference, adresse: x.ligne?.adresse, locataires: x.ligne?.locataires },
+        bailleur: x.ligne?.bailleur, mandat: x.ligne?.mandat, lot: lot || null });
+      g.circuit = x; g.bail_id = x.id;
+    });
     if (typeActif === 'tous') etapesVues.forEach((l) => {
       const g = groupe('a' + l.id, { dossier: { type: 'lot', ref: l.lot, adresse: l.adresse, asset_id: l.id, locataires: l.locataires }, bailleur: l.bailleur, mandat_id: l.mandat_id, lot: l });
       g.etape = l.a_faire;
     });
     const rang = { critique: 0, haute: 1, normale: 2 };
-    return [...m.values()].map((d) => ({ ...d, pire: Math.min(d.alertes.reduce((p, a) => Math.min(p, rang[a.gravite]), 2), d.etape ? (d.etape.urgent ? 1 : 2) : 2) }))
+    return [...m.values()].map((d) => ({ ...d, pire: Math.min(d.alertes.reduce((p, a) => Math.min(p, rang[a.gravite]), 2), d.etape ? (d.etape.urgent ? 1 : 2) : 2, d.circuit ? 1 : 2) }))
       .sort((x, y) => x.pire - y.pire || (y.alertes.length + (y.etape ? 1 : 0)) - (x.alertes.length + (x.etape ? 1 : 0)));
-  }, [alertes, cat, typeActif, biens, cible]);
+  }, [alertes, cat, typeActif, biens, cible, mesDossiers, membres]);
   const nomCible = cible === moi.user_id ? moi.prenom : (membres.find((m) => m.user_id === cible)?.prenom || '');
   const gravNom = ['critique', 'haute', 'normale'];
 
@@ -380,7 +394,7 @@ function Journee({ moi }) {
                   {/* 139 : la fiche s'ouvre sur la fiche unique du bien quand le lot est connu (sauf impayés : fiche impayé) */}
                   {(() => { const lot = d.lot;
                     const impaye = d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'));
-                    if (lot && !impaye) return <button className="btn" onClick={() => setBien(lot)}>Ouvrir la fiche</button>;
+                    if (lot && !impaye) return <button className="btn" onClick={() => setBien(lot)}>{d.circuit ? 'Fiche du lot' : 'Ouvrir la fiche'}</button>;
                     return (d.bail_id || d.mandat_id || d.dossier?.type === 'organisme') && <button className={'btn' + (fiche === d.cle ? ' plein' : '')} aria-expanded={fiche === d.cle}
                       onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>{fiche === d.cle ? 'Fermer la fiche' : 'Ouvrir la fiche'}</button>; })()}
                   {d.dossier?.lien && <a className="btn gris" href={d.dossier.lien} target="_blank" rel="noopener">Ouvrir dans Rivage</a>}
@@ -390,6 +404,12 @@ function Journee({ moi }) {
                 </div>
               </div>
               <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+                {d.circuit && <button className="j-etape urgent" onClick={() => setFiche(fiche === d.cle ? null : d.cle)}>
+                  <span className="j-etape-quoi"><span className="muted" style={{ fontSize: 12 }}>Dossier du bail {d.circuit.ligne?.reference} · étape 1/3 du parcours d’entrée</span>
+                    <b>Contrôle du bail avant signature{d.circuit.restant > 0 ? ` : ${d.circuit.restant} point(s) à traiter` : ''}{(d.circuit.vides || []).length ? ` · ${d.circuit.vides.length} champ(s) vide(s) dans Rivage` : ''}</b></span>
+                  <span className="btn plein" style={{ pointerEvents: 'none' }}>Ouvrir le dossier</span>
+                </button>}
+                {d.circuit && d.alertes.length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Rappels de l’entrée (les messages se préparent à l’étape 3 du dossier) :</div>}
                 {d.etape && <button className={'j-etape' + (d.etape.urgent ? ' urgent' : '')} onClick={() => setBien(d.lot)}>
                   <span className="j-etape-quoi"><span className="muted" style={{ fontSize: 12 }}>Étape de la frise · {LIB_PHASE[d.lot.phase]}</span><b>{d.etape.action}</b></span>
                   {d.etape.urgent && <span className="etq rose">En retard</span>}
@@ -424,7 +444,7 @@ function Journee({ moi }) {
                 {d.dossier?.type === 'organisme' || d.alertes.some((a) => a.regle.startsWith('impaye_'))
                   ? <FicheImpayes organisme={d.dossier?.type === 'organisme' ? d.dossier.ref : null} bail={d.bail_id} apres={charger} />
                   : d.bail_id
-                  ? <DossierBail b={{ bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse, bailleur: d.bailleur, mandat: d.mandat }}
+                  ? <DossierBail b={d.circuit?.ligne || { bail_id: d.bail_id, reference: d.dossier?.ref, locataires: d.dossier?.locataires, adresse: d.dossier?.adresse, bailleur: d.bailleur, mandat: d.mandat }}
                       peut={['direction', 'superviseur', 'gestionnaire'].includes(moi.role)} moi={moi} apres={charger}
                       etapesMessages={etapesDesAlertes(d.alertes.map((a) => a.regle))} />
                   : <DossierMandat m={{ id: d.mandat_id }} apres={charger} etapesMessages={etapesDesAlertes(d.alertes.map((a) => a.regle))} />}
@@ -435,10 +455,10 @@ function Journee({ moi }) {
       )}
       {/* 139 : listes de travail complémentaires, sous les actions du jour */}
       <div style={{ marginTop: 18 }}>
-      {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} />}
+      {cible === moi.user_id && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(moi.role) && <MesDossiers moi={moi} exclure={integres} />}
       {/* 124 : journée d'un membre de l'équipe : son bloc de dossiers tel qu'il le voit */}
-      {cible !== moi.user_id && (() => { const m = membres.find((x) => x.user_id === cible); return m && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(m.role) && <MesDossiers key={cible} moi={moi} pour={m} />; })()}
-      {cible === moi.user_id && ['gestionnaire', 'negociateur'].includes(moi.role) && <MessagesAEnvoyer />}
+      {cible !== moi.user_id && (() => { const m = membres.find((x) => x.user_id === cible); return m && ['direction', 'superviseur', 'gestionnaire', 'comptable', 'negociateur'].includes(m.role) && <MesDossiers key={cible} moi={moi} pour={m} exclure={integres} />; })()}
+      {cible === moi.user_id && ['gestionnaire', 'negociateur'].includes(moi.role) && <MessagesAEnvoyer exclure={integres} />}
       {cible === moi.user_id && moi.role === 'direction' && <RecapRemuneration />}
       {cible === moi.user_id && ['direction', 'superviseur'].includes(moi.role) && <Supervision voir={setCible} />}
       {['direction', 'superviseur'].includes(moi.role) && cible === moi.user_id && <div className="info">Ici, seulement les alertes réservées à la direction. Les autres vont à la gestionnaire ou à la comptable : cliquer sur un nom ci-dessus pour voir sa journée.</div>}

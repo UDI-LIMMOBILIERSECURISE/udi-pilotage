@@ -15,7 +15,7 @@ const COULEUR = { a_finaliser: 'haute', en_attente: 'normale', valide: 'normale'
 
 // ----- Liste « Mes dossiers » en tête de la journée -----
 // pour : membre dont on regarde la journée (124) ; la liste est celle de la direction, filtrée comme le serveur la filtre pour ce membre
-export default function MesDossiers({ moi, pour }) {
+export default function MesDossiers({ moi, pour, exclure }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [sel, setSel] = useState(null);
@@ -24,7 +24,7 @@ export default function MesDossiers({ moi, pour }) {
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return null;
   const ROLES_GESTION = ['direction', 'superviseur', 'gestionnaire', 'comptable'];
-  const liste = (d.dossiers || []).filter((x) => !pour || ROLES_GESTION.includes(pour.role) || x.a_attribuer || x.commercial === pour.prenom);
+  const liste = (d.dossiers || []).filter((x) => (!pour || ROLES_GESTION.includes(pour.role) || x.a_attribuer || x.commercial === pour.prenom) && !exclure?.has(x.id)); // 12/11 : déjà en carte dans la journée
   if (!liste.length && !sel) return null;
   const gestion = pour ? ROLES_GESTION.includes(pour.role) : !!d.gestion;
   const lecture = pour ? pour.role === 'comptable' : !!d.lecture;
