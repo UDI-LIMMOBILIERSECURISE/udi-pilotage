@@ -13,6 +13,7 @@ import FicheConge from './FicheConge.jsx';
 import ALouer, { PermisLouer } from './ALouer.jsx';
 import Biens, { FicheBien, PHASES, SUITES, LigneLot, FicheLot, useBiens, titreLot } from './Biens.jsx';
 import { MoiContexte } from './moi.js';
+import ParcoursSortie from './ParcoursSortie.jsx';
 import { EnvoiGroupe, REGLES_RELANCE } from './ActionsGroupees.jsx';
 import { SuiviSinistre, TexteLiens, ORIGINE } from './TicketsFil.jsx';
 import { MailsAVerifier, BandeauMails } from './Echanges.jsx';
@@ -1222,17 +1223,10 @@ function SortiesDG() {
           {s.situation.impaye > 0 && <div><b>Impayé du locataire : {euro(s.situation.impaye)}</b>, à retenir sur le dépôt avec justificatif.</div>}
           {s.situation.arriere_statut === 'open' && <div>Arriéré ouvert depuis le {date(s.situation.arriere_depuis)} ({s.situation.arriere_jours} jours).</div>}
           {s.situation.restitution_presente === false && <div>Aucune restitution du dépôt préparée dans Rivage.</div>}</div>}
-        <AlertesLiees items={s.alertes} />
-        {aCharge.length > 0 && <div className="mini-alerte haute"><b>À regarder avant restitution</b> · {aCharge.length} incident(s) à la charge du locataire :
-          {aCharge.map((i) => <div key={i.numero}><a href={i.lien} target="_blank" rel="noreferrer">n°{i.numero} {i.titre}</a> · {ST_INC[i.statut] || i.statut} · estimé {euro(i.montant_estime)}</div>)}</div>}
+        {/* 157 : parcours de sortie en étapes (remplace la liste des alertes, la fiche du congé et les onglets de messages) */}
         <ClotureDG s={s} apres={(patch) => { s.suivi = { ...(s.suivi || {}), ...patch }; setRev((n) => n + 1); biens.recharger(); }} />
-        {!s.suivi?.clos_le && <>
-          <SuiviReversement s={s} />
-          {s.statut === 'move_out' && <>
-            <FicheConge bail={s.bail_id} apres={() => setRev((n) => n + 1)} />
-            <MessagesDossier key={s.bail_id + rev} objet="bail" id={s.bail_id} statut={s.parti ? 'parti' : s.statut} />
-          </>}
-        </>}
+        {!s.suivi?.clos_le && <ParcoursSortie key={s.bail_id} s={s} aCharge={aCharge} reversement={<SuiviReversement s={s} />}
+          apres={() => biens.recharger()} />}
         <h3>Étapes</h3>
         <ol className="etapes">{etapesDG(s).map((st) => <li key={st.l} className={st.fait ? 'fait' : st.retard ? 'retard' : ''}>
           <span className="puce">{st.fait ? '✓' : ''}</span><span>{st.l}{st.info ? <span className="muted"> · {st.info}</span> : null}</span></li>)}</ol>
