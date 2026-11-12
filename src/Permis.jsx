@@ -64,12 +64,21 @@ export function PermisBail({ bail, lot, onErreur, statut }) {
   if (x === null && lot) return <div className="mini-alerte haute" style={{ marginTop: 10 }}>Permis de louer : le lot {lot} n’est pas suivi. Le suivi s’ouvre quand un ticket Rivage du lot porte le tag PL ou DMEL (le tag apparaît ici à la modification suivante de l’incident).</div>;
   if (!x) return null;
   const agir = async (args) => { try { await rpc('pilotage_permis_action', args); await charger(); } catch (e) { onErreur ? onErreur(e.message) : alert(e.message); } };
+  const loue = /prochaine location/i.test(x.etat || '') && statut !== 'move_out' && biens.parId[x.asset_id]?.phase !== 'sortie';
+  // 12/11 : logement loué, rien à faire avant la prochaine location : une ligne, le détail (démarches, tâches, notes) replié
+  if (loue) {
+    const d = (x.demandes || []).filter((y) => y.reponse).sort((u, v) => (u.reponse_le < v.reponse_le ? 1 : -1))[0];
+    return <details className="replie" style={{ marginTop: 10 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 13 }}><b>Permis de louer</b> · {d ? `${d.reponse} le ${date(d.reponse_le)} · ` : ''}à redemander à la prochaine location</summary>
+      {x.peut && <LotPermis l={x} agir={agir} email={email} prenom={prenom} recharger={charger} onErreur={onErreur} loue />}
+    </details>;
+  }
   return <div style={{ marginTop: 10 }}>
     <div className="groupe-tete"><b>Permis de louer</b> <span className={'sev ' + (x.gravite || 'normale')} style={{ marginLeft: 6 }}>{x.etat}</span>
       {x.echeance && <span className="mono" style={{ marginLeft: 6, fontSize: 12 }}>échéance {date(x.echeance)}</span>}</div>
     {x.action && <div style={{ fontSize: 13, marginTop: 4 }}>{x.action}</div>}
     {x.peut ? <LotPermis l={x} agir={agir} email={email} prenom={prenom} recharger={charger} onErreur={onErreur}
-        loue={/prochaine location/i.test(x.etat || '') && statut !== 'move_out' && biens.parId[x.asset_id]?.phase !== 'sortie'} />
+        loue={loue} />
       : <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{(x.demandes || []).length ? x.demandes.map((d) => `${d.regime === 'declaration' ? 'Déclaration' : 'Demande'} déposée le ${date(d.depot_le)}${d.reponse ? ' · ' + d.reponse + ' le ' + date(d.reponse_le) : ''}`).join(' ; ') : 'Aucune démarche enregistrée.'} Seule la gestion enregistre les démarches.</div>}
   </div>;
 }
