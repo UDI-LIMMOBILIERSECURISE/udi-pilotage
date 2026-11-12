@@ -138,12 +138,13 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
   parcourir(g.payload, texte, parts)
   const corps = (texte.plain.trim() || sansHtml(texte.html)).slice(0, 60000)
   // 146 : référence [UDI L.. T..] insérée dans le texte par le module Gmail, prise en compte comme dans l'objet
-  const refCorps = /\[UDI\s+L/i.test(objet) ? null : (corps.match(/\[UDI\s+L[A-Za-z0-9-]+(?:\s+T\d+)?\]/i) || [null])[0]
+  // 151 : ou [UDI T..] pour un ticket d'immeuble (sans lot)
+  const refCorps = /\[UDI\s+[LT]/i.test(objet) ? null : (corps.match(/\[UDI\s+(?:L[A-Za-z0-9-]+(?:\s+T\d+)?|T\d+)\]/i) || [null])[0]
   // 148 : mail envoyé — choix du dossier fait dans le module Gmail ; consommé dans tous les cas, utilisé seulement si la référence a disparu du mail
   let refChoix: string | null = null
   if (lab.includes('SENT')) {
     const { data: ch } = await service.rpc('pilotage_mails_choix_prendre', { p_boite: boite, p_le: le, p_dest: externes, p_objet: objet, p_message_id: messageId })
-    if (ch && !refCorps && !/\[UDI\s+L/i.test(objet)) refChoix = ch as string
+    if (ch && !refCorps && !/\[UDI\s+[LT]/i.test(objet)) refChoix = ch as string
   }
   const refAjout = refCorps || refChoix
   const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: refAjout ? `${objet} ${refAjout}` : objet, p_thread: g.threadId })
@@ -178,7 +179,7 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
   await service.rpc('pilotage_mails_enregistrer', { p: { message_id: messageId, thread_id: g.threadId, boites: { [boite]: g.id }, sens, de, a, cc, objet, le,
     extrait: g.snippet, corps, pj, parties: prep.parties, statut, methode, confiance, resume: ia?.resume || null,
     lot_id: statut === 'classe' ? lot : null, bail_id: statut === 'classe' ? bail : null, mandat_id: statut === 'classe' ? mandat : null,
-    ticket_id: statut === 'classe' ? ticket : null, candidats: cand } })
+    ticket_id: statut === 'classe' ? ticket : null, immeuble_id: statut === 'classe' ? (prep.immeuble_id || null) : null, candidats: cand } })
   await etiqueter(boite, g.id, statut === 'classe' ? LIB_CLASSE : LIB_VERIFIER)
   return statut
 }
