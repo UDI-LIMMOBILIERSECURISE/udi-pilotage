@@ -267,16 +267,20 @@ function ParcoursEntree({ d, b, peut, moi, agir, ouvrirMail, recharger, apres, e
   const apresCircuit = async () => { await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await recharger(); };
   const plus = async () => { setRev((n) => n + 1); charger(); apres && apres(); };
   const circuit = <Circuit objet="bail" id={b.bail_id} apres={apresCircuit} />;
+  const peutValider = !!e.peut_valider; // la gestion : le GO est son étape ; le commercial passe à la signature en attendant
+  // 12/11 (Nicolas) : le contrôle du bail se fait avant la signature, pour ne pas signer un bail avec des erreurs ; quand ce n'est pas
+  // possible, il reste à faire après. (Le mandat, lui, se signe puis se vérifie : son circuit n'est pas concerné.)
   const etapes = [
-    { cle: 'bail', titre: 'Bail signé : envoyer le dossier au locataire, au garant et au bailleur', fait: nb.fini,
-      resume: `${b.debut ? (commence ? 'Bail commencé le ' : 'Début le ') + date(b.debut) + ' · ' : ''}${nb.n ? `${nb.f}/${nb.n} message(s) envoyé(s) ou sans objet` : 'aucun message prévu'}` },
-    { cle: 'controle', titre: 'Contrôle d’entrée : pièces dans Rivage et questions', fait: finalise,
+    { cle: 'controle', titre: 'Contrôle du bail avant signature : pièces dans Rivage et questions', fait: finalise,
       resume: finalise ? (e.forcage ? 'Dossier forcé, transmis à la gestion' : 'Complet, transmis à la gestion')
-        : [e.restant > 0 ? `${e.restant} point(s) à traiter` : null, vides.length ? `${vides.length} champ(s) vide(s) dans Rivage` : null].filter(Boolean).join(' · ') || 'À compléter' },
+        : [commence ? 'Bail déjà commencé : à compléter quand même' : null, e.restant > 0 ? `${e.restant} point(s) à traiter` : null,
+          vides.length ? `${vides.length} champ(s) vide(s) dans Rivage` : null].filter(Boolean).join(' · ') || 'À compléter' },
+    { cle: 'go', titre: 'Validation par la gestion (GO)', fait: !!c.go_le, attente: !finalise || !peutValider,
+      resume: c.go_le ? `GO le ${date(c.go_le)} par ${c.go_par || '—'}` : finalise ? 'Chez la gestion : rien à faire pour le commercial, sauf si elle écrit' : 'Après le contrôle complet' },
+    { cle: 'bail', titre: 'Signature du bail : messages au locataire, au garant et au bailleur', fait: nb.fini,
+      resume: `${b.debut ? (commence ? 'Bail commencé le ' : 'Début le ') + date(b.debut) + ' · ' : ''}${nb.n ? `${nb.f}/${nb.n} message(s) envoyé(s) ou sans objet` : 'aucun message prévu'}` },
     { cle: 'edl', titre: 'État des lieux d’entrée', fait: edl.fini && commence,
       resume: edl.n ? `${edl.f}/${edl.n} message(s) envoyé(s) ou sans objet${commence ? '' : ' · entrée le ' + date(b.debut)}` : commence ? 'Fait' : 'Le jour de l’entrée' },
-    { cle: 'go', titre: 'Validation par la gestion (GO)', fait: !!c.go_le, attente: !finalise,
-      resume: c.go_le ? `GO le ${date(c.go_le)} par ${c.go_par || '—'}` : finalise ? 'Le dossier est chez la gestion : rien à faire pour le commercial, sauf si elle écrit' : 'Après le contrôle d’entrée complet' },
   ];
   const courante = etapes.find((x) => !x.fait && !x.attente) || etapes.find((x) => !x.fait);
   const ouv = ouverte || courante?.cle;
@@ -525,7 +529,7 @@ function Controle({ d, b, peut, circuit, agir, ouvrirMail, recharger }) {
       {peut && <div className="row" style={{ marginTop: 6 }}>
         {/* Bail dans le circuit : le GO se donne par « Valider le dossier » du bandeau (même fonction pilotage_bail_go), pas de second bouton */}
         {!c.go_le && !circuit && <button className="btn plein" disabled={c.restant > 0} onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: true })}>Donner le GO</button>}
-        {!c.go_le && circuit && <span className="muted" style={{ fontSize: 12 }}>Le GO se donne avec « Valider le dossier », en haut de la fiche.</span>}
+        {!c.go_le && circuit && <span className="muted" style={{ fontSize: 12 }}>Le GO se donne avec « Valider le dossier », à l’étape « Validation par la gestion ».</span>}
         {c.go_le && <button className="btn gris" onClick={() => agir('pilotage_bail_go', { p_bail: b.bail_id, p_oui: false })}>Retirer le GO</button>}
         {/* Bail lu une seule fois : plus de bouton de lecture une fois la lecture enregistrée */}
         {!d.lecture && <button className="btn" disabled={lecture.charge} onClick={() => lire(null)}>{lecture.charge ? 'Lecture en cours…' : 'Lire le bail déposé dans Rivage (IA)'}</button>}
