@@ -288,6 +288,10 @@ export function FicheBien({ l, peut, moi: moiPage, apres, bloc, sansDossier }) {
 const ETAPES_TICKET = [['declare', 'Déclaré'], ['devis_a_demander', 'Devis à demander'], ['devis_demande', 'Devis demandé'], ['devis_accepte', 'Devis accepté'],
   ['planifie', 'Planifié'], ['en_cours', 'En cours'], ['fait', 'Faits'], ['facture', 'Facturé']];
 const rangTicket = (e) => (e === 'fin_depassee' ? 5 : ETAPES_TICKET.findIndex(([k]) => k === e));
+// 153 : ticket PL / DMEL : étapes du permis de louer (suivi du lot), plus celles des travaux
+const ETAPES_DMEL = [['permis_a_deposer', 'À déposer'], ['recepisse_attendu', 'Déposée'], ['permis_termine', 'Récépissé reçu']];
+const ETAPES_PL = [['permis_a_deposer', 'À déposer'], ['reponse_attendue', 'Déposée'], ['attestation_attendue', 'Accord tacite'], ['permis_termine', 'Permis obtenu']];
+const estPermis = (t) => t.permis && !t.sinistre && !t.travaux;
 
 function Dossiers({ x, l, recharger }) {
   const cartes = [];
@@ -299,8 +303,10 @@ function Dossiers({ x, l, recharger }) {
         <a className="lien" href={t.lien} target="_blank" rel="noreferrer">Ouvrir dans Rivage ↗</a></header>
       {(t.sinistre || t.travaux) && <ol className="fb-pas" aria-label={'Étape : ' + t.etape_libelle}>
         {ETAPES_TICKET.map(([k, lib], n) => <li key={k} className={n < r ? 'fait' : n === r ? 'cour' : ''}>{lib}</li>)}</ol>}
+      {estPermis(t) && t.etape !== 'permis_refuse' && (() => { const et = t.tags.includes('pl') ? ETAPES_PL : ETAPES_DMEL; const rp = et.findIndex(([k]) => k === t.etape);
+        return <ol className="fb-pas" aria-label={'Étape : ' + t.etape_libelle}>{et.map(([k, lib], n) => <li key={k} className={n < rp ? 'fait' : n === rp ? 'cour' : ''}>{lib}</li>)}</ol>; })()}
       <div className="fb-carte-pied">
-        <span>{t.etape_libelle}{t.action && (t.sinistre || t.travaux) ? ' · ' + t.action : ''}</span>
+        <span>{t.etape_libelle}{t.action && (t.sinistre || t.travaux || estPermis(t)) ? ' · ' + t.action : ''}</span>
         {t.retard >= 0 && (t.sinistre || t.travaux) && <span className="etq rose">Relance : sans changement depuis le {date(t.depuis)}</span>}
         {!types.length && <span className="etq rose">Poser le tag Sinistre, Travaux, PL ou DMEL dans Rivage</span>}
         {t.a_facturer && <span className="etq violet">À facturer (Audrey et gestion)</span>}
