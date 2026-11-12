@@ -5,7 +5,8 @@
 --    ne sont pas concernés. Un mail de prestataire va au ticket du LOT dont il est prestataire (ouvert d'abord, sinon le plus récent,
 --    même clos : cas des deux bons 2PCJ du lot 188, ticket n°44, laissés tels quels) ; le ticket d'immeuble n'est retenu que si le
 --    prestataire n'a aucun ticket sur le lot, et le mail est alors rangé sur l'immeuble, sans lot ;
---    Un ticket de lot trouvé ainsi range le mail sur le lot de ce ticket, même avec plusieurs lots candidats ;
+--    Un ticket de lot trouvé ainsi range le mail sur le lot de ce ticket, même avec plusieurs lots candidats, si le prestataire n'a
+--    de tickets (ouverts, sinon tous) que sur ce lot ;
 --  - les mails rattachés à un ticket d'immeuble ne sont plus montrés dans les échanges des lots de l'immeuble (ils restent dans le
 --    fil du ticket) : retour sur le 151.
 --  Bloc unique.
@@ -111,7 +112,15 @@ begin
   -- 152 : ticket de lot trouvé par le prestataire : le mail va au lot de ce ticket, même s'il y a plusieurs lots candidats
   if v_ticket is not null then
     select i.data->>'asset_id' into v_lot from pilotage.objets i where i.id = v_ticket;
-    if v_lot is not null and v_lot = any(coalesce(lots, '{}')) then
+    -- seulement si ses tickets (ouverts, sinon tous) ne portent que sur ce lot : un prestataire de plusieurs lots passe par la vérification
+    if v_lot is not null and v_lot = any(coalesce(lots, '{}')) and (
+         select count(distinct i.data->>'asset_id') from pilotage.objets i
+          where i.type = 'Incident' and i.supprime_le is null and i.data->>'asset_id' = any(coalesce(lots, '{}'))
+            and (coalesce(i.data->>'status', '') not in ('closed', 'resolved', 'cancelled'))
+                = (select coalesce(t2.data->>'status', '') not in ('closed', 'resolved', 'cancelled') from pilotage.objets t2 where t2.id = v_ticket)
+            and exists (select 1 from jsonb_array_elements_text(coalesce(i.data->'contractor_ids', '[]'::jsonb)) c
+                          join pilotage.objets pr on pr.type = 'Profile' and pr.id = c
+                         where lower(pr.data->>'email') = any(select lower(trim(x)) from unnest(p_emails) x))) <= 1 then
       return jsonb_build_object('garder', true, 'parties', corr, 'certain', true, 'methode', 'prestataire', 'lot_id', v_lot, 'ticket_id', v_ticket,
         'bail_id', pilotage.mails_bail_a(v_lot, j), 'mandat_id', (select mandat_id from pilotage.v_lots where id = v_lot), 'candidats', cand);
     end if;
