@@ -1,8 +1,8 @@
--- 147 : l'annuaire des mails reconnaît tous les contacts de Rivage (question de Nicolas du 12/11/2026)
---  Jusqu'ici, un prestataire n'était reconnu que s'il était désigné sur un ticket, et un syndic que s'il était rattaché à un lot.
---  Rivage compte 122 prestataires, 63 syndics et 8 autres fournisseurs avec une adresse mail : tous sont maintenant reconnus.
---  Un mail avec un contact connu mais sans lot identifiable n'est plus ignoré : il est gardé et va dans « Mails à vérifier ».
---  (Les organismes GLI de Rivage n'ont pas d'adresse mail : rien à reconnaître pour eux tant qu'elle n'est pas saisie.)
+-- 147 : les mails des organismes d'ordures ménagères rattachés aux lots (précision de Nicolas du 12/11/2026)
+--  Règle confirmée : un correspondant n'est reconnu que s'il est lié à un lot ou à un bail (locataire, garant, bailleur, prestataire d'un
+--  ticket, syndic du lot — dans Rivage, le « fournisseur » d'un lot est son syndic). Une adresse seulement présente dans Rivage ne suffit pas.
+--  Ajout : l'organisme de collecte des ordures ménagères (table organismes_ordures, lots via lots_ordures). Un organisme couvre
+--  souvent plusieurs lots : l'IA choisit d'après l'adresse ou le nom cités dans le mail, sinon le mail va dans « Mails à vérifier ».
 
 create or replace function pilotage.mails_annuaire(p_emails text[])
 returns table(email text, role text, nom text, bail_id text, lot_id text, mandat_id text, ticket_id text, debut date, fin date)
@@ -39,29 +39,11 @@ language sql stable security definer set search_path to 'pilotage', 'public' as 
     from pilotage.objets a join pilotage.objets pr on pr.type = 'Profile' and pr.id = a.data->>'syndic_id'
    where a.type = 'Asset' and a.supprime_le is null and lower(trim(pr.data->>'email')) in (select x from e)
   union all
-  -- 147 : tout profil Rivage qui a cette adresse (prestataire sans ticket, fournisseur, syndic non rattaché à un lot, organisme…) :
-  --       le mail est gardé ; sans lot connu, il va dans « Mails à vérifier »
-  select lower(trim(pr.data->>'email')),
-         case pr.data->>'nature' when 'contractor' then 'prestataire' when 'syndic' then 'syndic'
-              when 'other_supplier' then 'fournisseur' when 'service_contract_provider' then 'fournisseur' when 'gli_provider' then 'organisme'
-              when 'physical_landlord' then 'bailleur' when 'moral_landlord' then 'bailleur'
-              when 'physical_tenant' then 'locataire' when 'moral_tenant' then 'locataire' when 'physical_guarantor' then 'garant'
-              else coalesce(pr.data->>'nature', 'contact') end,
-         pilotage.nom_profil(pr.id), null, null, null, null, null, null
-    from pilotage.objets pr
-   where pr.type = 'Profile' and pr.supprime_le is null and lower(trim(pr.data->>'email')) in (select x from e)
+  -- 147 : organisme de collecte des ordures ménagères (TEOM / REOM) : lots qui lui sont rattachés dans le pilotage (lots_ordures)
+  select lower(trim(o.email)), 'organisme', o.nom, null, lo.asset_id, a.data->>'management_contract_id', null, null, null
+    from pilotage.organismes_ordures o
+    join pilotage.lots_ordures lo on lo.organisme_id = o.id
+    left join pilotage.objets a on a.type = 'Asset' and a.id = lo.asset_id
+   where o.actif and lower(trim(o.email)) in (select x from e)
 $$;
 revoke all on function pilotage.mails_annuaire(text[]) from public, anon, authenticated;
-
--- Contact connu hors période (ancien locataire, ancien bailleur) : les lots de toutes les périodes restent proposés,
--- même si l'annuaire le reconnaît aussi par son seul profil (qui ne donne pas de lot)
-do $do$
-declare d text; avant text := $a$  if corr = '[]'::jsonb then
-    select coalesce(jsonb_agg(distinct jsonb_build_object('email', a.email, 'nom', a.nom, 'role', a.role)), '[]'::jsonb),$a$;
-  apres text := $b$  if lots is null then
-    select coalesce(jsonb_agg(distinct jsonb_build_object('email', a.email, 'nom', a.nom, 'role', a.role)), '[]'::jsonb),$b$;
-begin
-  d := pg_get_functiondef('public.pilotage_mails_preparer(text[], timestamptz, text, text)'::regprocedure);
-  if position(avant in d) = 0 then raise exception '147 : texte attendu introuvable dans pilotage_mails_preparer'; end if;
-  execute replace(d, avant, apres);
-end $do$;
