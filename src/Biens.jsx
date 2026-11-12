@@ -197,7 +197,8 @@ export function Frise({ phase, issues = false }) {
         aria-current={n === i ? 'step' : undefined}><span className="long">{lib}</span><span className="court" aria-hidden="true">{COURT[k]}</span></li>)}
       {suite && <li className={'frise-phase courante ' + phase} aria-current="step"><span className="long">{LIBELLE[phase]}</span><span className="court" aria-hidden="true">{COURT[phase]}</span></li>}
     </ol>
-    {issues && (phase === 'sortie' || phase === 'bail') && <div className="issues" aria-label="Suites possibles après la sortie">
+    {/* 12/11 : les suites possibles seulement pendant la sortie (pendant le bail, elles se lisaient comme l'état du lot) */}
+    {issues && phase === 'sortie' && <div className="issues" aria-label="Suites possibles après la sortie">
       <span className="muted">Après la sortie :</span>
       <span className="issue travaux">Travaux avant relocation</span><span className="issue relouer">Relouer</span><span className="issue fin">Fin de gestion</span>
     </div>}
@@ -215,7 +216,8 @@ export function Etapes({ etapes, courante }) {
   return <ol className="etapes">
     {etapes.map((e, n) => <li key={n} className={'etape e-' + e.etat + (n === courante ? ' courante' : '')} title={e.info || ''}>
       <span className="etape-marque" aria-hidden="true">{MARQUE[e.etat] || '○'}</span>
-      <span>{libelleEtape(e)}{e.date ? ' · ' + date(e.date) : ''}</span>
+      {/* 12/11 : une étape en alerte dit pourquoi (avant : seulement au survol) */}
+      <span>{libelleEtape(e)}{e.date ? ' · ' + date(e.date) : ''}{e.etat === 'alerte' && e.info ? ' : ' + e.info : ''}</span>
       <span className="sr">{{ fait: ' (fait)', en_cours: ' (en cours)', alerte: ' (à traiter)', a_venir: ' (à venir)' }[e.etat]}</span>
     </li>)}
   </ol>;
