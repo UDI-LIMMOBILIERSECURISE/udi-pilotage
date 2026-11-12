@@ -40,10 +40,10 @@ language sql stable security definer set search_path to 'pilotage', 'public' as 
    where a.type = 'Asset' and a.supprime_le is null and lower(trim(pr.data->>'email')) in (select x from e)
   union all
   -- 147 : organisme de collecte des ordures ménagères (TEOM / REOM) : lots qui lui sont rattachés dans le pilotage (lots_ordures)
-  select lower(trim(o.email)), 'organisme', o.nom, null, lo.asset_id, a.data->>'management_contract_id', null, null, null
+  select lower(trim(o.email)), 'organisme', o.nom, null, lo.asset_id::text, a.data->>'management_contract_id', null, null, null
     from pilotage.organismes_ordures o
     join pilotage.lots_ordures lo on lo.organisme_id = o.id
-    left join pilotage.objets a on a.type = 'Asset' and a.id = lo.asset_id
+    left join pilotage.objets a on a.type = 'Asset' and a.id = lo.asset_id::text
    where o.actif and lower(trim(o.email)) in (select x from e)
 $$;
 revoke all on function pilotage.mails_annuaire(text[]) from public, anon, authenticated;
