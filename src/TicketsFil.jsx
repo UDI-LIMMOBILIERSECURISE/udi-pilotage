@@ -2,6 +2,7 @@
 // Monday / WeRoof et des incidents Rivage, avec les liens Gmail et pièces jointes cliquables.
 import React, { useEffect, useState } from 'react';
 import { rpc } from './supabase.js';
+import { EchangesTicket } from './Echanges.jsx';
 
 const dateHeure = (d) => (d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 
@@ -54,6 +55,7 @@ export function SuiviSinistre({ dossier, recharger }) {
     </div>)}
     {racines.length > 3 && <button className="btn gris" style={{ marginTop: 8 }} onClick={() => setTout(!tout)}>{tout ? 'Ne garder que les 3 dernières' : `Voir les ${racines.length - 3} mises à jour plus anciennes`}</button>}
     {!notes.length && <p className="muted">Aucune mise à jour.</p>}
+    {!monday && <EchangesTicket ticketId={dossier.id} />}
     {monday && <p className="muted" style={{ marginTop: 8 }}>Pièces jointes et photos restées dans {ORIGINE(dossier)}.</p>}
     {dossier.repris && <p className="muted" style={{ marginTop: 8 }}>Historique repris de {ORIGINE(dossier.repris)}{dossier.repris.reference ? ' (' + dossier.repris.reference + ')' : ''} :
       pièces jointes et photos restées dans {ORIGINE(dossier.repris)}{dossier.repris.lien ? <> · <a href={dossier.repris.lien} target="_blank" rel="noreferrer">ouvrir le dossier d'origine</a></> : ''}.</p>}

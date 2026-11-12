@@ -347,3 +347,23 @@ tr.sel td { background: #EEF4FA; }
 .eg-ligne.ko { background: var(--red-bg); }
 .eg-texte { flex: 1; display: flex; flex-direction: column; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
 .eg-bilan { background: var(--teal-bg); color: var(--teal); border-radius: 10px; padding: 10px 14px; font-weight: 600; }
+
+/* 145 : échanges par mail (présentés comme une boîte Gmail) */
+.mail-liste { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.mail-fil + .mail-fil { border-top: 1px solid var(--line); }
+.mail-ligne { width: 100%; display: grid; grid-template-columns: minmax(120px, 220px) 1fr auto; gap: 12px; align-items: baseline; text-align: left; background: none; border: 0; padding: 9px 12px; font: inherit; color: inherit; cursor: pointer; }
+.mail-ligne:hover { background: #F5F7F9; }
+.mail-fil.ouvert .mail-ligne { background: var(--teal-bg); }
+.mail-qui { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-objet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mail-date { font-size: 12px; color: var(--ink2); white-space: nowrap; }
+.mail-detail { padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.mail-msg { border-left: 3px solid #9DB4CC; padding: 6px 10px; background: #FAFBFC; border-radius: 0 8px 8px 0; }
+.mail-msg.envoye { border-left-color: var(--teal); }
+.mail-tete { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.mail-sens { font-weight: 700; }
+.mail-de { font-weight: 600; }
+.mail-resume { margin-top: 2px; }
+.mail-corps { white-space: pre-wrap; font: inherit; font-size: 13px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 420px; overflow: auto; margin-top: 6px; }
+.mail-carte { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+@media (max-width: 640px) { .mail-ligne { grid-template-columns: 1fr; gap: 2px; } .mail-qui, .mail-objet { white-space: normal; } }
