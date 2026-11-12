@@ -1230,7 +1230,7 @@ function SortiesDG() {
           <SuiviReversement s={s} />
           {s.statut === 'move_out' && <>
             <FicheConge bail={s.bail_id} apres={() => setRev((n) => n + 1)} />
-            <MessagesDossier key={s.bail_id + rev} objet="bail" id={s.bail_id} />
+            <MessagesDossier key={s.bail_id + rev} objet="bail" id={s.bail_id} statut={s.parti ? 'parti' : s.statut} />
           </>}
         </>}
         <h3>Étapes</h3>

@@ -188,7 +188,7 @@ export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
     <PermisBail bail={b.bail_id} onErreur={setErr} />
     <ClesLots bail={b.bail_id} />
     <FicheConge bail={b.bail_id} apres={() => { setRev((n) => n + 1); apres && apres(); }} />
-    <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} etapes={etapesMessages} />
+    <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} etapes={etapesMessages} statut={b.statut} />
 
     {synthese ? <>
       {/* Mode synthèse (même présentation que le mandat) : la fiche d'abord, le détail replié en dessous */}
