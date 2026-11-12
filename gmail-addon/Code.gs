@@ -1,0 +1,190 @@
+// Module « Pilotage UDI » pour Gmail (146).
+// Lecture d'un mail : lot / bail / ticket reconnus par le pilotage, rattachement en un clic, derniers échanges.
+// Écriture d'un mail : recherche d'un lot, d'un bail ou d'un ticket ; référence [UDI L<lot> T<ticket>] et destinataires en un clic.
+// Les droits sont ceux du membre du pilotage qui a la même adresse Gmail (vérifiés côté pilotage, fonction pilotage-gmail).
+
+var API = 'https://tanupqmphxadaxeksxjh.supabase.co/functions/v1/pilotage-gmail';
+var PILOTAGE = 'https://udi-pilotage.vercel.app/';
+var ROLES = { locataire: 'Locataire', bailleur: 'Bailleur', prestataire: 'Prestataire', syndic: 'Syndic', garant: 'Garant', organisme: 'Organisme' };
+
+function appel(action, params) {
+  var corps = { action: action, id_token: ScriptApp.getIdentityToken() };
+  for (var k in params) corps[k] = params[k];
+  var r = UrlFetchApp.fetch(API, { method: 'post', contentType: 'application/json', payload: JSON.stringify(corps), muteHttpExceptions: true });
+  var j = {};
+  try { j = JSON.parse(r.getContentText() || '{}'); } catch (e) { j = {}; }
+  if (r.getResponseCode() !== 200) throw new Error(j.error || ('Erreur ' + r.getResponseCode()));
+  return j;
+}
+
+function adresses(texte) {
+  var m = String(texte || '').match(/[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  var vus = {}, res = [];
+  m.forEach(function (x) { x = x.toLowerCase(); if (!vus[x]) { vus[x] = 1; res.push(x); } });
+  return res;
+}
+function date(d) { return d ? Utilities.formatDate(new Date(d), 'Europe/Paris', 'dd/MM/yyyy') : ''; }
+function ref(lot, ticket) { return '[UDI L' + lot + (ticket ? ' T' + ticket : '') + ']'; }
+function carteErreur(e) {
+  return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Pilotage UDI'))
+    .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(String(e && e.message || e)))).build();
+}
+function lienPilotage() {
+  return CardService.newTextButton().setText('Ouvrir le pilotage').setOpenLink(CardService.newOpenLink().setUrl(PILOTAGE));
+}
+function blocLot(l) {
+  var t = '<b>Lot ' + l.lot + '</b> · ' + (l.adresse || '');
+  if (l.bail) t += '<br>Bail ' + l.bail + (l.locataires ? ' · ' + l.locataires : '');
+  if (l.bailleur) t += '<br>Bailleur : ' + l.bailleur;
+  if ((l.tickets || []).length) t += '<br>Tickets ouverts : ' + l.tickets.map(function (x) {
+    var p = (x.prestataires || []).map(function (y) { return y.nom; }).join(', ');
+    return 'n°' + x.numero + ' ' + (x.titre || '') + (p ? ' (' + p + ')' : '');
+  }).join(' ; ');
+  return CardService.newTextParagraph().setText(t);
+}
+
+// ---------- Page d'accueil (icône dans le panneau de droite) ----------
+function accueil(e) { return carteRecherche('', false, null); }
+
+// ---------- Lecture d'un mail ----------
+function surMessage(e) {
+  var d, m;
+  try {
+    GmailApp.setCurrentMessageAccessToken(e.gmail.accessToken);
+    m = GmailApp.getMessageById(e.gmail.messageId);
+    d = appel('contexte', { message_id: m.getHeader('Message-ID') || '', emails: adresses([m.getFrom(), m.getTo(), m.getCc()].join(',')) });
+  } catch (err) { return carteErreur(err); }
+  var c = CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Pilotage UDI').setSubtitle(m.getSubject() || ''));
+  var s1 = CardService.newCardSection().setHeader('Ce mail');
+  if (!d.mail) {
+    s1.addWidget(CardService.newTextParagraph().setText((d.parties || []).length
+      ? 'Pas encore dans le pilotage (boîte non branchée, ou passage dans les 5 minutes).'
+      : 'Aucun correspondant connu de Rivage : ce mail n\'est pas repris.'));
+  } else if (d.mail.statut === 'classe') {
+    s1.addWidget(CardService.newTextParagraph().setText('Rattaché au <b>lot ' + d.mail.lot + '</b> · ' + (d.mail.adresse || '')
+      + (d.mail.bail ? '<br>Bail ' + d.mail.bail : '') + (d.mail.ticket ? '<br>Ticket n°' + d.mail.ticket.numero + ' ' + (d.mail.ticket.titre || '') : '')
+      + (d.mail.resume ? '<br><i>' + d.mail.resume + '</i>' : '')));
+  } else if (d.mail.statut === 'a_verifier') {
+    s1.addWidget(CardService.newTextParagraph().setText('<b>À vérifier</b> : le pilotage hésite. Choisissez le bon lot ci-dessous.'));
+  } else {
+    s1.addWidget(CardService.newTextParagraph().setText('Retiré du pilotage (« pas un dossier »).'));
+  }
+  if ((d.parties || []).length) s1.addWidget(CardService.newTextParagraph().setText(d.parties.map(function (p) { return (p.nom || p.email) + ' (' + (ROLES[p.role] || p.role) + ')'; }).join('<br>')));
+  c.addSection(s1);
+
+  (d.lots || []).forEach(function (l) {
+    var s = CardService.newCardSection().addWidget(blocLot(l));
+    if (d.mail && d.peut_classer && !(d.mail.statut === 'classe' && d.mail.lot_id === l.lot_id && !d.mail.ticket_id)) {
+      var bs = CardService.newButtonSet();
+      if (!(d.mail.statut === 'classe' && d.mail.lot_id === l.lot_id))
+        bs.addButton(CardService.newTextButton().setText('Rattacher au lot ' + l.lot)
+          .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(d.mail.id), lot_id: l.lot_id, ticket_id: '' })));
+      (l.tickets || []).forEach(function (t) {
+        if (d.mail.ticket_id === t.ticket_id) return;
+        bs.addButton(CardService.newTextButton().setText('Ticket n°' + t.numero)
+          .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(d.mail.id), lot_id: l.lot_id, ticket_id: t.ticket_id })));
+      });
+      s.addWidget(bs);
+    }
+    c.addSection(s);
+  });
+
+  if ((d.echanges || []).length) {
+    var s3 = CardService.newCardSection().setHeader('Derniers échanges sur ce lot').setCollapsible(true).setNumUncollapsibleWidgets(3);
+    d.echanges.forEach(function (x) {
+      s3.addWidget(CardService.newDecoratedText().setTopLabel(date(x.le) + (x.sens === 'envoye' ? ' · envoyé' : ' · reçu')).setText(x.objet || '(sans objet)')
+        .setBottomLabel(x.resume || '').setWrapText(true));
+    });
+    c.addSection(s3);
+  }
+  if (d.mail && d.peut_classer) c.addSection(sectionRecherche('', false, d.mail.id));
+  c.addSection(CardService.newCardSection().addWidget(lienPilotage()));
+  return c.build();
+}
+
+function classer(e) {
+  var p = e.parameters;
+  try { appel('classer', { mail_id: Number(p.mail_id), lot_id: p.lot_id, ticket_id: p.ticket_id || null }); }
+  catch (err) { return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(String(err.message || err))).build(); }
+  return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText('Rattaché : le libellé Gmail passe à « Pilotage/Classé ».'))
+    .setStateChanged(true).build();
+}
+
+// ---------- Recherche (accueil, lecture et écriture) ----------
+function sectionRecherche(q, redaction, mailId) {
+  var s = CardService.newCardSection().setHeader(redaction ? 'Dossier du mail' : 'Chercher un lot');
+  s.addWidget(CardService.newTextInput().setFieldName('q').setTitle('N° de lot, adresse, locataire, bailleur, prestataire ou n° de ticket').setValue(q || ''));
+  s.addWidget(CardService.newTextButton().setText('Rechercher')
+    .setOnClickAction(CardService.newAction().setFunctionName('rechercher').setParameters({ redaction: redaction ? '1' : '', mail_id: mailId ? String(mailId) : '' })));
+  return s;
+}
+
+function carteRecherche(q, redaction, mailId, lots) {
+  var c = CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Pilotage UDI').setSubtitle(redaction ? 'Rattacher ce mail à un dossier' : 'Recherche'));
+  c.addSection(sectionRecherche(q, redaction, mailId));
+  if (lots) {
+    if (!lots.length) c.addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText('Aucun lot trouvé.')));
+    lots.forEach(function (l) {
+      var s = CardService.newCardSection().addWidget(blocLot(l));
+      var bs = CardService.newButtonSet();
+      if (redaction) {
+        bs.addButton(CardService.newTextButton().setText('Référence lot ' + l.lot)
+          .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: ref(l.lot) })));
+        (l.tickets || []).forEach(function (t) {
+          bs.addButton(CardService.newTextButton().setText('Réf. ticket n°' + t.numero)
+            .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: ref(l.lot, t.numero) })));
+          var pre = (t.prestataires || []).map(function (x) { return x.email; }).filter(Boolean);
+          if (pre.length) bs.addButton(CardService.newTextButton().setText('À : prestataire n°' + t.numero)
+            .setOnClickAction(CardService.newAction().setFunctionName('ajouterDest').setParameters({ emails: pre.join(',') })));
+        });
+        var loc = ((l.contacts || {}).locataires || []).map(function (x) { return x.email; }).filter(Boolean);
+        var bai = ((l.contacts || {}).bailleurs || []).map(function (x) { return x.email; }).filter(Boolean);
+        if (loc.length) bs.addButton(CardService.newTextButton().setText('À : locataire')
+          .setOnClickAction(CardService.newAction().setFunctionName('ajouterDest').setParameters({ emails: loc.join(',') })));
+        if (bai.length) bs.addButton(CardService.newTextButton().setText('À : bailleur')
+          .setOnClickAction(CardService.newAction().setFunctionName('ajouterDest').setParameters({ emails: bai.join(',') })));
+      } else if (mailId) {
+        bs.addButton(CardService.newTextButton().setText('Rattacher au lot ' + l.lot)
+          .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(mailId), lot_id: l.lot_id, ticket_id: '' })));
+        (l.tickets || []).forEach(function (t) {
+          bs.addButton(CardService.newTextButton().setText('Ticket n°' + t.numero)
+            .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(mailId), lot_id: l.lot_id, ticket_id: t.ticket_id })));
+        });
+      }
+      s.addWidget(bs);
+      c.addSection(s);
+    });
+  }
+  return c.build();
+}
+
+function rechercher(e) {
+  var q = (e.formInput && e.formInput.q) || '';
+  var redaction = !!e.parameters.redaction, mailId = e.parameters.mail_id ? Number(e.parameters.mail_id) : null;
+  var lots;
+  try { lots = appel('chercher', { q: q }).lots || []; } catch (err) { return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(String(err.message || err))).build(); }
+  return CardService.newActionResponseBuilder().setNavigation(CardService.newNavigation().pushCard(carteRecherche(q, redaction, mailId, lots))).build();
+}
+
+// ---------- Écriture d'un mail ----------
+function surRedaction(e) { return [carteRecherche('', true, null)]; }
+
+// Référence ajoutée à la fin de l'objet si Gmail le transmet, sinon insérée dans le texte (le pilotage la lit aux deux endroits)
+function insererRef(e) {
+  var r = e.parameters.ref, objet = e.draftMetadata && e.draftMetadata.subject;
+  var b = CardService.newUpdateDraftActionResponseBuilder();
+  if (typeof objet === 'string') {
+    if (objet.indexOf('[UDI ') < 0) b.setUpdateDraftSubjectAction(CardService.newUpdateDraftSubjectAction().addUpdateSubject((objet ? objet + ' ' : '') + r));
+  } else {
+    b.setUpdateDraftBodyAction(CardService.newUpdateDraftBodyAction().addUpdateContent(' ' + r + ' ', CardService.ContentType.TEXT)
+      .setUpdateType(CardService.UpdateDraftBodyType.IN_PLACE_INSERT));
+  }
+  return b.build();
+}
+
+function ajouterDest(e) {
+  var deja = (e.draftMetadata && e.draftMetadata.toRecipients) || [];
+  var tous = deja.concat(String(e.parameters.emails || '').split(',')).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+  return CardService.newUpdateDraftActionResponseBuilder()
+    .setUpdateToRecipientsAction(CardService.newUpdateToRecipientsAction().addUpdateToRecipients(tous)).build();
+}
