@@ -61,7 +61,7 @@ function surMessage(e) {
       ? 'Pas encore dans le pilotage.'
       : 'Aucun correspondant connu de Rivage : ce mail n\'est pas repris.'));
     if ((d.parties || []).length) s1.addWidget(CardService.newTextButton().setText('Ajouter au pilotage')
-      .setOnClickAction(CardService.newAction().setFunctionName('importer').setParameters({ gmail_id: String(e.gmail.messageId) })));
+      .setOnClickAction(CardService.newAction().setFunctionName('importer').setParameters({ gmail_id: String(m.getId()) })));
     // Mail non repris mais portant une référence [UDI L<lot> T<ticket>] : on affiche quand même le dossier, pour information
     var r = String(m.getSubject() || '').match(/\[UDI L([^\]\s]+)(?: T(\d+))?\]/);
     if (r) {
