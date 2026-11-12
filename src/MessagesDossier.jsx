@@ -28,7 +28,14 @@ export const ETAPE_DES_ALERTES = {
 };
 export const etapesDesAlertes = (regles) => [...new Set((regles || []).map((r) => ETAPE_DES_ALERTES[r]).filter(Boolean))];
 
-export default function MessagesDossier({ objet, id, apres, titre = true, etapes }) {
+// 12/11 : les étapes de messages suivent la frise du dossier : passées (✓ si tout est envoyé), en cours (mise en avant), à venir (grisées).
+// Position du dossier : la plus avancée des étapes en cours, sinon le statut du bail (statut Rivage, ou « parti »).
+const ORDRE_ETAPES = ['nouveau_mandat', 'mise_en_location', 'nouveau_bail', 'edl_entree', 'conge', 'edl_sortie'];
+const POS_STATUT = { created: 2, move_in: 3.5, in_progress: 3.5, move_out: 4.5, closed: 6, parti: 6 };
+const LIB_STATUT = { created: 'bail à signer', move_in: 'bail en cours', in_progress: 'bail en cours', move_out: 'congé reçu', closed: 'bail terminé', parti: 'locataire parti' };
+
+export default function MessagesDossier({ objet, id, apres, titre = true, etapes, statut }) {
+  const [tout, setTout] = useState(false);
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [etape, setEtape] = useState(null);
@@ -41,8 +48,8 @@ export default function MessagesDossier({ objet, id, apres, titre = true, etapes
   // Étapes proposées : toutes, ou seulement celles de l'alerte ; les autres ne gardent que leurs messages déjà faits (historique)
   const proposee = (cle) => !etapes || etapes.includes(cle);
   const visible = (x, cle) => proposee(cle) || (x.messages || []).some((m) => m.categorie === cle && m.fait);
-  const premiere = (x) => (x.actives || []).find(proposee) || (etapes || []).find((k) => visible(x, k))
-    || (x.categories || []).map((k) => k.cle).find((k) => visible(x, k)) || null;
+  // Aucune étape en cours : rien n'est ouvert d'office (avant : la première étape, « Nouveau bail à signer » sur un bail parti)
+  const premiere = (x) => (x.actives || []).find(proposee) || (etapes || []).find((k) => visible(x, k)) || null;
   useEffect(() => { setD(null); setEtape(null); setOuvert(null); charger(); }, [objet, id]);
   useEffect(() => { supabase.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || '')); monRole().then(setRole); }, []);
   if (err && !d) return <div className="err">{err}</div>;
@@ -51,6 +58,12 @@ export default function MessagesDossier({ objet, id, apres, titre = true, etapes
   const categories = d.categories.filter((k) => visible(d, k.cle));
   if (!categories.length) return null;
   const historique = etape && !proposee(etape);
+  const rang = (cle) => ORDRE_ETAPES.indexOf(cle);
+  const rangsActifs = actives.map(rang).filter((n) => n >= 0);
+  const pos = rangsActifs.length ? Math.max(...rangsActifs) : (statut && POS_STATUT[statut] != null ? POS_STATUT[statut] : null);
+  const tousFaits = (cle) => { const l = d.messages.filter((m) => m.categorie === cle); return l.length > 0 && l.every((m) => m.fait || m.attente); };
+  const situation = (k) => (actives.includes(k.cle) ? 'cours' : rang(k.cle) < 0 || pos == null ? 'autre' : rang(k.cle) < pos ? 'passee' : 'avenir');
+  const montrees = tout || actives.length ? categories : categories.filter((k) => k.cle === etape);
   const restants = (cle) => (proposee(cle) ? d.messages.filter((m) => m.categorie === cle && !m.fait && !m.attente).length : 0);
   const liste = d.messages.filter((m) => m.categorie === etape && (!historique || m.fait));
   const noter = async (m, moyen, x) => {
@@ -63,17 +76,21 @@ export default function MessagesDossier({ objet, id, apres, titre = true, etapes
   return (
     <div style={{ marginTop: 18 }}>
       {titre && <h3 style={{ margin: '0 0 6px' }}>Messages {objet === 'mandat' ? 'au bailleur' : 'au locataire et au bailleur'}</h3>}
-      <div className="row" role="tablist" style={{ marginBottom: 8 }}>
-        {categories.map((k) => (
-          <button key={k.cle} role="tab" aria-selected={etape === k.cle} className={'chip' + (etape === k.cle ? ' on' : '')} onClick={() => { setEtape(k.cle); setOuvert(null); }}
-            style={k.active ? undefined : { opacity: 0.6 }}>
-            {k.libelle}{k.active && restants(k.cle) > 0 && <span className="n">{restants(k.cle)}</span>}
-          </button>
-        ))}
-      </div>
-      {!etape && <p className="muted" style={{ fontSize: 13 }}>Aucune étape en cours pour ce dossier : choisissez une étape pour voir ses messages.</p>}
+      {!actives.length && !tout && <p className="muted" style={{ fontSize: 13, margin: '0 0 6px' }}>
+        Aucun message attendu à cette étape{statut && LIB_STATUT[statut] ? ' (' + LIB_STATUT[statut] + ')' : ''}.{' '}
+        <button className="lien" onClick={() => setTout(true)}>Voir les messages des autres étapes</button></p>}
+      {montrees.length > 0 && <div className="row" role="tablist" style={{ marginBottom: 8 }}>
+        {montrees.map((k) => { const st = situation(k);
+          return <button key={k.cle} role="tab" aria-selected={etape === k.cle} className={'chip' + (etape === k.cle ? ' on' : '')} onClick={() => { setEtape(k.cle); setOuvert(null); }}
+            style={st === 'avenir' || st === 'autre' ? { opacity: 0.55 } : st === 'passee' ? { opacity: 0.8 } : { fontWeight: 600 }}
+            title={{ cours: 'Étape en cours', passee: 'Étape passée', avenir: 'Étape à venir', autre: '' }[st]}>
+            {st === 'passee' && (tousFaits(k.cle) ? '✓ ' : '')}{k.libelle}{st === 'cours' ? ' · en cours' : st === 'avenir' ? ' · à venir' : ''}
+            {st === 'cours' && restants(k.cle) > 0 && <span className="n">{restants(k.cle)}</span>}
+          </button>; })}
+      </div>}
       {historique && <p className="muted" style={{ fontSize: 13 }}>Messages déjà préparés pour cette étape (historique).</p>}
-      {etape && !historique && !actives.includes(etape) && <p className="muted" style={{ fontSize: 13 }}>Cette étape n’est pas en cours pour ce dossier ; les messages restent utilisables.</p>}
+      {etape && !historique && !actives.includes(etape) && <p className="muted" style={{ fontSize: 13 }}>
+        {situation({ cle: etape }) === 'passee' ? 'Étape passée' : situation({ cle: etape }) === 'avenir' ? 'Étape à venir' : 'Étape pas en cours'} pour ce dossier ; les messages restent utilisables.</p>}
       {err && <div className="err">{err}</div>}
       {d.identite && !historique && ['edl_entree', 'edl_sortie'].includes(etape) && <Identite bail={id} x={d.identite} apres={async () => { await charger(); apres && apres(); }} />}
       {d.edl_entree && !historique && ['nouveau_bail', 'edl_entree'].includes(etape) && <EdlEntree bail={id} e={d.edl_entree} apres={async () => { await charger(); apres && apres(); }} />}

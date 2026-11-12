@@ -1180,11 +1180,12 @@ function SortiesDG() {
   // 12/11 : départs de plus de 6 mois (stock resté « en sortie » dans Rivage) à part, dans « Baux à clôturer dans Rivage »
   const six = (() => { const t = new Date(); t.setMonth(t.getMonth() - 6); return t.toISOString().slice(0, 10); })();
   const ancien = (x) => x.parti && String(x.sortie_reelle || x.fin || '') < six;
-  const recents = d.filter((x) => !ancien(x));
-  const anciens = d.filter((x) => ancien(x) && !x.remboursee);
+  const clos = (x) => !!x.suivi?.clos_le;  // 154 : dossier clôturé dans le pilotage
+  const recents = d.filter((x) => !ancien(x) && !clos(x));
+  const anciens = d.filter((x) => ancien(x) && !x.remboursee && !clos(x));
   const partis = recents.filter((x) => x.parti && !x.remboursee);
-  const tests = { tous: (x) => !ancien(x), preavis: (x) => !x.parti, partis: (x) => !ancien(x) && x.parti && !x.remboursee,
-    retard: (x) => !ancien(x) && x.parti && !x.remboursee && a > x.limite_1_mois, anciens: (x) => ancien(x) && !x.remboursee };
+  const tests = { tous: (x) => !ancien(x) && !clos(x), preavis: (x) => !x.parti && !clos(x), partis: (x) => !ancien(x) && !clos(x) && x.parti && !x.remboursee,
+    retard: (x) => !ancien(x) && !clos(x) && x.parti && !x.remboursee && a > x.limite_1_mois, anciens: (x) => ancien(x) && !x.remboursee && !clos(x), clos };
   // Recherche (096) : n° de bail, locataires, bailleur, adresse, lot, mandat, téléphones et e-mails ; elle porte sur tous les dossiers, quel que soit le filtre
   const q = normaliser(cherche);
   const vus = (q ? d : d.filter(tests[filtre])).filter((x) => !q || correspond(texteRecherche(x.reference, x.locataires, x.bailleur, x.adresse, x.lot, x.mandat, x.parties), q));
@@ -1197,7 +1198,7 @@ function SortiesDG() {
       [d.filter(tests.retard).length, 'Au-delà d’un mois', true], [partis.filter((x) => !x.restitution_creee).length, 'Restitution non créée', true]]} />
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <Filtres val={filtre} set={setFiltre} items={[['tous', 'Tous', recents.length], ['preavis', 'Préavis', d.filter(tests.preavis).length],
-        ['partis', 'À restituer', partis.length], ['retard', 'En retard', d.filter(tests.retard).length], ['anciens', 'Baux à clôturer dans Rivage', anciens.length]]} />
+        ['partis', 'À restituer', partis.length], ['retard', 'En retard', d.filter(tests.retard).length], ['anciens', 'Baux à clôturer dans Rivage', anciens.length], ['clos', 'Clôturés', d.filter(clos).length]]} />
       <input className="recherche" placeholder="Rechercher : nom, adresse, téléphone, e-mail, n° de bail" value={cherche} onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un congé" />
     </div>
     {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) sur tous les congés.</div>}
@@ -1224,10 +1225,13 @@ function SortiesDG() {
         <AlertesLiees items={s.alertes} />
         {aCharge.length > 0 && <div className="mini-alerte haute"><b>À regarder avant restitution</b> · {aCharge.length} incident(s) à la charge du locataire :
           {aCharge.map((i) => <div key={i.numero}><a href={i.lien} target="_blank" rel="noreferrer">n°{i.numero} {i.titre}</a> · {ST_INC[i.statut] || i.statut} · estimé {euro(i.montant_estime)}</div>)}</div>}
-        <SuiviReversement s={s} />
-        {s.statut === 'move_out' && <>
-          <FicheConge bail={s.bail_id} apres={() => setRev((n) => n + 1)} />
-          <MessagesDossier key={s.bail_id + rev} objet="bail" id={s.bail_id} />
+        <ClotureDG s={s} apres={(patch) => { s.suivi = { ...(s.suivi || {}), ...patch }; setRev((n) => n + 1); biens.recharger(); }} />
+        {!s.suivi?.clos_le && <>
+          <SuiviReversement s={s} />
+          {s.statut === 'move_out' && <>
+            <FicheConge bail={s.bail_id} apres={() => setRev((n) => n + 1)} />
+            <MessagesDossier key={s.bail_id + rev} objet="bail" id={s.bail_id} statut={s.parti ? 'parti' : s.statut} />
+          </>}
         </>}
         <h3>Étapes</h3>
         <ol className="etapes">{etapesDG(s).map((st) => <li key={st.l} className={st.fait ? 'fait' : st.retard ? 'retard' : ''}>
@@ -1261,6 +1265,43 @@ function SortiesDG() {
 const plusMoisDG = (x, n) => { if (!x) return null; const t = new Date(x); t.setMonth(t.getMonth() + n); return t.toISOString().slice(0, 10); };
 
 // Détenteur du dépôt, reversement du bailleur et mails (054). Rivage ne donne ni l'un ni l'autre : saisie de la gestion.
+// 154 : clôturer le dossier dans le pilotage sans remplir la fiche du congé (stock, dépôt réglé hors Rivage) ; motif obligatoire, réversible
+const MOTIFS_CLOTURE_DG = { restitue_hors_rivage: 'Dépôt restitué (hors Rivage)', pas_de_depot: 'Pas de dépôt à restituer',
+  impute_dette: 'Dépôt imputé sur la dette du locataire', autre: 'Autre (préciser)' };
+function ClotureDG({ s, apres }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [motif, setMotif] = useState('');
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
+  const c = s.suivi || {};
+  const envoyer = async (m, n) => {
+    setErr('');
+    try {
+      await rpc('pilotage_dg_clore', { p_bail: s.bail_id, p_motif: m || null, p_note: n || null });
+      apres(m ? { clos_le: new Date().toISOString(), clos_motif: m, clos_note: n || null } : { clos_le: null, clos_motif: null, clos_note: null });
+      setOuvert(false); setMotif(''); setNote('');
+    } catch (e) { setErr(e.message); }
+  };
+  if (c.clos_le) return <div className="mini-alerte normale"><b>Dossier clôturé dans le pilotage</b> le {date(c.clos_le)} · {MOTIFS_CLOTURE_DG[c.clos_motif] || c.clos_motif}{c.clos_note ? ' : ' + c.clos_note : ''}
+    {s.statut === 'move_out' && <div className="muted">Le bail reste « en sortie » dans Rivage : le clôturer dans Rivage.</div>}
+    <div className="row" style={{ marginTop: 6 }}><button className="btn gris" onClick={() => envoyer(null)}>Rouvrir le dossier</button></div>
+    {err && <div className="banner">{err}</div>}</div>;
+  if (!s.parti) return null;
+  return <div style={{ margin: '8px 0' }}>
+    {!ouvert ? <button className="btn" onClick={() => setOuvert(true)}>Clôturer le dossier sans la fiche du congé</button>
+      : <div className="mini-alerte normale"><b>Clôturer le dossier</b>
+        <div className="muted">Pour un départ ancien ou un dépôt déjà réglé : le dossier sort des listes et des alertes, la fiche du congé n’est pas demandée.</div>
+        <div className="row" style={{ gap: 6, marginTop: 6 }}>
+          <select value={motif} onChange={(e) => setMotif(e.target.value)} aria-label="Motif de clôture">
+            <option value="">Motif…</option>{Object.entries(MOTIFS_CLOTURE_DG).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <input placeholder={motif === 'autre' ? 'Préciser (obligatoire)' : 'Précision (facultatif)'} value={note} onChange={(e) => setNote(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
+          <button className="btn plein" disabled={!motif || (motif === 'autre' && !note.trim())} onClick={() => envoyer(motif, note.trim())}>Clôturer</button>
+          <button className="btn gris" onClick={() => setOuvert(false)}>Annuler</button>
+        </div>
+        {err && <div className="banner">{err}</div>}</div>}
+  </div>;
+}
+
 function SuiviReversement({ s }) {
   const moi = useMoiMail();
   const [suivi, setSuivi] = useState(s.suivi || {});
