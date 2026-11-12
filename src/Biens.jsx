@@ -123,7 +123,7 @@ export function LigneLot({ l, ouvrir, peut: peutPage, apres: apresPage, entete, 
       <strong>{l.a_moi ? 'À vous' : 'À faire par ' + af.prenom}</strong> : {af.action}{etape?.info ? ' · ' + etape.info : ''}
     </div>}
     {!af && etape?.info && <div className="muted" style={{ marginTop: 4 }}>{etape.libelle} : {etape.info}</div>}
-    {peut && af?.action?.startsWith('Mettre le lot') && <MettreEnLocation l={l} apres={apres} />}
+    {peut && aMettreEnLocation(l) && <MettreEnLocation l={l} apres={apres} />}
   </div>;
 }
 const LigneBien = LigneLot;
@@ -211,13 +211,17 @@ const MARQUE = { fait: '✓', en_cours: '●', alerte: '!', a_venir: '○' };
 const A_FAIRE = { 'Bail signé': 'Bail à signer', 'Dépôt de garantie restitué': 'Dépôt de garantie à restituer', 'Bail clos dans Rivage': 'Bail à clôturer dans Rivage',
   'Mis en location': 'À mettre en location' };
 const libelleEtape = (e) => (e.etat !== 'fait' && A_FAIRE[e.libelle]) || e.libelle;
+// 12/11 : « Mettre en location » proposé dès que l'étape en cours le demande, même quand le lot est passé en vérification
+// direction (libre depuis plus de 90 jours, 141 : plus d'action à la gestion, mais mettre le lot « À louer » reste la bonne suite)
+const aMettreEnLocation = (l) => (l.etapes || []).some((e) => e.etat !== 'fait' && e.etat !== 'a_venir' && (e.action || '').startsWith('Mettre le lot'))
+  || !!l.a_faire?.action?.startsWith('Mettre le lot');
 export function Etapes({ etapes, courante }) {
   if (!etapes?.length) return null;
   return <ol className="etapes">
     {etapes.map((e, n) => <li key={n} className={'etape e-' + e.etat + (n === courante ? ' courante' : '')} title={e.info || ''}>
       <span className="etape-marque" aria-hidden="true">{MARQUE[e.etat] || '○'}</span>
       {/* 12/11 : une étape en alerte dit pourquoi (avant : seulement au survol) */}
-      <span>{libelleEtape(e)}{e.date ? ' · ' + date(e.date) : ''}{e.etat === 'alerte' && e.info ? ' : ' + e.info : ''}</span>
+      <span>{libelleEtape(e)}{e.date ? ' · ' + date(e.date) : ''}{e.etat === 'alerte' && (e.info || e.info_direction) ? ' : ' + (e.info || e.info_direction) : ''}</span>
       <span className="sr">{{ fait: ' (fait)', en_cours: ' (en cours)', alerte: ' (à traiter)', a_venir: ' (à venir)' }[e.etat]}</span>
     </li>)}
   </ol>;
@@ -259,7 +263,12 @@ export function FicheBien({ l, peut, moi: moiPage, apres, bloc, sansDossier }) {
           <div className="fb-action-qui">{l.a_moi ? 'À vous, maintenant' : 'À faire par ' + af.prenom}</div>
           <div className="fb-action-quoi">{af.action}</div>
           {etape?.info && <div className="muted">{etape.info}</div>}
-          {peut && af.action?.startsWith('Mettre le lot') && <MettreEnLocation l={l} apres={apres} />}
+          {peut && aMettreEnLocation(l) && <MettreEnLocation l={l} apres={apres} />}
+        </div>}
+        {!af && peut && aMettreEnLocation(l) && <div className="fb-action">
+          <div className="fb-action-qui">Vérification par la direction</div>
+          <div className="fb-action-quoi">Lot libre depuis longtemps : vérifier Rivage, ou le mettre « À louer »</div>
+          <MettreEnLocation l={l} apres={apres} />
         </div>}
       </div>
     </section>
