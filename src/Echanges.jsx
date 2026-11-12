@@ -7,7 +7,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 
 const dateHeure = (d) => (d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
-const ROLES = { locataire: 'Locataire', bailleur: 'Bailleur', prestataire: 'Prestataire', syndic: 'Syndic', garant: 'Garant' };
+const ROLES = { locataire: 'Locataire', bailleur: 'Bailleur', prestataire: 'Prestataire', fournisseur: 'Fournisseur', syndic: 'Syndic', garant: 'Garant', organisme: 'Organisme' };
 const qui = (m) => (m.parties || []).map((p) => `${p.nom || p.email} (${ROLES[p.role] || p.role})`).join(', ');
 
 async function ouvrirPj(id, cle) {

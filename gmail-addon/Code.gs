@@ -5,7 +5,7 @@
 
 var API = 'https://tanupqmphxadaxeksxjh.supabase.co/functions/v1/pilotage-gmail';
 var PILOTAGE = 'https://udi-pilotage.vercel.app/';
-var ROLES = { locataire: 'Locataire', bailleur: 'Bailleur', prestataire: 'Prestataire', syndic: 'Syndic', garant: 'Garant' };
+var ROLES = { locataire: 'Locataire', bailleur: 'Bailleur', prestataire: 'Prestataire', fournisseur: 'Fournisseur', syndic: 'Syndic', garant: 'Garant', organisme: 'Organisme' };
 
 function appel(action, params) {
   var corps = { action: action, id_token: ScriptApp.getIdentityToken() };
