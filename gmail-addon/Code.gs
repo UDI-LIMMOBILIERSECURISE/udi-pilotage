@@ -25,6 +25,9 @@ function adresses(texte) {
 }
 function date(d) { return d ? Utilities.formatDate(new Date(d), 'Europe/Paris', 'dd/MM/yyyy') : ''; }
 function ref(lot, ticket) { return '[UDI L' + lot + (ticket ? ' T' + ticket : '') + ']'; }
+// 151 : ticket d'immeuble (sans lot) : référence courte, rattachement sans lot
+function refTicket(l, t) { return t.immeuble ? '[UDI T' + t.numero + ']' : ref(l.lot, t.numero); }
+function libTicket(t) { return 'Ticket n°' + t.numero + (t.immeuble ? ' · immeuble' : ''); }
 function carteErreur(e) {
   return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Pilotage UDI'))
     .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(String(e && e.message || e)))).build();
@@ -38,7 +41,7 @@ function blocLot(l) {
   if (l.bailleur) t += '<br>Bailleur : ' + l.bailleur;
   if ((l.tickets || []).length) t += '<br>Tickets ouverts : ' + l.tickets.map(function (x) {
     var p = (x.prestataires || []).map(function (y) { return y.nom; }).join(', ');
-    return 'n°' + x.numero + ' ' + (x.titre || '') + (p ? ' (' + p + ')' : '');
+    return 'n°' + x.numero + ' ' + (x.titre || '') + (x.immeuble ? ' [' + (x.immeuble_libelle || 'immeuble') + ']' : '') + (p ? ' (' + p + ')' : '');
   }).join(' ; ');
   return CardService.newTextParagraph().setText(t);
 }
@@ -76,7 +79,7 @@ function surMessage(e) {
       } catch (err) { }
     }
   } else if (d.mail.statut === 'classe') {
-    s1.addWidget(CardService.newTextParagraph().setText('Rattaché au <b>lot ' + d.mail.lot + '</b> · ' + (d.mail.adresse || '')
+    s1.addWidget(CardService.newTextParagraph().setText((d.mail.lot ? 'Rattaché au <b>lot ' + d.mail.lot + '</b> · ' + (d.mail.adresse || '') : 'Rattaché à l\'<b>' + (d.mail.immeuble || 'immeuble') + '</b>')
       + (d.mail.bail ? '<br>Bail ' + d.mail.bail : '') + (d.mail.ticket ? '<br>Ticket n°' + d.mail.ticket.numero + ' ' + (d.mail.ticket.titre || '') : '')
       + (d.mail.resume ? '<br><i>' + d.mail.resume + '</i>' : '')));
   } else if (d.mail.statut === 'a_verifier') {
@@ -96,8 +99,8 @@ function surMessage(e) {
           .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(d.mail.id), lot_id: l.lot_id, ticket_id: '' })));
       (l.tickets || []).forEach(function (t) {
         if (d.mail.ticket_id === t.ticket_id) return;
-        bs.addButton(CardService.newTextButton().setText('Ticket n°' + t.numero)
-          .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(d.mail.id), lot_id: l.lot_id, ticket_id: t.ticket_id })));
+        bs.addButton(CardService.newTextButton().setText(libTicket(t))
+          .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(d.mail.id), lot_id: t.immeuble ? '' : l.lot_id, ticket_id: t.ticket_id })));
       });
       s.addWidget(bs);
     }
@@ -160,15 +163,15 @@ function carteRecherche(q, redaction, mailId, lots) {
         bs.addButton(CardService.newTextButton().setText('Lot ' + l.lot + (l.bail ? ' · bail ' + l.bail : ''))
           .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: ref(l.lot) })));
         (l.tickets || []).forEach(function (t) {
-          bs.addButton(CardService.newTextButton().setText('Ticket n°' + t.numero)
-            .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: ref(l.lot, t.numero) })));
+          bs.addButton(CardService.newTextButton().setText(libTicket(t))
+            .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: refTicket(l, t) })));
         });
       } else if (mailId) {
         bs.addButton(CardService.newTextButton().setText('Rattacher au lot ' + l.lot)
           .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(mailId), lot_id: l.lot_id, ticket_id: '' })));
         (l.tickets || []).forEach(function (t) {
-          bs.addButton(CardService.newTextButton().setText('Ticket n°' + t.numero)
-            .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(mailId), lot_id: l.lot_id, ticket_id: t.ticket_id })));
+          bs.addButton(CardService.newTextButton().setText(libTicket(t))
+            .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(mailId), lot_id: t.immeuble ? '' : l.lot_id, ticket_id: t.ticket_id })));
         });
       }
       s.addWidget(bs);

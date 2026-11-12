@@ -121,13 +121,14 @@ export function MailsAVerifier() {
         <div className="row" style={{ gap: 6, marginTop: 8 }}>
           {(m.candidats || []).map((c) => <React.Fragment key={c.lot_id}>
             <button className="btn" onClick={() => classer(m, c.lot)}>Lot {c.lot} · {c.adresse}{c.locataires ? ' · ' + c.locataires : ''}</button>
-            {(c.tickets || []).map((t) => <button key={t.ticket_id} className="btn gris" onClick={() => classer(m, c.lot, t.numero)}>Lot {c.lot} · ticket n°{t.numero} {t.titre}</button>)}
+            {(c.tickets || []).map((t) => <button key={t.ticket_id} className="btn gris" onClick={() => classer(m, t.immeuble ? null : c.lot, t.numero)}>
+              {t.immeuble ? 'Immeuble' : 'Lot ' + c.lot} · ticket n°{t.numero} {t.titre}</button>)}
           </React.Fragment>)}
         </div>
         <div className="row" style={{ gap: 6, marginTop: 8 }}>
-          <input placeholder="N° de lot" value={saisie[m.id]?.lot || ''} onChange={(e) => setSaisie({ ...saisie, [m.id]: { ...saisie[m.id], lot: e.target.value } })} style={{ width: 110 }} />
+          <input placeholder="N° de lot (vide : ticket d’immeuble)" value={saisie[m.id]?.lot || ''} onChange={(e) => setSaisie({ ...saisie, [m.id]: { ...saisie[m.id], lot: e.target.value } })} style={{ width: 230 }} />
           <input placeholder="N° de ticket (facultatif)" value={saisie[m.id]?.ticket || ''} onChange={(e) => setSaisie({ ...saisie, [m.id]: { ...saisie[m.id], ticket: e.target.value } })} style={{ width: 190 }} />
-          <button className="btn plein" disabled={!saisie[m.id]?.lot} onClick={() => classer(m, saisie[m.id].lot, saisie[m.id].ticket)}>Rattacher</button>
+          <button className="btn plein" disabled={!saisie[m.id]?.lot && !saisie[m.id]?.ticket} onClick={() => classer(m, saisie[m.id].lot, saisie[m.id].ticket)}>Rattacher</button>
           <button className="btn gris" onClick={() => classer(m, null, null, true)}>Pas un dossier</button>
         </div>
       </div>)}</div>}
