@@ -187,7 +187,7 @@ function MettreEnLocation({ l, apres }) {
 }
 
 // Les quatre phases, la phase en cours marquée ; après la sortie, la suite (travaux, relocation, fin de gestion)
-export function Frise({ phase, issues = false }) {
+export function Frise({ phase }) {
   if (phase === 'hors') return <div className="frise"><span className="frise-phase hors">Hors gestion</span></div>;
   const suite = phase === 'travaux' || phase === 'fin';
   const i = suite ? PHASES.length : PHASES.findIndex(([k]) => k === phase);
@@ -197,11 +197,6 @@ export function Frise({ phase, issues = false }) {
         aria-current={n === i ? 'step' : undefined}><span className="long">{lib}</span><span className="court" aria-hidden="true">{COURT[k]}</span></li>)}
       {suite && <li className={'frise-phase courante ' + phase} aria-current="step"><span className="long">{LIBELLE[phase]}</span><span className="court" aria-hidden="true">{COURT[phase]}</span></li>}
     </ol>
-    {/* 12/11 : les suites possibles seulement pendant la sortie (pendant le bail, elles se lisaient comme l'état du lot) */}
-    {issues && phase === 'sortie' && <div className="issues" aria-label="Suites possibles après la sortie">
-      <span className="muted">Après la sortie :</span>
-      <span className="issue travaux">Travaux avant relocation</span><span className="issue relouer">Relouer</span><span className="issue fin">Fin de gestion</span>
-    </div>}
   </div>;
 }
 
@@ -253,8 +248,9 @@ export function FicheBien({ l, peut, moi: moiPage, apres, bloc, sansDossier }) {
     </dl>
     <section className="fb-bloc">
       <h3 className="fb-titre">Où en est le bien</h3>
-      <Frise phase={l.phase} issues />
-      {l.suite && <p className="fb-suite">Suite prévue : <b>{l.suite}</b></p>}
+      <Frise phase={l.phase} />
+      {/* 12/11 : une seule ligne — la suite choisie, ou « à décider » pendant la sortie (plus la légende des trois suites) */}
+      {(l.suite || l.phase === 'sortie') && <p className="fb-suite">Après la sortie : {l.suite ? <b>{l.suite}</b> : <span className="muted">à décider avec le bailleur</span>}</p>}
       <div className="fb-deux">
         <div>{l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
           {(l.etapes || []).filter((e) => e.info || e.info_direction).length > 0 && <ul className="muted" style={{ margin: '8px 0 0', paddingLeft: 18 }}>
