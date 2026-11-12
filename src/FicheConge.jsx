@@ -7,7 +7,8 @@ import React, { useEffect, useState } from 'react';
 import { rpc } from './supabase.js';
 
 const date = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
-const SUITE = { relouer: 'Relouer', reprise: 'Reprendre le bien', vente: 'Vendre' };
+// 150 : « Travaux avant relocation » : alerte à la gestion tant que le ticket Travaux n'est pas créé dans Rivage
+const SUITE = { relouer: 'Relouer', travaux: 'Travaux avant relocation', reprise: 'Reprendre le bien', vente: 'Vendre' };
 const VIDE = { recu_le: '', nouvelle_adresse: '', previsite: null, previsite_le: '', previsite_heure: '', edl_par: '', edl_commande_le: '',
   edl_le: '', edl_heure: '', edl_intervenant: '', suite: '', notes: '' };
 
