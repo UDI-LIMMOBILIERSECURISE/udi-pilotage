@@ -246,9 +246,10 @@ async function reprendre(service: SupabaseClient, debut: number) {
   const apres = Math.floor(new Date(r.depuis).getTime() / 1000)
   // Le curseur n'avance qu'après une page traitée en entier : une page interrompue est reprise au passage suivant
   // (les mails déjà gardés repassent vite, les autres ne coûtent qu'une lecture d'en-têtes)
-  let curseur = Math.floor(new Date(r.curseur).getTime() / 1000), vus = 0, gardes = 0, fini = false
+  let curseur = Math.floor(new Date(r.curseur).getTime() / 1000), vus = 0, gardes = 0, totalVus = 0, totalGardes = 0, fini = false
   while (Date.now() - debut < BUDGET_MS) {
-    const l = await gmail(r.boite, `messages?q=${encodeURIComponent(`after:${apres} before:${curseur} -in:chats -in:drafts -in:spam -in:trash`)}&maxResults=100`)
+    // Pages de 25 enregistrées une à une : la fonction peut être arrêtée par la plateforme avant la fin du budget
+    const l = await gmail(r.boite, `messages?q=${encodeURIComponent(`after:${apres} before:${curseur} -in:chats -in:drafts -in:spam -in:trash`)}&maxResults=25`)
     const ids: string[] = (l?.messages || []).map((m: { id: string }) => m.id)
     if (!ids.length) { fini = true; break }
     let plusAncien = curseur, complet = true
@@ -267,8 +268,11 @@ async function reprendre(service: SupabaseClient, debut: number) {
     }
     if (!complet) break
     curseur = plusAncien < curseur ? plusAncien : curseur - 1  // la fenêtre recule toujours
+    await service.rpc('pilotage_mails_reprise_maj', { p_boite: r.boite, p_curseur: new Date(curseur * 1000).toISOString(), p_vus: vus, p_gardes: gardes, p_fini: false })
+    totalVus += vus; totalGardes += gardes; vus = 0; gardes = 0
   }
-  await service.rpc('pilotage_mails_reprise_maj', { p_boite: r.boite, p_curseur: new Date(curseur * 1000).toISOString(), p_vus: vus, p_gardes: gardes, p_fini: fini })
+  if (fini) await service.rpc('pilotage_mails_reprise_maj', { p_boite: r.boite, p_curseur: new Date(curseur * 1000).toISOString(), p_vus: 0, p_gardes: 0, p_fini: true })
+  vus += totalVus; gardes += totalGardes
   return { boite: r.boite, vus, gardes, jusqu_au: new Date(curseur * 1000).toISOString().slice(0, 10), fini }
 }
 
