@@ -137,7 +137,14 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
   const corps = (texte.plain.trim() || sansHtml(texte.html)).slice(0, 60000)
   // 146 : référence [UDI L.. T..] insérée dans le texte par le module Gmail, prise en compte comme dans l'objet
   const refCorps = /\[UDI\s+L/i.test(objet) ? null : (corps.match(/\[UDI\s+L[A-Za-z0-9-]+(?:\s+T\d+)?\]/i) || [null])[0]
-  const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: refCorps ? `${objet} ${refCorps}` : objet, p_thread: g.threadId })
+  // 148 : mail envoyé — choix du dossier fait dans le module Gmail ; consommé dans tous les cas, utilisé seulement si la référence a disparu du mail
+  let refChoix: string | null = null
+  if (lab.includes('SENT')) {
+    const { data: ch } = await service.rpc('pilotage_mails_choix_prendre', { p_boite: boite, p_le: le, p_dest: externes, p_objet: objet, p_message_id: messageId })
+    if (ch && !refCorps && !/\[UDI\s+L/i.test(objet)) refChoix = ch as string
+  }
+  const refAjout = refCorps || refChoix
+  const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: refAjout ? `${objet} ${refAjout}` : objet, p_thread: g.threadId })
   if (error) throw new Error(error.message)
   if (!prep?.garder) return 'hors_rivage'
   const sens = lab.includes('SENT') ? 'envoye' : 'recu'
@@ -223,7 +230,43 @@ async function synchroniser(service: SupabaseClient) {
       bilan[b.adresse] = { erreur: msg }
     }
   }
+  // 148 : reprise d'historique avec le temps restant (du plus récent au plus ancien, une boîte à la fois)
+  try { const r = await reprendre(service, debut); if (r) bilan.reprise = r } catch (e) { console.error('[pilotage-mails] reprise', e) }
   return bilan
+}
+
+async function reprendre(service: SupabaseClient, debut: number) {
+  const { data } = await service.rpc('pilotage_mails_reprise_suivante')
+  const r = ((data || []) as { boite: string; depuis: string; curseur: string }[])[0]
+  if (!r || Date.now() - debut > BUDGET_MS - 20_000) return null
+  const prive = (await libelles(r.boite))[LIB_PRIVE]
+  const apres = Math.floor(new Date(r.depuis).getTime() / 1000)
+  // Le curseur n'avance qu'après une page traitée en entier : une page interrompue est reprise au passage suivant
+  // (les mails déjà gardés repassent vite, les autres ne coûtent qu'une lecture d'en-têtes)
+  let curseur = Math.floor(new Date(r.curseur).getTime() / 1000), vus = 0, gardes = 0, fini = false
+  while (Date.now() - debut < BUDGET_MS) {
+    const l = await gmail(r.boite, `messages?q=${encodeURIComponent(`after:${apres} before:${curseur} -in:chats -in:drafts -in:spam -in:trash`)}&maxResults=100`)
+    const ids: string[] = (l?.messages || []).map((m: { id: string }) => m.id)
+    if (!ids.length) { fini = true; break }
+    let plusAncien = curseur, complet = true
+    for (const id of ids) {
+      if (Date.now() - debut > BUDGET_MS) { complet = false; break }
+      // En-têtes seulement : un mail sans correspondant connu de Rivage n'est ni téléchargé ni lu
+      const m = await gmail(r.boite, `messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc`)
+      vus++
+      if (!m) continue
+      plusAncien = Math.min(plusAncien, Math.floor(Number(m.internalDate) / 1000))
+      const hd = (n: string) => (m.payload?.headers || []).filter((x: { name: string }) => x.name.toLowerCase() === n.toLowerCase()).map((x: { value: string }) => x.value).join(',')
+      const ext = [...new Set(adresses([hd('From'), hd('To'), hd('Cc')].join(',')).filter((x) => !DOMAINE_INTERNE.test(x)))]
+      if (!ext.length || (await service.rpc('pilotage_mails_connus', { p_emails: ext })).data !== true) continue
+      const st = await traiterMessage(service, r.boite, id, prive)
+      if (st === 'classe' || st === 'a_verifier') gardes++
+    }
+    if (!complet) break
+    curseur = plusAncien < curseur ? plusAncien : curseur - 1  // la fenêtre recule toujours
+  }
+  await service.rpc('pilotage_mails_reprise_maj', { p_boite: r.boite, p_curseur: new Date(curseur * 1000).toISOString(), p_vus: vus, p_gardes: gardes, p_fini: fini })
+  return { boite: r.boite, vus, gardes, jusqu_au: new Date(curseur * 1000).toISOString().slice(0, 10), fini }
 }
 
 Deno.serve(async (req) => {
@@ -243,7 +286,7 @@ Deno.serve(async (req) => {
 
   const auth = req.headers.get('Authorization'); if (!auth) return rep(401, { error: 'Non connecté' })
   const utilisateur = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } })
-  let c: { action?: string; id?: number; cle?: string } = {}
+  let c: { action?: string; id?: number; cle?: string; boite?: string; gmail_id?: string } = {}
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   try {
     // Les droits sont vérifiés en base avec la session de l'utilisateur
@@ -253,6 +296,15 @@ Deno.serve(async (req) => {
       const p = (m.pj_complet || []).find((x: { cle?: string }) => x.cle && x.cle === c.cle)
       if (!p) return rep(404, { error: 'Pièce jointe introuvable' })
       return rep(200, { ok: true, url: await r2('GET', p.cle) })
+    }
+    if (c.action === 'importer') {
+      // 148 : « Ajouter au pilotage » depuis le module Gmail (fonction pilotage-gmail, clé de service, personne déjà vérifiée)
+      if (auth !== `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return rep(403, { error: 'Accès refusé' })
+      const boite = String(c.boite || '').toLowerCase(), gid = String(c.gmail_id || '')
+      if (!/^[0-9a-f]{10,20}$/i.test(gid)) return rep(400, { error: 'Mail inconnu' })
+      if ((await service.rpc('pilotage_mails_boite_active', { p_boite: boite })).data !== true) return rep(400, { error: 'Cette boîte n\'est pas branchée au pilotage' })
+      const st = await traiterMessage(service, boite, gid, (await libelles(boite))[LIB_PRIVE])
+      return rep(200, { ok: true, statut: st })
     }
     if (c.action === 'etiqueter') {
       // Appel de la fonction pilotage-gmail (clé de service : droits déjà vérifiés par elle) ou d'un membre qui peut classer
