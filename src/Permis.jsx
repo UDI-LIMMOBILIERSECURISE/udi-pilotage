@@ -140,7 +140,9 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur, loue })
 }
 
 // Tâches et mises à jour du permis de louer d'un lot (126). Une tâche arrive dans Ma journée de la personne choisie le jour de son échéance.
-function FilPermis({ l, enCours, onErreur }) {
+// 157 : aussi pour la sortie d'un locataire (contexte « sortie ») : notes et tâches du lot, partagées
+export function FilLot({ asset, contexte, onErreur, titreNotes }) { return <FilPermis l={{ asset_id: asset }} contexte={contexte} onErreur={onErreur} titreNotes={titreNotes} />; }
+function FilPermis({ l, enCours, onErreur, contexte, titreNotes }) {
   const [f, setF] = useState(null);
   const [tache, setTache] = useState(null); // formulaire de nouvelle tâche
   const [note, setNote] = useState('');
@@ -151,8 +153,12 @@ function FilPermis({ l, enCours, onErreur }) {
   if (!f) return null;
   const erreur = (e) => (onErreur ? onErreur(e.message) : alert(e.message));
   const tacheAction = async (action, t, extra = {}) => {
-    try { await rpc('pilotage_permis_tache', { p_action: action, p_id: t?.id || null, p_asset: l.asset_id, p_demande: extra.demande || null,
-      p_libelle: extra.libelle || null, p_echeance: extra.echeance || null, p_assigne: extra.assigne || null }); await charger(); return true; }
+    try {
+      if (contexte) await rpc('pilotage_lot_tache', { p_action: action, p_id: t?.id || null, p_asset: l.asset_id,
+        p_libelle: extra.libelle || null, p_echeance: extra.echeance || null, p_assigne: extra.assigne || null, p_contexte: contexte });
+      else await rpc('pilotage_permis_tache', { p_action: action, p_id: t?.id || null, p_asset: l.asset_id, p_demande: extra.demande || null,
+        p_libelle: extra.libelle || null, p_echeance: extra.echeance || null, p_assigne: extra.assigne || null });
+      await charger(); return true; }
     catch (e) { erreur(e); return false; }
   };
   const ouvertes = f.taches.filter((t) => !t.faite_le);
@@ -164,7 +170,7 @@ function FilPermis({ l, enCours, onErreur }) {
     </div>
     {tache && <div className="row" style={{ marginTop: 4, alignItems: 'flex-end' }}>
       <label className="muted" style={{ flex: 1, minWidth: 200 }}>Tâche<br /><input value={tache.libelle} onChange={(e) => setTache({ ...tache, libelle: e.target.value })}
-        placeholder="Ex. relancer la mairie, transmettre le récépissé au locataire" style={{ width: '100%' }} autoFocus /></label>
+        placeholder={contexte === 'sortie' ? 'Ex. rappeler le bailleur, récupérer les clés chez le locataire' : 'Ex. relancer la mairie, transmettre le récépissé au locataire'} style={{ width: '100%' }} autoFocus /></label>
       <label className="muted">Pour<br /><select value={tache.assigne} onChange={(e) => setTache({ ...tache, assigne: e.target.value })}>
         {f.membres.map((m) => <option key={m.id} value={m.id}>{m.prenom}</option>)}</select></label>
       <label className="muted">Échéance<br /><input type="date" value={tache.echeance} onChange={(e) => setTache({ ...tache, echeance: e.target.value })} /></label>
@@ -180,10 +186,10 @@ function FilPermis({ l, enCours, onErreur }) {
       {!t.faite_le && <button className="lien" onClick={() => window.confirm('Supprimer cette tâche ?') && tacheAction('supprimer', t)}>Supprimer</button>}
     </div>)}
 
-    <div style={{ marginTop: 10 }}><b>Mises à jour{f.notes.length ? ` (${f.notes.length})` : ''}</b></div>
+    <div style={{ marginTop: 10 }}><b>{titreNotes || 'Mises à jour'}{f.notes.length ? ` (${f.notes.length})` : ''}</b></div>
     <div className="row" style={{ marginTop: 4, alignItems: 'flex-end' }}>
-      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Ajouter une mise à jour (appel à la mairie, pièce envoyée, réponse du bailleur…)" style={{ flex: 1, minWidth: 220 }} />
-      <button className="btn" disabled={busy || !note.trim()} onClick={async () => { setBusy(true); try { await rpc('pilotage_permis_note', { p_asset: l.asset_id, p_contenu: note, p_supprimer: null }); setNote(''); await charger(); } catch (e) { erreur(e); } setBusy(false); }}>Publier</button>
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder={contexte === 'sortie' ? 'Note de suivi (appel du bailleur, réponse du locataire, clés…)' : 'Ajouter une mise à jour (appel à la mairie, pièce envoyée, réponse du bailleur…)'} style={{ flex: 1, minWidth: 220 }} />
+      <button className="btn" disabled={busy || !note.trim()} onClick={async () => { setBusy(true); try { await (contexte ? rpc('pilotage_lot_note', { p_asset: l.asset_id, p_contenu: note, p_supprimer: null, p_contexte: contexte }) : rpc('pilotage_permis_note', { p_asset: l.asset_id, p_contenu: note, p_supprimer: null })); setNote(''); await charger(); } catch (e) { erreur(e); } setBusy(false); }}>Publier</button>
     </div>
     {f.notes.map((n) => <div key={n.id} style={{ borderLeft: '3px solid var(--line)', padding: '4px 8px', margin: '6px 0', fontSize: 13 }}>
       <div className="muted" style={{ fontSize: 12 }}>{n.auteur || '—'} · {new Date(n.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
