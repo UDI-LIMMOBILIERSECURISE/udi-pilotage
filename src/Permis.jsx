@@ -1,5 +1,6 @@
 // Permis de louer (038) : régime de chaque logement (table des communes, à l'adresse), demandes déposées et leur suivi,
 // mail préparé à la mairie pour l'attestation d'accord tacite, liste des pièces par régime.
+import { useBiens } from './Biens.jsx';
 import React, { useEffect, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { lienGmail } from './mails.js';
@@ -49,7 +50,8 @@ export default function PermisMandat({ m, onErreur }) {
 
 // Fiche du bail : permis de louer du lot du bail (suivi d'ensemble 052, filtré sur ce bail). Rien si le lot n'est pas soumis.
 // Fiche d'un ticket tagué PL ou DMEL : même bloc, retrouvé par le n° du lot (lot), avec un message si le lot n'est pas suivi.
-export function PermisBail({ bail, lot, onErreur }) {
+export function PermisBail({ bail, lot, onErreur, statut }) {
+  const biens = useBiens();
   const [x, setX] = useState(undefined);
   const [email, setEmail] = useState('');
   const [prenom, setPrenom] = useState('');
@@ -66,12 +68,16 @@ export function PermisBail({ bail, lot, onErreur }) {
     <div className="groupe-tete"><b>Permis de louer</b> <span className={'sev ' + (x.gravite || 'normale')} style={{ marginLeft: 6 }}>{x.etat}</span>
       {x.echeance && <span className="mono" style={{ marginLeft: 6, fontSize: 12 }}>échéance {date(x.echeance)}</span>}</div>
     {x.action && <div style={{ fontSize: 13, marginTop: 4 }}>{x.action}</div>}
-    {x.peut ? <LotPermis l={x} agir={agir} email={email} prenom={prenom} recharger={charger} onErreur={onErreur} />
+    {x.peut ? <LotPermis l={x} agir={agir} email={email} prenom={prenom} recharger={charger} onErreur={onErreur}
+        loue={/prochaine location/i.test(x.etat || '') && statut !== 'move_out' && biens.parId[x.asset_id]?.phase !== 'sortie'} />
       : <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{(x.demandes || []).length ? x.demandes.map((d) => `${d.regime === 'declaration' ? 'Déclaration' : 'Demande'} déposée le ${date(d.depot_le)}${d.reponse ? ' · ' + d.reponse + ' le ' + date(d.reponse_le) : ''}`).join(' ; ') : 'Aucune démarche enregistrée.'} Seule la gestion enregistre les démarches.</div>}
   </div>;
 }
 
-export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
+// 12/11 : loue = logement loué avec un permis déjà utilisé pour ce bail, sans congé : la prochaine démarche se fera à la relocation,
+// les boutons « Qui dépose ? », « Permis déjà obtenu » et « Demande déposée » ne sont pas proposés d'ici là. Dès le congé reçu
+// (bail en sortie dans Rivage, frise en « Sortie »), les questions reviennent pour redéposer avant la relocation (règle de Nicolas).
+export function LotPermis({ l, agir, email, prenom, recharger, onErreur, loue }) {
   const p = l.permis || {};
   const [modif, setModif] = useState(false);
   const modifiable = p.regime !== 'non_concerne' && !p.tag; // 132 : avec un tag PL ou DMEL, c'est le tag qui décide
@@ -84,7 +90,7 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
   const [pieces, setPieces] = useState(false);
   const [obtenu, setObtenu] = useState({ ouvert: false, le: '', numero: '' }); // permis déjà obtenu par le bailleur (095)
   const enCours = (l.demandes || []).find((d) => !d.close_le);
-  const soumis = ['autorisation', 'declaration', 'a_verifier'].includes(p.regime);
+  const soumis = ['autorisation', 'declaration', 'a_verifier'].includes(p.regime) && !loue;
   return <div style={{ borderTop: '1px solid var(--line)', padding: '8px 0', fontSize: 13 }}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <div><b>Lot {l.lot}</b><span className="muted"> · {l.adresse}</span></div>
@@ -109,7 +115,8 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
       {l.choix !== 'agence' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_agence', p_le: null, p_numero: null, p_notes: null })}>{p.regime === 'declaration' ? 'L’agence dépose' : 'L’agence dépose (90 € TTC)'}</button>}
       {l.choix !== 'bailleur' && <button className="btn" onClick={() => agir({ p_asset: l.asset_id, p_demande: null, p_action: 'choix_bailleur', p_le: null, p_numero: null, p_notes: null })}>Le bailleur dépose</button>}
     </div>}
-    {['autorisation', 'a_verifier'].includes(p.regime) && !enCours && (obtenu.ouvert
+    {loue && <div className="muted" style={{ marginTop: 4 }}>Rien à faire tant que le logement est loué : la démarche se fera à la prochaine mise en location.</div>}
+    {['autorisation', 'a_verifier'].includes(p.regime) && !enCours && !loue && (obtenu.ouvert
       ? <div className="row" style={{ marginTop: 4 }}>
           <label className="muted">Permis obtenu le <input type="date" value={obtenu.le} max={auj()} onChange={(e) => setObtenu({ ...obtenu, le: e.target.value })} /></label>
           <input placeholder="N° du permis (facultatif)" value={obtenu.numero} onChange={(e) => setObtenu({ ...obtenu, numero: e.target.value })} style={{ width: 170 }} />
@@ -128,7 +135,7 @@ export function LotPermis({ l, agir, email, prenom, recharger, onErreur }) {
     </div>)}
     {pieces && <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: 12 }}>{(PIECES[p.regime === 'declaration' ? 'declaration' : 'autorisation']).map((x) => <li key={x}>{x}</li>)}
       {p.email_depot && <li>Dossier complet à transmettre à : {p.email_depot}{p.adresse_depot ? ' (' + p.adresse_depot + ')' : ''}</li>}</ul>}
-    {soumis && <FilPermis l={l} enCours={enCours} onErreur={onErreur} />}
+    {['autorisation', 'declaration', 'a_verifier'].includes(p.regime) && <FilPermis l={l} enCours={enCours} onErreur={onErreur} />}
   </div>;
 }
 
