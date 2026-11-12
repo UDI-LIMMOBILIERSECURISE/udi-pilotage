@@ -1,7 +1,8 @@
 // Page « Biens » (136) : chaque lot sur une frise en quatre phases déduites de Rivage (entrée en gestion, mise en location, bail en cours,
 // sortie), avec le détail de la phase en cours. Compteurs par phase en tête, filtre « À moi » (lots dont je suis le commercial ou qui
 // portent une alerte qui m'est adressée). Lecture seule : un clic ouvre la fiche existante du mandat ou du bail.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { MoiContexte } from './moi.js';
 import { rpc } from './supabase.js';
 import Fiche from './Fiche.jsx';
 import DossierMandat from './SuiviMandat.jsx';
@@ -9,6 +10,7 @@ import { DossierBail } from './SuiviBaux.jsx';
 import { nature, texteRecherche, correspond } from './cartes.jsx';
 import { SuiviSinistre, ORIGINE } from './TicketsFil.jsx';
 import { EchangesLot } from './Echanges.jsx';
+import { ClesLots } from './Cles.jsx';
 
 export const PHASES = [
   ['entree', 'Entrée en gestion'],
@@ -80,24 +82,38 @@ export default function Biens({ moi }) {
   </>;
 }
 
-function LigneBien({ l, ouvrir, peut, apres }) {
+// Ligne d'un lot (page Biens, et depuis le 12/11/2026 toutes les pages à lots) : frise, étapes, action en cours.
+// Une page ajoute ce qui lui est propre : entete (petite ligne au-dessus du titre), etiquettes (à droite), complement (sous le titre).
+// Sans lot connu (ticket d'immeuble, clés sans lot), la ligne garde la même forme avec le seul contenu de la page.
+export function LigneLot({ l, ouvrir, peut, apres, entete, etiquettes, complement, gravite, titre, sel }) {
+  const clic = { role: 'button', tabIndex: 0, onClick: ouvrir, onKeyDown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) ouvrir(); } };
+  if (!l) return <div className={'kcarte bien ' + (gravite || 'normale') + (sel ? ' sel' : '')} {...clic}>
+    {entete && <div className="lot-entete">{entete}</div>}
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="kcarte-titre" style={{ marginTop: 0, minWidth: 0 }}>{titre || 'Sans lot Rivage'}</div>
+      {etiquettes && <div className="row" style={{ gap: 6 }}>{etiquettes}</div>}
+    </div>
+    {complement && <div className="lot-complement">{complement}</div>}
+  </div>;
   const etape = l.etape != null ? (l.etapes || [])[l.etape] : null;
   const af = l.a_faire;
   const alerte = (l.etapes || []).some((e) => e.etat === 'alerte');
-  return <div className={'kcarte bien ' + (alerte ? 'haute' : 'normale')} role="button" tabIndex={0} onClick={ouvrir}
-    onKeyDown={(e) => { if (e.key === 'Enter') ouvrir(); }}>
+  return <div className={'kcarte bien ' + (gravite || (alerte ? 'haute' : 'normale')) + (sel ? ' sel' : '')} {...clic}>
+    {entete && <div className="lot-entete">{entete}</div>}
     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
       <div style={{ minWidth: 0 }}>
         <div className="kcarte-titre" style={{ marginTop: 0 }}>Lot {l.lot || '?'} · {l.adresse || 'adresse ?'}</div>
         <div className="muted">{nature(l.nature)} · {l.bailleur || 'bailleur ?'}{l.locataires ? ' · ' + l.locataires : ''}{l.commercial ? ' · ' + l.commercial : ''}</div>
       </div>
       <div className="row" style={{ gap: 6 }}>
+        {etiquettes}
         {l.alertes_moi > 0 && <span className="etq rose">{l.alertes_moi} alerte{l.alertes_moi > 1 ? 's' : ''} pour moi</span>}
         {l.fin_gestion && <span className="etq violet">Fin de gestion le {date(l.fin_gestion)}</span>}
         {(l.suite || l.relocation) && <span className="etq ok">{l.suite || l.relocation}</span>}
         {l.a_cloturer > 0 && <span className="etq rose" title="Bail resté en sortie dans Rivage plus de 2 mois après le départ">{l.a_cloturer} bail à clôturer</span>}
       </div>
     </div>
+    {complement && <div className="lot-complement">{complement}</div>}
     <Frise phase={l.phase} />
     {l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
     {af && <div className={'a-faire' + (l.a_moi ? ' moi' : '') + (af.urgent ? ' urgent' : '')}>
@@ -107,6 +123,34 @@ function LigneBien({ l, ouvrir, peut, apres }) {
     {peut && af?.action?.startsWith('Mettre le lot') && <MettreEnLocation l={l} apres={apres} />}
   </div>;
 }
+const LigneBien = LigneLot;
+
+// Liste des biens lue une fois et partagée entre les pages (gardée 60 s) : chaque page retrouve le lot de ses dossiers
+// par n° de lot Rivage (référence unique), identifiant du lot ou mandat.
+let memoBiens = null;
+export function useBiens() {
+  const [d, setD] = useState(memoBiens?.d || null);
+  const lire = (forcer) => {
+    if (!forcer && memoBiens && Date.now() - memoBiens.t < 60000) { setD(memoBiens.d); return Promise.resolve(); }
+    return rpc('pilotage_biens').then((x) => { memoBiens = { d: x, t: Date.now() }; setD(x); }).catch(() => setD((v) => v || { lots: [], peut: false }));
+  };
+  useEffect(() => { lire(false); }, []);
+  const index = useMemo(() => {
+    const parRef = {}, parId = {}, parMandat = {};
+    (d?.lots || []).forEach((l) => { parRef[String(l.lot)] = l; parId[l.id] = l; if (l.mandat_id) (parMandat[l.mandat_id] = parMandat[l.mandat_id] || []).push(l); });
+    return { parRef, parId, parMandat };
+  }, [d]);
+  return { d, ...index, lot: (ref) => (ref == null ? null : index.parRef[String(ref)] || null), peut: !!d?.peut, recharger: () => lire(true) };
+}
+
+// Fiche ouverte depuis une page : la fiche du bien, avec le dossier propre à la page juste après « Où en est le bien ».
+// sansDossier : la page montre déjà le dossier complet (bail, mandat), on ne le répète pas en bas de la fiche.
+export function FicheLot({ l, titre, peut, apres, sansDossier, children }) {
+  if (!l) return children;
+  return <FicheBien l={l} peut={peut} apres={apres} sansDossier={sansDossier} bloc={children && <section className="fb-bloc fb-page">
+    {titre && <h3 className="fb-titre">{titre}</h3>}{children}</section>} />;
+}
+export const titreLot = (l, defaut) => (l ? 'Lot ' + (l.lot || '') + ' · ' + (l.adresse || '') : defaut);
 
 // Mise en location depuis la ligne du bien (même effet que le bouton de la page « À louer ») : gestion et direction
 function MettreEnLocation({ l, apres }) {
@@ -154,19 +198,25 @@ export function Frise({ phase, issues = false }) {
 
 // Détail de la phase en cours : chaque étape avec son état (fait, en cours, à venir, alerte)
 const MARQUE = { fait: '✓', en_cours: '●', alerte: '!', a_venir: '○' };
+// 12/11 : une étape non faite dit ce qui reste à faire (« Bail signé » en cours se lisait comme un bail déjà signé, lot 140)
+const A_FAIRE = { 'Bail signé': 'Bail à signer', 'Dépôt de garantie restitué': 'Dépôt de garantie à restituer', 'Bail clos dans Rivage': 'Bail à clôturer dans Rivage',
+  'Mis en location': 'À mettre en location' };
+const libelleEtape = (e) => (e.etat !== 'fait' && A_FAIRE[e.libelle]) || e.libelle;
 export function Etapes({ etapes, courante }) {
   if (!etapes?.length) return null;
   return <ol className="etapes">
     {etapes.map((e, n) => <li key={n} className={'etape e-' + e.etat + (n === courante ? ' courante' : '')} title={e.info || ''}>
       <span className="etape-marque" aria-hidden="true">{MARQUE[e.etat] || '○'}</span>
-      <span>{e.libelle}{e.date ? ' · ' + date(e.date) : ''}</span>
+      <span>{libelleEtape(e)}{e.date ? ' · ' + date(e.date) : ''}</span>
       <span className="sr">{{ fait: ' (fait)', en_cours: ' (en cours)', alerte: ' (à traiter)', a_venir: ' (à venir)' }[e.etat]}</span>
     </li>)}
   </ol>;
 }
 
 // Fiche unique du bien (refonte du 11/11/2026) : en-tête, frise et suites, action en cours, dossiers ouverts, puis le dossier complet
-export function FicheBien({ l, peut, moi, apres }) {
+export function FicheBien({ l, peut, moi: moiPage, apres, bloc, sansDossier }) {
+  const moiCtx = useContext(MoiContexte);
+  const moi = moiPage || moiCtx;
   const [x, setX] = useState(null);
   const [err, setErr] = useState('');
   const charger = () => rpc('pilotage_bien', { p_asset: l.id }).then(setX).catch((e) => setErr(e.message));
@@ -194,7 +244,7 @@ export function FicheBien({ l, peut, moi, apres }) {
       <div className="fb-deux">
         <div>{l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
           {(l.etapes || []).filter((e) => e.info || e.info_direction).length > 0 && <ul className="muted" style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-            {l.etapes.filter((e) => e.info || e.info_direction).map((e, n) => <li key={n}>{e.libelle} : {e.info_direction || e.info}</li>)}</ul>}</div>
+            {l.etapes.filter((e) => e.info || e.info_direction).map((e, n) => <li key={n}>{libelleEtape(e)} : {e.info_direction || e.info}</li>)}</ul>}</div>
         {af && <div className={'fb-action' + (af.urgent ? ' urgent' : '') + (l.a_moi ? ' moi' : '')}>
           <div className="fb-action-qui">{l.a_moi ? 'À vous, maintenant' : 'À faire par ' + af.prenom}</div>
           <div className="fb-action-quoi">{af.action}</div>
@@ -203,21 +253,24 @@ export function FicheBien({ l, peut, moi, apres }) {
         </div>}
       </div>
     </section>
+    {bloc}
     {err && <div className="banner">{err}</div>}
     <section className="fb-bloc">
       <h3 className="fb-titre">Dossiers ouverts sur ce bien</h3>
       {!x ? <p className="muted">Chargement…</p> : <Dossiers x={x} l={l} recharger={charger} />}
     </section>
+    {/* 12/11 : clés du lot sur toutes les fiches : n° du trousseau, prise et retour, ajout (n° libres proposés) */}
+    <section className="fb-bloc"><h3 className="fb-titre">Clés</h3><ClesLots assets={[l.id]} ouvert /></section>
     <HistoriqueTickets l={l} />
     <EchangesLot lotId={l.id} />
-    <details className="fb-bloc fb-complet" open={!!(af && (af.action || '').match(/contrôle|dossier|GO/i))}>
+    {!sansDossier && <details className="fb-bloc fb-complet" open={!!(af && (af.action || '').match(/contrôle|dossier|GO/i))}>
       <summary>Dossier complet du {l.bail_id ? 'bail' : 'mandat'} (contrôle, suivis, messages)</summary>
       {l.bail_id
         ? <DossierBail b={{ bail_id: l.bail_id, reference: l.bail, locataires: l.locataires, adresse: l.adresse, bailleur: l.bailleur, mandat: l.mandat ? 'Mandat n°' + l.mandat : null, mandat_id: l.mandat_id }}
             peut={peut} moi={moi} apres={apres} />
         : l.mandat_id ? <DossierMandat m={{ id: l.mandat_id }} apres={apres} />
         : <p className="muted">Aucun mandat ni bail rattaché à ce lot dans Rivage.</p>}
-    </details>
+    </details>}
   </div>;
 }
 
@@ -250,11 +303,9 @@ function Dossiers({ x, l, recharger }) {
   if (x.assurance) cartes.push(<article key="assurance" className="fb-carte"><header><div><h4>Assurance habitation du locataire</h4><div className="muted">Relance automatique</div></div></header>
     <div className="fb-carte-pied"><span>Prochaine échéance le {date(x.assurance.prochaine)}</span>
       {new Date(x.assurance.prochaine) <= new Date(Date.now() + 45 * 864e5) && <span className="etq rose">Relances en cours</span>}</div></article>);
-  cartes.push(<article key="cles" className="fb-carte fb-carte-mini"><header><div><h4>Clés</h4>
-    <div className="muted">{x.trousseaux ? x.trousseaux + ' trousseau(x) enregistré(s) à l’agence' : 'Aucun trousseau enregistré à l’agence'}</div></div></header></article>);
   return <>
     <div className="fb-cartes">{cartes}</div>
-    {cartes.length === 1 && <p className="muted">Ni ticket, ni impayé, ni relance d’assurance : les cartes n’apparaissent que s’il y a un dossier.</p>}
+    {!cartes.length && <p className="muted">Aucun dossier ouvert : ni ticket, ni impayé, ni relance d’assurance en cours sur ce bien.</p>}
     <DonneesACorriger l={l} liste={x.donnees || []} recharger={recharger} />
   </>;
 }
