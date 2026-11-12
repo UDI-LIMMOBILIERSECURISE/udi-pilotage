@@ -36,7 +36,10 @@ function blocLot(l) {
   var t = '<b>Lot ' + l.lot + '</b> · ' + (l.adresse || '');
   if (l.bail) t += '<br>Bail ' + l.bail + (l.locataires ? ' · ' + l.locataires : '');
   if (l.bailleur) t += '<br>Bailleur : ' + l.bailleur;
-  if ((l.tickets || []).length) t += '<br>Tickets ouverts : ' + l.tickets.map(function (x) { return 'n°' + x.numero + ' ' + (x.titre || ''); }).join(' ; ');
+  if ((l.tickets || []).length) t += '<br>Tickets ouverts : ' + l.tickets.map(function (x) {
+    var p = (x.prestataires || []).map(function (y) { return y.nom; }).join(', ');
+    return 'n°' + x.numero + ' ' + (x.titre || '') + (p ? ' (' + p + ')' : '');
+  }).join(' ; ');
   return CardService.newTextParagraph().setText(t);
 }
 
@@ -110,7 +113,7 @@ function classer(e) {
 // ---------- Recherche (accueil, lecture et écriture) ----------
 function sectionRecherche(q, redaction, mailId) {
   var s = CardService.newCardSection().setHeader(redaction ? 'Dossier du mail' : 'Chercher un lot');
-  s.addWidget(CardService.newTextInput().setFieldName('q').setTitle('N° de lot, adresse, locataire, bailleur ou n° de ticket').setValue(q || ''));
+  s.addWidget(CardService.newTextInput().setFieldName('q').setTitle('N° de lot, adresse, locataire, bailleur, prestataire ou n° de ticket').setValue(q || ''));
   s.addWidget(CardService.newTextButton().setText('Rechercher')
     .setOnClickAction(CardService.newAction().setFunctionName('rechercher').setParameters({ redaction: redaction ? '1' : '', mail_id: mailId ? String(mailId) : '' })));
   return s;
@@ -130,6 +133,9 @@ function carteRecherche(q, redaction, mailId, lots) {
         (l.tickets || []).forEach(function (t) {
           bs.addButton(CardService.newTextButton().setText('Réf. ticket n°' + t.numero)
             .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: ref(l.lot, t.numero) })));
+          var pre = (t.prestataires || []).map(function (x) { return x.email; }).filter(Boolean);
+          if (pre.length) bs.addButton(CardService.newTextButton().setText('À : prestataire n°' + t.numero)
+            .setOnClickAction(CardService.newAction().setFunctionName('ajouterDest').setParameters({ emails: pre.join(',') })));
         });
         var loc = ((l.contacts || {}).locataires || []).map(function (x) { return x.email; }).filter(Boolean);
         var bai = ((l.contacts || {}).bailleurs || []).map(function (x) { return x.email; }).filter(Boolean);

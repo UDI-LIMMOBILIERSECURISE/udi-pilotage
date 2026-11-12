@@ -20,7 +20,10 @@ language sql stable security definer set search_path to 'pilotage', 'public' as 
     'bail', vb.reference, 'locataires', vb.locataires,
     'bailleur', pilotage.bailleurs_mandat(l.mandat_id),
     'contacts', coalesce(pilotage.contacts_bail(vb.id), pilotage.contacts_mandat(l.mandat_id)),
-    'tickets', (select coalesce(jsonb_agg(jsonb_build_object('ticket_id', i.id, 'numero', i.data->>'number', 'titre', i.data->>'title') order by i.data->>'declared_at' desc), '[]'::jsonb)
+    'tickets', (select coalesce(jsonb_agg(jsonb_build_object('ticket_id', i.id, 'numero', i.data->>'number', 'titre', i.data->>'title',
+                    'prestataires', (select coalesce(jsonb_agg(jsonb_build_object('nom', coalesce(pilotage.nom_profil(c), 'Prestataire'), 'email', pr.data->>'email')), '[]'::jsonb)
+                                       from jsonb_array_elements_text(coalesce(i.data->'contractor_ids', '[]'::jsonb)) c
+                                       left join pilotage.objets pr on pr.type = 'Profile' and pr.id = c)) order by i.data->>'declared_at' desc), '[]'::jsonb)
                   from pilotage.objets i where i.type = 'Incident' and i.supprime_le is null and i.data->>'asset_id' = l.id
                    and coalesce(i.data->>'status', '') not in ('closed', 'resolved', 'cancelled') and i.data->>'archived_at' is null))
   from pilotage.v_lots l left join pilotage.v_baux vb on vb.id = pilotage.mails_bail_a(l.id, current_date)
@@ -58,7 +61,11 @@ begin
         left join pilotage.v_baux vb on vb.id = pilotage.mails_bail_a(l.id, current_date)
        where l.reference = q or l.adresse ilike '%' || q || '%' or vb.locataires ilike '%' || q || '%' or pilotage.bailleurs_mandat(l.mandat_id) ilike '%' || q || '%'
           or vb.reference = q
-          or exists (select 1 from pilotage.objets i where i.type = 'Incident' and i.data->>'asset_id' = l.id and (i.data->>'number' = q or i.data->>'title' ilike '%' || q || '%'))
+          or exists (select 1 from pilotage.objets i where i.type = 'Incident' and i.data->>'asset_id' = l.id
+                      and coalesce(i.data->>'status', '') not in ('closed', 'resolved', 'cancelled') and i.data->>'archived_at' is null
+                      and (i.data->>'number' = q or i.data->>'title' ilike '%' || q || '%'
+                           or exists (select 1 from jsonb_array_elements_text(coalesce(i.data->'contractor_ids', '[]'::jsonb)) c
+                                       where pilotage.nom_profil(c) ilike '%' || q || '%')))
        order by (l.reference = q) desc, l.adresse limit 12) t), '[]'::jsonb);
 end $$;
 
