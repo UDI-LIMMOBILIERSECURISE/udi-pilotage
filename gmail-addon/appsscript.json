@@ -1,0 +1,28 @@
+{
+  "timeZone": "Europe/Paris",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/gmail.addons.execute",
+    "https://www.googleapis.com/auth/gmail.addons.current.message.metadata",
+    "https://www.googleapis.com/auth/gmail.addons.current.action.compose",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid"
+  ],
+  "urlFetchWhitelist": ["https://tanupqmphxadaxeksxjh.supabase.co/"],
+  "addOns": {
+    "common": {
+      "name": "Pilotage UDI",
+      "logoUrl": "https://udi-pilotage.vercel.app/logo-udi.png",
+      "homepageTrigger": { "runFunction": "accueil" }
+    },
+    "gmail": {
+      "contextualTriggers": [{ "unconditional": {}, "onTriggerFunction": "surMessage" }],
+      "composeTrigger": {
+        "selectActions": [{ "text": "Pilotage UDI", "runFunction": "surRedaction" }],
+        "draftAccess": "METADATA"
+      }
+    }
+  }
+}

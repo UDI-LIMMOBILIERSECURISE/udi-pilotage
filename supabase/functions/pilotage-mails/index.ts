@@ -132,13 +132,14 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
   const externes = [...new Set([de, ...a, ...cc].filter((x) => x && !DOMAINE_INTERNE.test(x)))]
   if (!externes.length) return 'interne'
   const le = new Date(Number(g.internalDate)).toISOString(), objet = h('Subject')
-  const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: objet, p_thread: g.threadId })
-  if (error) throw new Error(error.message)
-  if (!prep?.garder) return 'hors_rivage'
-
   const texte = { plain: '', html: '' }, parts: Part[] = []
   parcourir(g.payload, texte, parts)
   const corps = (texte.plain.trim() || sansHtml(texte.html)).slice(0, 60000)
+  // 146 : référence [UDI L.. T..] insérée dans le texte par le module Gmail, prise en compte comme dans l'objet
+  const refCorps = /\[UDI\s+L/i.test(objet) ? null : (corps.match(/\[UDI\s+L[A-Za-z0-9-]+(?:\s+T\d+)?\]/i) || [null])[0]
+  const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: refCorps ? `${objet} ${refCorps}` : objet, p_thread: g.threadId })
+  if (error) throw new Error(error.message)
+  if (!prep?.garder) return 'hors_rivage'
   const sens = lab.includes('SENT') ? 'envoye' : 'recu'
   const pj: { nom: string; type: string; taille: number; cle?: string; omis?: string }[] = []
   for (const p of parts) {
@@ -254,7 +255,9 @@ Deno.serve(async (req) => {
       return rep(200, { ok: true, url: await r2('GET', p.cle) })
     }
     if (c.action === 'etiqueter') {
-      if ((await utilisateur.rpc('pilotage_mails_peut_classer')).data !== true) return rep(403, { error: 'Accès refusé' })
+      // Appel de la fonction pilotage-gmail (clé de service : droits déjà vérifiés par elle) ou d'un membre qui peut classer
+      const interne = auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+      if (!interne && (await utilisateur.rpc('pilotage_mails_peut_classer')).data !== true) return rep(403, { error: 'Accès refusé' })
       const { data: x } = await service.rpc('pilotage_mail_gmail', { p_id: c.id })
       for (const [boite, gid] of Object.entries((x?.boites || {}) as Record<string, string>)) {
         await (x.statut === 'ignore' ? (async () => { const l = await libelles(boite)
