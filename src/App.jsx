@@ -1070,7 +1070,7 @@ function Sinistres() {
         {!ferme && <div className="stack" style={{ gap: 8, marginBottom: 12 }}>{items.map((x) => { const u = URG[x.urgence] || [x.urgence, 'normale'];
           return <LigneLot key={x.id} l={biens.lot(x.lot)} sel={sel === x.id} gravite={!x.clos && x.jours > 15 ? 'critique' : u[1]} ouvrir={() => setSel(x.id)}
             titre={x.adresse || immeubles[x.id]?.libelle || 'Immeuble, pas de lot précis'}
-            entete={(immeubles[x.id] && !x.lot ? 'Ticket d’immeuble (' + immeubles[x.id].lots.length + ' lots) · ' : '') + (x.source === 'monday' ? ORIGINE(x) + (x.reference ? ' · ' + x.reference : '') : 'Ticket #' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type || 'type ?')) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}
+            entete={(immeubles[x.id] && !x.lot ? 'Ticket d’immeuble · ' : '') + (x.source === 'monday' ? ORIGINE(x) + (x.reference ? ' · ' + x.reference : '') : 'Ticket #' + x.numero + ' · ' + (TYPE_INC[x.type] || x.type || 'type ?')) + (x.nb_notes ? ' · 💬 ' + x.nb_notes : '')}
             etiquettes={<><span className={'statut-inc ' + colonneDe(x)}>{x.clos ? (ST_INC[x.statut] || 'Clos') : x.statut_monday || ST_INC[x.statut] || x.statut}</span>{u[0] && <span className={'sev ' + u[1]}>{u[0]}</span>}</>}
             complement={<>
               <div><b>{x.titre}</b></div>
@@ -1087,20 +1087,15 @@ function Sinistres() {
   </>;
 }
 
-// 152 : fiche d'un ticket : fiche du bien pour un ticket de lot ; pour un ticket d'immeuble (sans lot), l'immeuble et ses lots,
-// puis le dossier du ticket (fil, mails rattachés)
+// 152 : fiche d'un ticket : fiche du bien pour un ticket de lot ; pour un ticket d'immeuble (sans lot, parties communes : aucun lot
+// concerné, règle de Nicolas du 12/11), l'immeuble puis le dossier du ticket (fil, mails rattachés)
 function FicheTicketLieu({ l, imm, biens, titre, children }) {
   if (l || !imm) return <FicheLot l={l} titre={titre} peut={biens.peut} apres={biens.recharger}>{children}</FicheLot>;
   return <div className="fiche-bien">
     <div className="fb-etiquettes"><span className="etq neutre">Ticket d’immeuble</span></div>
     <section className="fb-bloc">
       <h3 className="fb-titre">{imm.libelle}</h3>
-      <p className="muted" style={{ margin: '0 0 8px' }}>Ticket créé dans Rivage sur l’immeuble, sans lot : il concerne les {imm.lots.length} lots ci-dessous. Les mails rattachés à ce ticket apparaissent aussi dans les échanges de chacun de ces lots.</p>
-      <div className="stack" style={{ gap: 6 }}>{imm.lots.map((x) => { const b = biens.parId[x.id];
-        return <div key={x.id} className="row" style={{ gap: 8, justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 6 }}>
-          <span><b>Lot {x.lot}</b> · {x.adresse}{b?.locataires ? ' · ' + b.locataires : ''}</span>
-          {b && <span className={'etq phase-' + b.phase}>{{ entree: 'Entrée en gestion', location: 'Mise en location', bail: 'Bail en cours', sortie: 'Sortie', travaux: 'Travaux avant relocation', fin: 'Fin de gestion', hors: 'Hors gestion' }[b.phase]}</span>}
-        </div>; })}</div>
+      <p className="muted" style={{ margin: 0 }}>Ticket créé dans Rivage sur l’immeuble (parties communes), sans lot concerné. Les mails rattachés à ce ticket sont dans son fil ci-dessous.</p>
     </section>
     <section className="fb-bloc fb-page">{titre && <h3 className="fb-titre">{titre}</h3>}{children}</section>
   </div>;

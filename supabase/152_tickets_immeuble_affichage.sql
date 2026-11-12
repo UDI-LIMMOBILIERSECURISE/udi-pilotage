@@ -1,10 +1,12 @@
 -- 152 : tickets d'immeuble dans le pilotage (constat de Nicolas du 12/11/2026 : ticket n°42 affiché à l'ancienne, mails non vus)
 --  - pilotage_tickets_immeubles() : pour chaque ticket créé sur un immeuble sans lot, l'immeuble et ses lots (page Tickets : ligne et
 --    fiche de l'immeuble au lieu de « Immeuble, pas de lot précis ») ;
---  - lecture des mails : un mail d'un prestataire est rattaché d'abord au ticket OUVERT dont il est prestataire (sur le lot ou sur
---    l'immeuble du lot) ; avant, le premier ticket trouvé, même clos (au 12/11, deux bons d'intervention 2PCJ rangés sur le ticket n°44
---    clos du lot 188 alors que 2PCJ intervient sur le ticket d'immeuble n°42). Un ticket d'immeuble trouvé ainsi range le mail sur
---    l'immeuble, sans lot.
+--  - règle de Nicolas (12/11) : un ticket d'immeuble ne concerne aucun lot en particulier (parties communes) ; les lots de l'immeuble
+--    ne sont pas concernés. Un mail de prestataire va au ticket du LOT dont il est prestataire (ouvert d'abord, sinon le plus récent,
+--    même clos : cas des deux bons 2PCJ du lot 188, ticket n°44, laissés tels quels) ; le ticket d'immeuble n'est retenu que si le
+--    prestataire n'a aucun ticket sur le lot, et le mail est alors rangé sur l'immeuble, sans lot ;
+--  - les mails rattachés à un ticket d'immeuble ne sont plus montrés dans les échanges des lots de l'immeuble (ils restent dans le
+--    fil du ticket) : retour sur le 151.
 --  Bloc unique.
 
 begin;
@@ -76,18 +78,28 @@ begin
                      and (i.data->>'declared_at')::date <= j + 1
                      and (i.data->>'resolved_at' is null or (i.data->>'resolved_at')::date >= j - 30)))), '[]'::jsonb)
     into cand from pilotage.v_lots l where l.id = any(coalesce(lots, '{}'));
-  -- 152 : prestataire d'un ticket ouvert d'abord (lot ou immeuble du lot), puis l'annuaire (ticket ouvert avant ticket clos)
+  -- 152 : ticket du lot dont l'expéditeur est prestataire (ouvert d'abord, puis le plus récent même clos) ;
+  -- le ticket d'immeuble seulement si le prestataire n'a aucun ticket sur le lot
   select i.id into v_ticket from pilotage.objets i
-   where i.type = 'Incident' and i.supprime_le is null and coalesce(i.data->>'status', '') not in ('closed', 'resolved', 'cancelled') and i.data->>'archived_at' is null
-     and exists (select 1 from unnest(coalesce(lots, '{}')) x where pilotage.ticket_du_lot(i.data, x))
+   where i.type = 'Incident' and i.supprime_le is null and i.data->>'asset_id' = any(coalesce(lots, '{}'))
      and exists (select 1 from jsonb_array_elements_text(coalesce(i.data->'contractor_ids', '[]'::jsonb)) c
                    join pilotage.objets pr on pr.type = 'Profile' and pr.id = c
                   where lower(pr.data->>'email') = any(select lower(trim(x)) from unnest(p_emails) x))
-   order by coalesce(i.data->>'asset_id', '') = '', i.data->>'declared_at' desc limit 1;
+   order by coalesce(i.data->>'status', '') not in ('closed', 'resolved', 'cancelled') desc, i.data->>'declared_at' desc limit 1;
   if v_ticket is null then
     select a.ticket_id into v_ticket from pilotage.mails_annuaire(p_emails) a where a.role = 'prestataire' and a.lot_id = any(coalesce(lots, '{}'))
        and (a.debut is null or a.debut <= j) and (a.fin is null or a.fin >= j)
      order by (select coalesce(i.data->>'status', '') not in ('closed', 'resolved', 'cancelled') from pilotage.objets i where i.id = a.ticket_id) desc nulls last limit 1;
+  end if;
+  if v_ticket is null then
+    select i.id into v_ticket from pilotage.objets i
+     where i.type = 'Incident' and i.supprime_le is null and coalesce(i.data->>'asset_id', '') = ''
+       and coalesce(i.data->>'status', '') not in ('closed', 'resolved', 'cancelled') and i.data->>'archived_at' is null
+       and exists (select 1 from unnest(coalesce(lots, '{}')) x where pilotage.ticket_du_lot(i.data, x))
+       and exists (select 1 from jsonb_array_elements_text(coalesce(i.data->'contractor_ids', '[]'::jsonb)) c
+                     join pilotage.objets pr on pr.type = 'Profile' and pr.id = c
+                    where lower(pr.data->>'email') = any(select lower(trim(x)) from unnest(p_emails) x))
+     order by i.data->>'declared_at' desc limit 1;
   end if;
   -- 152 : ticket d'immeuble trouvé par le prestataire : rattachement à l'immeuble, sans lot
   grp := pilotage.ticket_immeuble(v_ticket);
@@ -107,6 +119,14 @@ begin
     end if;
   end if;
   return jsonb_build_object('garder', true, 'parties', corr, 'certain', false, 'candidats', cand);
+end $$;
+
+-- Échanges d'un lot : ses seuls mails (un mail rattaché à un ticket d'immeuble reste dans le fil du ticket)
+create or replace function public.pilotage_mails_lot(p_asset text) returns jsonb
+language plpgsql stable security definer set search_path to 'pilotage', 'public' as $$
+begin
+  if pilotage.mon_role() is null or not pilotage.voit_tableau('sinistres', (select mandat_id from pilotage.v_lots where id = p_asset)) then raise exception 'Accès refusé'; end if;
+  return coalesce((select jsonb_agg(pilotage.mails_ligne(m) order by m.le desc) from pilotage.mails m where m.lot_id = p_asset and m.statut = 'classe'), '[]'::jsonb);
 end $$;
 
 commit;
