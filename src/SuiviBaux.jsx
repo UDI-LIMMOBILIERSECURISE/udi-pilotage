@@ -277,17 +277,15 @@ function ParcoursEntree({ d, b, peut, moi, agir, ouvrirMail, recharger, apres, e
           vides.length ? `${vides.length} champ(s) vide(s) dans Rivage` : null].filter(Boolean).join(' · ') || 'À compléter' },
     { cle: 'go', titre: 'Validation par la gestion (GO)', fait: !!c.go_le, attente: !finalise || !peutValider,
       resume: c.go_le ? `GO le ${date(c.go_le)} par ${c.go_par || '—'}` : finalise ? 'Chez la gestion : rien à faire pour le commercial, sauf si elle écrit' : 'Après le contrôle complet' },
-    { cle: 'bail', titre: 'Signature du bail : messages au locataire, au garant et au bailleur', fait: nb.fini,
-      resume: `${b.debut ? (commence ? 'Bail commencé le ' : 'Début le ') + date(b.debut) + ' · ' : ''}${nb.n ? `${nb.f}/${nb.n} message(s) envoyé(s) ou sans objet` : 'aucun message prévu'}` },
-    { cle: 'edl', titre: 'État des lieux d’entrée', fait: edl.fini && commence,
-      resume: edl.n ? `${edl.f}/${edl.n} message(s) envoyé(s) ou sans objet${commence ? '' : ' · entrée le ' + date(b.debut)}` : commence ? 'Fait' : 'Le jour de l’entrée' },
+    // 12/11 (Nicolas) : signature et état des lieux d'entrée se font ensemble : une seule étape, les deux séries de messages
+    { cle: 'bail', titre: 'Signature et état des lieux d’entrée : messages au locataire, au garant et au bailleur', fait: nb.fini && edl.fini && commence,
+      resume: `${b.debut ? (commence ? 'Entrée le ' : 'Entrée prévue le ') + date(b.debut) + ' · ' : ''}${nb.n + edl.n ? `${nb.f + edl.f}/${nb.n + edl.n} message(s) envoyé(s) ou sans objet` : 'aucun message prévu'}` },
   ];
   const courante = etapes.find((x) => !x.fait && !x.attente) || etapes.find((x) => !x.fait);
   const ouv = ouverte || courante?.cle;
   const corps = (x) => {
-    if (x.cle === 'bail') return <MessagesDossier key={'nb' + rev} objet="bail" id={b.bail_id} etapes={etapesMessages ?? ['nouveau_bail']} titre={false} statut={b.statut} apres={plus} />;
+    if (x.cle === 'bail') return <MessagesDossier key={'nb' + rev} objet="bail" id={b.bail_id} etapes={etapesMessages ?? ['nouveau_bail', 'edl_entree']} titre={false} statut={b.statut} apres={plus} />;
     if (x.cle === 'controle') return <>{!finalise && circuit}<Controle d={d} b={b} peut={peut} circuit agir={agir} ouvrirMail={ouvrirMail} recharger={recharger} /></>;
-    if (x.cle === 'edl') return <MessagesDossier key={'edl' + rev} objet="bail" id={b.bail_id} etapes={etapesMessages ?? ['edl_entree']} titre={false} statut={b.statut} apres={plus} />;
     if (x.cle === 'go') return finalise ? circuit : <p className="muted" style={{ margin: 0 }}>Le dossier part seul chez la gestion dès que le contrôle d’entrée est complet.</p>;
     return null;
   };
