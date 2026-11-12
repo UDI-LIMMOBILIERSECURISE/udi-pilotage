@@ -1,6 +1,6 @@
 // Module « Pilotage UDI » pour Gmail (146).
 // Lecture d'un mail : lot / bail / ticket reconnus par le pilotage, rattachement en un clic, derniers échanges.
-// Écriture d'un mail : recherche d'un lot, d'un bail ou d'un ticket ; référence [UDI L<lot> T<ticket>] et destinataires en un clic.
+// Écriture d'un mail : recherche d'un lot, d'un bail ou d'un ticket ; un clic sur le dossier ajoute la référence [UDI L<lot> T<ticket>] à l'objet.
 // Les droits sont ceux du membre du pilotage qui a la même adresse Gmail (vérifiés côté pilotage, fonction pilotage-gmail).
 
 var API = 'https://tanupqmphxadaxeksxjh.supabase.co/functions/v1/pilotage-gmail';
@@ -60,6 +60,19 @@ function surMessage(e) {
     s1.addWidget(CardService.newTextParagraph().setText((d.parties || []).length
       ? 'Pas encore dans le pilotage (boîte non branchée, ou passage dans les 5 minutes).'
       : 'Aucun correspondant connu de Rivage : ce mail n\'est pas repris.'));
+    // Mail non repris mais portant une référence [UDI L<lot> T<ticket>] : on affiche quand même le dossier, pour information
+    var r = String(m.getSubject() || '').match(/\[UDI L([^\]\s]+)(?: T(\d+))?\]/);
+    if (r) {
+      try {
+        var trouves = (appel('chercher', { q: r[1] }).lots || []).filter(function (l) { return String(l.lot) === r[1]; });
+        trouves.forEach(function (l) {
+          var t = (l.tickets || []).filter(function (x) { return r[2] && String(x.numero) === r[2]; })[0];
+          s1.addWidget(CardService.newTextParagraph().setText('Référence <b>' + r[0] + '</b> dans l\'objet :'
+            + (t ? '<br>Ticket n°' + t.numero + ' ' + (t.titre || '') : '')));
+          d.lots = (d.lots || []).concat([l]);
+        });
+      } catch (err) { }
+    }
   } else if (d.mail.statut === 'classe') {
     s1.addWidget(CardService.newTextParagraph().setText('Rattaché au <b>lot ' + d.mail.lot + '</b> · ' + (d.mail.adresse || '')
       + (d.mail.bail ? '<br>Bail ' + d.mail.bail : '') + (d.mail.ticket ? '<br>Ticket n°' + d.mail.ticket.numero + ' ' + (d.mail.ticket.titre || '') : '')
@@ -113,6 +126,7 @@ function classer(e) {
 // ---------- Recherche (accueil, lecture et écriture) ----------
 function sectionRecherche(q, redaction, mailId) {
   var s = CardService.newCardSection().setHeader(redaction ? 'Dossier du mail' : 'Chercher un lot');
+  if (redaction) s.addWidget(CardService.newTextParagraph().setText('Cherchez le lot, puis cliquez sur le lot ou le ticket concerné : la référence [UDI …] est ajoutée à l\'objet et le mail, comme les réponses, sera rangé dans ce dossier.'));
   s.addWidget(CardService.newTextInput().setFieldName('q').setTitle('N° de lot, adresse, locataire, bailleur, prestataire ou n° de ticket').setValue(q || ''));
   s.addWidget(CardService.newTextButton().setText('Rechercher')
     .setOnClickAction(CardService.newAction().setFunctionName('rechercher').setParameters({ redaction: redaction ? '1' : '', mail_id: mailId ? String(mailId) : '' })));
@@ -128,21 +142,13 @@ function carteRecherche(q, redaction, mailId, lots) {
       var s = CardService.newCardSection().addWidget(blocLot(l));
       var bs = CardService.newButtonSet();
       if (redaction) {
-        bs.addButton(CardService.newTextButton().setText('Référence lot ' + l.lot)
+        // Un seul geste : choisir le dossier. La référence part dans l'objet, et la réponse reviendra au même dossier.
+        bs.addButton(CardService.newTextButton().setText('Lot ' + l.lot + (l.bail ? ' · bail ' + l.bail : ''))
           .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: ref(l.lot) })));
         (l.tickets || []).forEach(function (t) {
-          bs.addButton(CardService.newTextButton().setText('Réf. ticket n°' + t.numero)
+          bs.addButton(CardService.newTextButton().setText('Ticket n°' + t.numero)
             .setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: ref(l.lot, t.numero) })));
-          var pre = (t.prestataires || []).map(function (x) { return x.email; }).filter(Boolean);
-          if (pre.length) bs.addButton(CardService.newTextButton().setText('À : prestataire n°' + t.numero)
-            .setOnClickAction(CardService.newAction().setFunctionName('ajouterDest').setParameters({ emails: pre.join(',') })));
         });
-        var loc = ((l.contacts || {}).locataires || []).map(function (x) { return x.email; }).filter(Boolean);
-        var bai = ((l.contacts || {}).bailleurs || []).map(function (x) { return x.email; }).filter(Boolean);
-        if (loc.length) bs.addButton(CardService.newTextButton().setText('À : locataire')
-          .setOnClickAction(CardService.newAction().setFunctionName('ajouterDest').setParameters({ emails: loc.join(',') })));
-        if (bai.length) bs.addButton(CardService.newTextButton().setText('À : bailleur')
-          .setOnClickAction(CardService.newAction().setFunctionName('ajouterDest').setParameters({ emails: bai.join(',') })));
       } else if (mailId) {
         bs.addButton(CardService.newTextButton().setText('Rattacher au lot ' + l.lot)
           .setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters({ mail_id: String(mailId), lot_id: l.lot_id, ticket_id: '' })));
@@ -174,17 +180,11 @@ function insererRef(e) {
   var r = e.parameters.ref, objet = e.draftMetadata && e.draftMetadata.subject;
   var b = CardService.newUpdateDraftActionResponseBuilder();
   if (typeof objet === 'string') {
-    if (objet.indexOf('[UDI ') < 0) b.setUpdateDraftSubjectAction(CardService.newUpdateDraftSubjectAction().addUpdateSubject((objet ? objet + ' ' : '') + r));
+    var sans = objet.replace(/\s*\[UDI [^\]]*\]/g, '').trim();
+    b.setUpdateDraftSubjectAction(CardService.newUpdateDraftSubjectAction().addUpdateSubject((sans ? sans + ' ' : '') + r));
   } else {
     b.setUpdateDraftBodyAction(CardService.newUpdateDraftBodyAction().addUpdateContent(' ' + r + ' ', CardService.ContentType.TEXT)
       .setUpdateType(CardService.UpdateDraftBodyType.IN_PLACE_INSERT));
   }
   return b.build();
-}
-
-function ajouterDest(e) {
-  var deja = (e.draftMetadata && e.draftMetadata.toRecipients) || [];
-  var tous = deja.concat(String(e.parameters.emails || '').split(',')).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
-  return CardService.newUpdateDraftActionResponseBuilder()
-    .setUpdateToRecipientsAction(CardService.newUpdateToRecipientsAction().addUpdateToRecipients(tous)).build();
 }
