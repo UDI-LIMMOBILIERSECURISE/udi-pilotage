@@ -1,6 +1,6 @@
 // Module « Pilotage UDI » pour Gmail (146).
 // Lecture d'un mail : lot / bail / ticket reconnus par le pilotage, rattachement en un clic, derniers échanges.
-// Écriture d'un mail : recherche d'un lot, d'un bail ou d'un ticket ; un clic sur le dossier ajoute la référence [UDI L<lot> T<ticket>] à l'objet.
+// Écriture d'un mail : recherche d'un lot, d'un bail ou d'un ticket ; un clic sur le dossier ajoute la référence [UDI L<lot> T<ticket>] en bas du mail.
 // Les droits sont ceux du membre du pilotage qui a la même adresse Gmail (vérifiés côté pilotage, fonction pilotage-gmail).
 
 var API = 'https://tanupqmphxadaxeksxjh.supabase.co/functions/v1/pilotage-gmail';
@@ -126,7 +126,7 @@ function classer(e) {
 // ---------- Recherche (accueil, lecture et écriture) ----------
 function sectionRecherche(q, redaction, mailId) {
   var s = CardService.newCardSection().setHeader(redaction ? 'Dossier du mail' : 'Chercher un lot');
-  if (redaction) s.addWidget(CardService.newTextParagraph().setText('Cherchez le lot, puis cliquez sur le lot ou le ticket concerné : la référence [UDI …] est ajoutée à l\'objet et le mail, comme les réponses, sera rangé dans ce dossier.'));
+  if (redaction) s.addWidget(CardService.newTextParagraph().setText('Cherchez le lot, puis cliquez sur le lot ou le ticket concerné : la référence du dossier est ajoutée en bas du mail et le mail, comme les réponses, sera rangé dans ce dossier.'));
   s.addWidget(CardService.newTextInput().setFieldName('q').setTitle('N° de lot, adresse, locataire, bailleur, prestataire ou n° de ticket').setValue(q || ''));
   s.addWidget(CardService.newTextButton().setText('Rechercher')
     .setOnClickAction(CardService.newAction().setFunctionName('rechercher').setParameters({ redaction: redaction ? '1' : '', mail_id: mailId ? String(mailId) : '' })));
@@ -175,16 +175,12 @@ function rechercher(e) {
 // ---------- Écriture d'un mail ----------
 function surRedaction(e) { return [carteRecherche('', true, null)]; }
 
-// Référence ajoutée à la fin de l'objet si Gmail le transmet, sinon insérée dans le texte (le pilotage la lit aux deux endroits)
+// Référence ajoutée en bas du texte du mail, en petit et en gris (l'objet reste libre). Le pilotage la lit dans le texte comme dans l'objet,
+// et elle reste dans le texte cité des réponses.
 function insererRef(e) {
-  var r = e.parameters.ref, objet = e.draftMetadata && e.draftMetadata.subject;
-  var b = CardService.newUpdateDraftActionResponseBuilder();
-  if (typeof objet === 'string') {
-    var sans = objet.replace(/\s*\[UDI [^\]]*\]/g, '').trim();
-    b.setUpdateDraftSubjectAction(CardService.newUpdateDraftSubjectAction().addUpdateSubject((sans ? sans + ' ' : '') + r));
-  } else {
-    b.setUpdateDraftBodyAction(CardService.newUpdateDraftBodyAction().addUpdateContent(' ' + r + ' ', CardService.ContentType.TEXT)
-      .setUpdateType(CardService.UpdateDraftBodyType.IN_PLACE_INSERT));
-  }
-  return b.build();
+  var r = e.parameters.ref;
+  var html = '<div style="clear:both;display:block;text-align:left;white-space:nowrap;color:#9aa0a6;font-size:11px;margin-top:12px">Réf. dossier : ' + r + '</div>';
+  return CardService.newUpdateDraftActionResponseBuilder()
+    .setUpdateDraftBodyAction(CardService.newUpdateDraftBodyAction().addUpdateContent(html, CardService.ContentType.MUTABLE_HTML)
+      .setUpdateType(CardService.UpdateDraftBodyType.INSERT_AT_END)).build();
 }
