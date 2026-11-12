@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
   let ok = false, erreur: string | null = null
   try {
     const r = await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: EXPEDITEUR, to: (envoi.to as string[]).join(','), subject: c.objet, body: c.corps, bail: c.bail, envoi: envoi.id }) })
+      body: JSON.stringify({ from: EXPEDITEUR, to: (envoi.to as string[]).join(','), subject: envoi.objet || c.objet, body: c.corps, bail: c.bail, envoi: envoi.id }) })
     ok = r.ok
     if (!r.ok) erreur = `Zapier HTTP ${r.status}`
   } catch (x) { erreur = x instanceof Error ? x.message : String(x) }
