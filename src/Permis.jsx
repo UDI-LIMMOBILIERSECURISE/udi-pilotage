@@ -1,5 +1,6 @@
 // Permis de louer (038) : régime de chaque logement (table des communes, à l'adresse), demandes déposées et leur suivi,
 // mail préparé à la mairie pour l'attestation d'accord tacite, liste des pièces par régime.
+import { useBiens } from './Biens.jsx';
 import React, { useEffect, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
 import { lienGmail } from './mails.js';
@@ -49,7 +50,8 @@ export default function PermisMandat({ m, onErreur }) {
 
 // Fiche du bail : permis de louer du lot du bail (suivi d'ensemble 052, filtré sur ce bail). Rien si le lot n'est pas soumis.
 // Fiche d'un ticket tagué PL ou DMEL : même bloc, retrouvé par le n° du lot (lot), avec un message si le lot n'est pas suivi.
-export function PermisBail({ bail, lot, onErreur }) {
+export function PermisBail({ bail, lot, onErreur, statut }) {
+  const biens = useBiens();
   const [x, setX] = useState(undefined);
   const [email, setEmail] = useState('');
   const [prenom, setPrenom] = useState('');
@@ -67,13 +69,14 @@ export function PermisBail({ bail, lot, onErreur }) {
       {x.echeance && <span className="mono" style={{ marginLeft: 6, fontSize: 12 }}>échéance {date(x.echeance)}</span>}</div>
     {x.action && <div style={{ fontSize: 13, marginTop: 4 }}>{x.action}</div>}
     {x.peut ? <LotPermis l={x} agir={agir} email={email} prenom={prenom} recharger={charger} onErreur={onErreur}
-        loue={/prochaine location/i.test(x.etat || '')} />
+        loue={/prochaine location/i.test(x.etat || '') && statut !== 'move_out' && biens.parId[x.asset_id]?.phase !== 'sortie'} />
       : <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{(x.demandes || []).length ? x.demandes.map((d) => `${d.regime === 'declaration' ? 'Déclaration' : 'Demande'} déposée le ${date(d.depot_le)}${d.reponse ? ' · ' + d.reponse + ' le ' + date(d.reponse_le) : ''}`).join(' ; ') : 'Aucune démarche enregistrée.'} Seule la gestion enregistre les démarches.</div>}
   </div>;
 }
 
-// 12/11 : loue = logement loué avec un permis déjà utilisé pour ce bail : la prochaine démarche se fera à la relocation,
-// les boutons « Qui dépose ? », « Permis déjà obtenu » et « Demande déposée » ne sont pas proposés d'ici là
+// 12/11 : loue = logement loué avec un permis déjà utilisé pour ce bail, sans congé : la prochaine démarche se fera à la relocation,
+// les boutons « Qui dépose ? », « Permis déjà obtenu » et « Demande déposée » ne sont pas proposés d'ici là. Dès le congé reçu
+// (bail en sortie dans Rivage, frise en « Sortie »), les questions reviennent pour redéposer avant la relocation (règle de Nicolas).
 export function LotPermis({ l, agir, email, prenom, recharger, onErreur, loue }) {
   const p = l.permis || {};
   const [modif, setModif] = useState(false);
