@@ -388,3 +388,7 @@ tr.sel td { background: #EEF4FA; }
 .parcours-corps { padding: 4px 12px 12px 46px; font-size: 13px; }
 .parcours-fil { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
 .parcours-fil summary { cursor: pointer; }
+
+/* 12/11 : résumé IA court, parcours d'entrée */
+.resume-court { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.bandeau-etat { margin: 10px 0; padding: 8px 12px; border-radius: 10px; background: var(--teal-bg); font-size: 14px; }

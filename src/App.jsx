@@ -251,14 +251,21 @@ function Journee({ moi }) {
   useEffect(() => { if (moi.voit_equipe) rpc('pilotage_membres').then(setMembres).catch(() => {}); }, []);
   useEffect(() => { setAlertes(null); charger(); }, [cible]);
   const chargerBiens = () => rpc('pilotage_biens').then(setBiens).catch(() => setBiens({ lots: [] }));
+  // 12/11 : dossiers du circuit (« Mes dossiers », plus bas) : leur alerte « dossier à compléter » et l'étape « Compléter le contrôle
+  // d'entrée » ne sont pas répétées dans les cartes du jour (Nicolas : « les alertes sont en double dans des blocs différents »)
+  const [circuit, setCircuit] = useState(() => new Set());
+  useEffect(() => { rpc('pilotage_mes_dossiers').then((x) => setCircuit(new Set((x?.dossiers || []).filter((y) => y.etat !== 'valide').map((y) => y.id)))).catch(() => {}); }, [cible]);
+  const REGLES_CIRCUIT = ['bail_dossier_a_completer', 'mandat_controle_entree'];
+  const dansCircuit = (a) => REGLES_CIRCUIT.includes(a.regle) && circuit.has(a.objet_id);
+  const etapeCircuit = (l) => /contrôle d.entrée|dossier du mandat/i.test(l.a_faire?.action || '') && (circuit.has(l.bail_id) || circuit.has(l.mandat_id));
   useEffect(() => { chargerBiens(); }, []);
   const phaseDuLot = useMemo(() => Object.fromEntries((biens?.lots || []).map((l) => [l.id, l.phase])), [biens]);
   const phaseAlerte = (a) => phaseDuLot[a.dossier?.asset_id] || null;
-  const etapesMoi = cible === moi.user_id ? (biens?.lots || []).filter((l) => l.a_moi && l.phase !== 'hors')
+  const etapesMoi = cible === moi.user_id ? (biens?.lots || []).filter((l) => l.a_moi && l.phase !== 'hors' && !etapeCircuit(l))
     .sort((x, y) => Number(!!y.a_faire?.urgent) - Number(!!x.a_faire?.urgent)) : [];
   const traiter = async (a, oui) => { try { await rpc('pilotage_traiter', { p_alerte: a.id, p_traitee: oui }); setOuvert(null); charger(); } catch (e) { setErr(e.message); } };
 
-  const ouvertes = (alertes || []).filter((a) => a.statut === 'ouverte');
+  const ouvertes = (alertes || []).filter((a) => a.statut === 'ouverte' && !dansCircuit(a));
   const traitees = (alertes || []).filter((a) => a.statut === 'traitee');
   const enPhase = cat.startsWith('phase:') ? cat.slice(6) : null;
   const dansCat = ouvertes.filter((a) => cat === 'toutes' || (enPhase ? phaseAlerte(a) === enPhase : (a.famille || 'controles') === cat));
@@ -907,6 +914,7 @@ function AvecDetail({ children, detail, fermer, vide, titre }) {
 
 function ResumeIA({ type, id }) {
   const [etat, setEtat] = useState({ charge: true });
+  const [long, setLong] = useState(false); // 12/11 : 3 lignes, « Lire la suite » pour le reste
   const demander = (forcer) => {
     setEtat((e) => ({ ...e, charge: true, err: '' }));
     supabase.functions.invoke('pilotage-resume', { body: { type, id, forcer } })
@@ -924,7 +932,9 @@ function ResumeIA({ type, id }) {
     </div>
     {etat.charge ? <p className="muted">Analyse du dossier en cours…</p>
       : etat.err ? <p className="muted">{etat.err}</p>
-      : <><p>{etat.texte}</p><div className="muted">Généré le {dateHeure(etat.genere_le)} à partir des seules données du dossier{type === 'impaye' ? ' et de ses échanges' : ''}. À vérifier avant toute décision.</div></>}
+      : <><p className={long ? '' : 'resume-court'}>{etat.texte}</p>
+        {etat.texte.length > 320 && <button className="lien" onClick={() => setLong(!long)}>{long ? 'Réduire' : 'Lire la suite'}</button>}
+        <div className="muted">Généré le {dateHeure(etat.genere_le)} à partir des seules données du dossier{type === 'impaye' ? ' et de ses échanges' : ''}. À vérifier avant toute décision.</div></>}
   </div>;
 }
 

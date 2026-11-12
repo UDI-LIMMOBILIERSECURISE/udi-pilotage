@@ -147,6 +147,8 @@ export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
   // Contrôle non requis (habitation antérieure au contrôle d'entrée) : synthèse directement.
   const soumis = ['commercial', 'derogatoire', 'professionnel'].includes(ech.type) || (b.debut && b.debut >= '2026-10-16');
   const synthese = !parametrer && (!!d.controle?.go_le || !soumis);
+  // 12/11 : nouveau bail pas encore validé (ou paramétrage rouvert) : parcours d'entrée en étapes à la place de la page à plat
+  const entree = soumis && !synthese;
   const etapeFaite = (cle, etape, detail) => agir('pilotage_suivi_etape', { p_cle: cle, p_etape: etape, p_detail: detail, p_annuler: false });
 
   // Actions du moment : échéance + obligations
@@ -160,11 +162,14 @@ export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
     <div className="muted">{[b.adresse, b.mandat, 'Bailleur : ' + (b.bailleur || '—')].filter(Boolean).join(' · ')}</div>
     {err && <div className="banner">{err}</div>}
     <ResumeIA type="bail" id={b.bail_id} />
-    {soumis && <Circuit objet="bail" id={b.bail_id} apres={async () => { await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await charger(); apres && apres(); }} />}
+    {soumis && !entree && <Circuit objet="bail" id={b.bail_id} apres={async () => { await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await charger(); apres && apres(); }} />}
     {ech.alerte_derogatoire && <div className="mini-alerte critique">{ech.alerte_derogatoire}</div>}
 
-    <h3>À faire maintenant</h3>
-    {!actions.length && <p className="muted">Rien à faire aujourd’hui sur ce bail.</p>}
+    {/* 12/11 : rien à faire = une ligne, pas un titre vide */}
+    {!entree && !actions.length && <div className="bandeau-etat">{d.controle?.go_le ? `Bail en cours, contrôle d’entrée validé le ${date(d.controle.go_le)} par ${d.controle.go_par || '—'} : ` : ''}rien à faire aujourd’hui sur ce bail.</div>}
+    {entree && <ParcoursEntree d={d} b={b} peut={peut} moi={moi} agir={agir} ouvrirMail={ouvrirMail} recharger={async () => { await charger(); apres(); }} apres={apres}
+      etapesMessages={etapesMessages} ouvrir={parametrer ? 'controle' : null} />}
+    {actions.length > 0 && <h3>À faire maintenant</h3>}
     {actions.map((a) => <div key={a.k} className={'mini-alerte ' + (a.grav || 'normale')}>
       <b>{SEV[a.grav] || 'Normale'}</b> · {a.libelle}
       {a.ob && <div className="muted">{a.ob.libelle} · échéance le {date(a.ob.prochaine)} · {CANAL[a.ob.a_faire.canal]} prévu le {date(a.ob.a_faire.date)}</div>}
@@ -188,7 +193,10 @@ export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
     <PermisBail bail={b.bail_id} onErreur={setErr} statut={b.statut} />
     <ClesLots bail={b.bail_id} />
     <FicheConge bail={b.bail_id} apres={() => { setRev((n) => n + 1); apres && apres(); }} />
-    <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} etapes={etapesMessages} statut={b.statut} />
+    {/* 12/11 : en entrée, les messages sont dans les étapes du parcours ; bail en cours : repliés, la sortie a son propre parcours */}
+    {!entree && (['created', 'move_in'].includes(b.statut) ? <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} etapes={etapesMessages} statut={b.statut} />
+      : <details className="replie" style={{ marginTop: 14 }}><summary style={{ cursor: 'pointer', fontWeight: 700 }}>Messages au locataire et au bailleur</summary>
+        <MessagesDossier key={rev} objet="bail" id={b.bail_id} apres={apres} etapes={etapesMessages} statut={b.statut} titre={false} /></details>)}
 
     {synthese ? <>
       {/* Mode synthèse (même présentation que le mandat) : la fiche d'abord, le détail replié en dessous */}
@@ -208,6 +216,17 @@ export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
         <ol className="histo">{journal.slice(0, 30).map((j, i) =>
           <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol>
       </details>}
+    </> : entree ? <>
+      {parametrer && <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}><button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse du bail</button></div>}
+      <details className="replie" style={{ marginTop: 14 }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Échéance, suivis et journal du bail</summary>
+        <Echeance d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
+        <Suivis d={d} b={b} peut={gere} agir={agir} />
+        <Paliers d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
+        <Actes d={d} b={b} peut={gere} agir={agir} />
+        {journal.length > 0 && <><h3>Journal</h3><ol className="histo">{journal.slice(0, 30).map((j, i) =>
+          <li key={i}><span className="muted">{new Date(j.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span>{j.detail || j.etape}{j.par ? ' · ' + j.par : ''}</span></li>)}</ol></>}
+      </details>
     </> : <>
       <Echeance d={d} b={b} peut={gere} agir={agir} ouvrirMail={ouvrirMail} />
       {(d.controle?.go_le || !soumis) && <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}><button className="btn plein" onClick={() => setParametrer(false)}>Retour à la synthèse du bail</button></div>}
@@ -220,6 +239,69 @@ export function DossierBail({ b, peut, moi, apres, etapesMessages }) {
     </>}
     <div className="row" style={{ marginTop: 14 }}><a className="btn plein" href={b.lien} target="_blank" rel="noreferrer">Ouvrir le bail dans Rivage</a></div>
   </>;
+}
+
+// 12/11 : parcours d'entrée d'un nouveau bail en étapes, sur le modèle du parcours de sortie (demande de Nicolas : « le commercial est
+// perdu, structurer la page selon l'avancement »). Une seule étape ouverte : la première qui reste à faire ; les étapes faites tiennent
+// sur une ligne. Le bandeau du circuit (état, validation, échanges avec la gestion) va dans l'étape où se trouve le dossier.
+function ParcoursEntree({ d, b, peut, moi, agir, ouvrirMail, recharger, apres, etapesMessages, ouvrir }) {
+  const [m, setM] = useState(null);
+  const [e, setE] = useState(null);
+  const [ouverte, setOuverte] = useState(ouvrir || null);
+  const [rev, setRev] = useState(0);
+  const charger = () => {
+    rpc('pilotage_messages_dossier', { p_objet: 'bail', p_id: b.bail_id }).then(setM).catch(() => setM({ messages: [] }));
+    rpc('pilotage_dossier_etat', { p_objet: 'bail', p_id: b.bail_id }).then(setE).catch(() => setE({}));
+  };
+  useEffect(() => { setM(null); setE(null); setOuverte(ouvrir || null); charger(); }, [b.bail_id, d]);
+  useEffect(() => { if (ouvrir) setOuverte(ouvrir); }, [ouvrir]);
+  if (!m || !e) return <p className="muted">Chargement du parcours…</p>;
+  const c = d.controle || { items: [] };
+  const auj = new Date().toISOString().slice(0, 10);
+  const msgs = (cat) => (m.messages || []).filter((x) => x.categorie === cat);
+  const bilan = (cat) => { const l = msgs(cat); const f = l.filter((x) => x.fait).length; /* un message « en attente » (date pas connue) reste à faire */ return { n: l.length, f, fini: f === l.length }; };
+  const nb = bilan('nouveau_bail'); const edl = bilan('edl_entree');
+  const commence = !!b.debut && b.debut <= auj;
+  const vides = e.vides || [];
+  const finalise = !!c.go_le || ['en_attente', 'valide'].includes(e.etat);
+  const apresCircuit = async () => { await rpc('pilotage_bail_rafraichir', { p_bail: b.bail_id }).catch(() => {}); await recharger(); };
+  const plus = async () => { setRev((n) => n + 1); charger(); apres && apres(); };
+  const circuit = <Circuit objet="bail" id={b.bail_id} apres={apresCircuit} />;
+  const etapes = [
+    { cle: 'bail', titre: 'Bail signé : envoyer le dossier au locataire, au garant et au bailleur', fait: nb.fini,
+      resume: `${b.debut ? (commence ? 'Bail commencé le ' : 'Début le ') + date(b.debut) + ' · ' : ''}${nb.n ? `${nb.f}/${nb.n} message(s) envoyé(s) ou sans objet` : 'aucun message prévu'}` },
+    { cle: 'controle', titre: 'Contrôle d’entrée : pièces dans Rivage et questions', fait: finalise,
+      resume: finalise ? (e.forcage ? 'Dossier forcé, transmis à la gestion' : 'Complet, transmis à la gestion')
+        : [e.restant > 0 ? `${e.restant} point(s) à traiter` : null, vides.length ? `${vides.length} champ(s) vide(s) dans Rivage` : null].filter(Boolean).join(' · ') || 'À compléter' },
+    { cle: 'edl', titre: 'État des lieux d’entrée', fait: edl.fini && commence,
+      resume: edl.n ? `${edl.f}/${edl.n} message(s) envoyé(s) ou sans objet${commence ? '' : ' · entrée le ' + date(b.debut)}` : commence ? 'Fait' : 'Le jour de l’entrée' },
+    { cle: 'go', titre: 'Validation par la gestion (GO)', fait: !!c.go_le, attente: !finalise,
+      resume: c.go_le ? `GO le ${date(c.go_le)} par ${c.go_par || '—'}` : finalise ? 'Le dossier est chez la gestion : rien à faire pour le commercial, sauf si elle écrit' : 'Après le contrôle d’entrée complet' },
+  ];
+  const courante = etapes.find((x) => !x.fait && !x.attente) || etapes.find((x) => !x.fait);
+  const ouv = ouverte || courante?.cle;
+  const corps = (x) => {
+    if (x.cle === 'bail') return <MessagesDossier key={'nb' + rev} objet="bail" id={b.bail_id} etapes={etapesMessages ?? ['nouveau_bail']} titre={false} statut={b.statut} apres={plus} />;
+    if (x.cle === 'controle') return <>{!finalise && circuit}<Controle d={d} b={b} peut={peut} circuit agir={agir} ouvrirMail={ouvrirMail} recharger={recharger} /></>;
+    if (x.cle === 'edl') return <MessagesDossier key={'edl' + rev} objet="bail" id={b.bail_id} etapes={etapesMessages ?? ['edl_entree']} titre={false} statut={b.statut} apres={plus} />;
+    if (x.cle === 'go') return finalise ? circuit : <p className="muted" style={{ margin: 0 }}>Le dossier part seul chez la gestion dès que le contrôle d’entrée est complet.</p>;
+    return null;
+  };
+  return <section style={{ marginTop: 14 }}>
+    <h3 style={{ margin: '0 0 6px' }}>Parcours d’entrée</h3>
+    <ol className="parcours">{etapes.map((x, n) => {
+      const etat = x.cle === courante?.cle && !x.fait ? 'cours' : x.fait ? 'fait' : 'avenir';
+      const ouvert = ouv === x.cle;
+      return <li key={x.cle} className={'parcours-etape ' + etat}>
+        <button className="parcours-tete" aria-expanded={ouvert} onClick={() => setOuverte(ouvert ? '-' : x.cle)}>
+          <span className="parcours-n">{x.fait ? '✓' : n + 1}</span>
+          <span className="parcours-titre"><b>{x.titre}</b> <span className="muted">· {x.resume}</span></span>
+          {etat === 'cours' && <span className="sev haute">À faire</span>}
+        </button>
+        {ouvert && <div className="parcours-corps">{corps(x)}</div>}
+      </li>;
+    })}</ol>
+  </section>;
 }
 
 // SMS au locataire (065, 066) : envoi direct par le pilotage (Zapier → Twilio, expéditeur UDI GESTION) au numéro Rivage du locataire,
