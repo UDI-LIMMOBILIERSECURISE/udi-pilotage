@@ -7,6 +7,7 @@ import Fiche from './Fiche.jsx';
 import DossierMandat from './SuiviMandat.jsx';
 import { DossierBail } from './SuiviBaux.jsx';
 import { nature, texteRecherche, correspond } from './cartes.jsx';
+import { SuiviSinistre, ORIGINE } from './TicketsFil.jsx';
 
 export const PHASES = [
   ['entree', 'Entrée en gestion'],
@@ -206,6 +207,7 @@ export function FicheBien({ l, peut, moi, apres }) {
       <h3 className="fb-titre">Dossiers ouverts sur ce bien</h3>
       {!x ? <p className="muted">Chargement…</p> : <Dossiers x={x} l={l} recharger={charger} />}
     </section>
+    <HistoriqueTickets l={l} />
     <details className="fb-bloc fb-complet" open={!!(af && (af.action || '').match(/contrôle|dossier|GO/i))}>
       <summary>Dossier complet du {l.bail_id ? 'bail' : 'mandat'} (contrôle, suivis, messages)</summary>
       {l.bail_id
@@ -277,4 +279,35 @@ function DonneesACorriger({ l, liste, recharger }) {
       </div>}
     {err && <div className="err">{err}</div>}
   </div>;
+}
+
+// Historique de tous les tickets du lot (12/11/2026) : incidents Rivage (ouverts et clos) et dossiers repris de Monday / WeRoof,
+// avec leur fil de mises à jour (liens vers les mails Gmail et pièces jointes). Chargé à l'ouverture seulement.
+function HistoriqueTickets({ l }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [liste, setListe] = useState(null);
+  const [err, setErr] = useState('');
+  const [sel, setSel] = useState(null);
+  const charger = () => rpc('pilotage_sinistres').then((d) => setListe((d || []).filter((t) => (l.lot && t.lot === l.lot) || (!t.lot && l.adresse && t.adresse === l.adresse))
+    .sort((a, b) => String(b.declare_le || '').localeCompare(String(a.declare_le || ''))))).catch((e) => setErr(e.message));
+  useEffect(() => { if (ouvert && !liste) charger(); }, [ouvert]);
+  return <details className="fb-bloc fb-complet" onToggle={(e) => setOuvert(e.currentTarget.open)}>
+    <summary>Historique des tickets du lot (Rivage, Monday, WeRoof){liste ? ` · ${liste.length}` : ''}</summary>
+    {err && <div className="banner">{err}</div>}
+    {ouvert && !liste && !err && <p className="muted">Chargement…</p>}
+    {liste && !liste.length && <p className="muted">Aucun ticket sur ce lot, ni dans Rivage ni dans les dossiers repris de Monday / WeRoof.</p>}
+    {liste && liste.map((t) => <div key={t.id} className="fb-carte" style={{ marginTop: 8 }}>
+      <button className="eg-texte" aria-expanded={sel === t.id} onClick={() => setSel(sel === t.id ? null : t.id)}>
+        <b>{t.titre || 'Sans titre'}</b>
+        <span className="muted">{t.source === 'monday' ? 'Repris de ' + ORIGINE(t) + (t.reference ? ' · ' + t.reference : '') : 'Rivage n°' + t.numero}
+          {' · '}{t.clos ? 'Clos' : 'En cours'}{t.declare_le ? ' · ouvert le ' + date(t.declare_le) : ''}{t.resolu_le ? ' · clos le ' + date(t.resolu_le) : ''}
+          {t.locataires ? ' · ' + t.locataires : ''}{t.nb_notes ? ' · 💬 ' + t.nb_notes : ''}</span>
+      </button>
+      {sel === t.id && <div style={{ marginTop: 8 }}>
+        {t.description && <p style={{ whiteSpace: 'pre-wrap' }}>{t.description}</p>}
+        {t.lien && <p><a className="lien" href={t.lien} target="_blank" rel="noreferrer">{t.source === 'monday' ? 'Ouvrir dans ' + ORIGINE(t) : 'Ouvrir dans Rivage'} ↗</a></p>}
+        <SuiviSinistre dossier={t} recharger={charger} />
+      </div>}
+    </div>)}
+  </details>;
 }
