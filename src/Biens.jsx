@@ -85,7 +85,10 @@ export default function Biens({ moi }) {
 // Ligne d'un lot (page Biens, et depuis le 12/11/2026 toutes les pages à lots) : frise, étapes, action en cours.
 // Une page ajoute ce qui lui est propre : entete (petite ligne au-dessus du titre), etiquettes (à droite), complement (sous le titre).
 // Sans lot connu (ticket d'immeuble, clés sans lot), la ligne garde la même forme avec le seul contenu de la page.
-export function LigneLot({ l, ouvrir, peut, apres, entete, etiquettes, complement, gravite, titre, sel }) {
+export function LigneLot({ l, ouvrir, peut: peutPage, apres: apresPage, entete, etiquettes, complement, gravite, titre, sel }) {
+  // 12/11 : bouton « Mettre en location » sur toutes les pages (droit lu dans la liste des biens partagée si la page ne le donne pas)
+  const peut = peutPage ?? !!memoBiens?.d?.peut;
+  const apres = apresPage || relireBiens;
   const clic = { role: 'button', tabIndex: 0, onClick: ouvrir, onKeyDown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) ouvrir(); } };
   if (!l) return <div className={'kcarte bien ' + (gravite || 'normale') + (sel ? ' sel' : '')} {...clic}>
     {entete && <div className="lot-entete">{entete}</div>}
@@ -128,13 +131,18 @@ const LigneBien = LigneLot;
 // Liste des biens lue une fois et partagée entre les pages (gardée 60 s) : chaque page retrouve le lot de ses dossiers
 // par n° de lot Rivage (référence unique), identifiant du lot ou mandat.
 let memoBiens = null;
+const abonnes = new Set();
+// Relit la liste et met à jour toutes les pages ouvertes (après une mise en location, par exemple)
+export function relireBiens() {
+  return rpc('pilotage_biens').then((x) => { memoBiens = { d: x, t: Date.now() }; abonnes.forEach((f) => f(x)); }).catch(() => {});
+}
 export function useBiens() {
   const [d, setD] = useState(memoBiens?.d || null);
   const lire = (forcer) => {
     if (!forcer && memoBiens && Date.now() - memoBiens.t < 60000) { setD(memoBiens.d); return Promise.resolve(); }
-    return rpc('pilotage_biens').then((x) => { memoBiens = { d: x, t: Date.now() }; setD(x); }).catch(() => setD((v) => v || { lots: [], peut: false }));
+    return relireBiens().then(() => { if (!memoBiens) setD((v) => v || { lots: [], peut: false }); });
   };
-  useEffect(() => { lire(false); }, []);
+  useEffect(() => { abonnes.add(setD); lire(false); return () => { abonnes.delete(setD); }; }, []);
   const index = useMemo(() => {
     const parRef = {}, parId = {}, parMandat = {};
     (d?.lots || []).forEach((l) => { parRef[String(l.lot)] = l; parId[l.id] = l; if (l.mandat_id) (parMandat[l.mandat_id] = parMandat[l.mandat_id] || []).push(l); });
