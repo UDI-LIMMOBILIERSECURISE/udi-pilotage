@@ -79,7 +79,9 @@ async function r2(methode: 'PUT' | 'GET', cle: string, contenu?: Uint8Array, typ
   const hote = `${compte}.r2.cloudflarestorage.com`
   const date = new Date().toISOString().replace(/[:-]|\.\d{3}/g, ''), jour = date.slice(0, 8)
   const portee = `${jour}/auto/s3/aws4_request`
-  const chemin = `/${seau}/${cle.split('/').map(encodeURIComponent).join('/')}`
+  // Encodage RFC 3986 exigé par la signature S3 (encodeURIComponent laisse ! ' ( ) * : noms de pièces jointes refusés en 403)
+  const enc3986 = (x: string) => encodeURIComponent(x).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+  const chemin = `/${seau}/${cle.split('/').map(enc3986).join('/')}`
   const q = new URLSearchParams({ 'X-Amz-Algorithm': 'AWS4-HMAC-SHA256', 'X-Amz-Credential': `${acces}/${portee}`, 'X-Amz-Date': date, 'X-Amz-Expires': '300', 'X-Amz-SignedHeaders': 'host' })
   const qs = q.toString().replace(/\+/g, '%20')
   const canon = [methode, chemin, qs, `host:${hote}\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\n')
@@ -155,8 +157,9 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
     const att = await gmail(boite, `messages/${g.id}/attachments/${p.body!.attachmentId}`)
     if (!att?.data) continue
     const cle = `mails/${le.slice(0, 7)}/${g.id}/${nom.replace(/[\\/]/g, '_')}`
-    await r2('PUT', cle, deB64url(att.data), p.mimeType)
-    pj.push({ nom, type: p.mimeType || '', taille, cle })
+    // Une pièce jointe qui ne passe pas sur R2 ne bloque pas le mail : elle reste consultable dans Gmail
+    try { await r2('PUT', cle, deB64url(att.data), p.mimeType); pj.push({ nom, type: p.mimeType || '', taille, cle }) }
+    catch (e) { console.error('[pilotage-mails] PJ', nom, e instanceof Error ? e.message : e); pj.push({ nom, type: p.mimeType || '', taille, omis: 'copie impossible (reste dans Gmail)' }) }
   }
 
   let statut = 'a_verifier', methode = prep.methode || null, confiance = prep.certain ? 1 : null
