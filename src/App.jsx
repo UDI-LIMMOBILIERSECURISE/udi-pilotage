@@ -21,6 +21,7 @@ import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
+import { FriseImpaye, detteSoldee, NOMS_ORG } from './ImpayesFrise.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 // 139 : familles de dossiers de Ma journée (calculées par pilotage.famille_alerte)
@@ -1573,10 +1574,14 @@ function Impayes() {
   const [section, setSection] = useState('en_cours');
   const [moi, setMoi] = useState(null);
   const [vue, setVue] = useState(() => { try { return localStorage.getItem('vue-impayes') || 'cartes'; } catch { return 'cartes'; } });
+  const [onglet, setOnglet] = useState('mois');
+  const [mois, setMois] = useState(null);
+  const [rappro, setRappro] = useState(0);
+  const chargerMois = () => rpc('pilotage_impayes_mois').then(setMois).catch(() => setMois({ a_declarer: [], reglements: [], actualisations: [], en_attente: [] }));
   const changerVue = (v) => { setVue(v); try { localStorage.setItem('vue-impayes', v); } catch { /* stockage indisponible */ } };
   const biens = useBiens();
   const charger = () => rpc('pilotage_impayes').then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { charger(); rpc('pilotage_moi').then(setMoi).catch(() => {}); }, []);
+  useEffect(() => { charger(); chargerMois(); rpc('pilotage_moi').then(setMoi).catch(() => {}); }, []);
   if (err) return <div className="banner">{err}</div>;
   if (!d) return <p className="sub">Chargement…</p>;
   const ouvrir = async (bail) => { try { const id = await rpc('pilotage_impaye_ouvrir', { p_bail: bail, p_groupe: 'GLI ZELOK' }); await charger(); setSel(id); } catch (e) { setErr(e.message); } };
@@ -1590,46 +1595,63 @@ function Impayes() {
   const somme = (k) => actifs.reduce((t, x) => t + (Number(x[k]) || 0), 0);
   const groupesConnus = GROUPES_IMP.map((g) => g[0]);
   const autres = [...new Set(d.dossiers.map((x) => x.groupe).filter((g) => !groupesConnus.includes(g)))].map((g) => [g, g, '#666']);
+  // 13/11 (Nicolas : « la page est incompréhensible ») : trois onglets — ce qu'il y a à faire ce mois-ci, les dossiers en cours
+  // avec leur frise d'avancement selon l'organisme, et ce qui est à ranger (rattachements, garanties à corriger, dettes soldées).
+  const soldes = actifs.filter(detteSoldee);
+  const ecarts = d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé');
+  const nbRanger = d.candidats.length + ecarts.length + soldes.length + (rappro || 0);
+  const nbMois = mois ? (mois.a_declarer || []).length + (mois.reglements || []).length + (mois.actualisations || []).filter((a) => !a.fait_le).length : null;
+  const voirOnglet = q ? 'dossiers' : onglet;
   return <>
     <div className="entete"><div><h1>Suivi des impayés</h1>
-      <p className="sub">Un dossier par impayé : garantie, prise en charge, procédure, indemnisation et remboursements, avec le fil des échanges.</p></div></div>
-    <Tuiles items={[[actifs.length, 'Dossiers en cours'], [euro(somme('montant_impaye')), `Montant saisi · ${actifs.filter((x) => x.montant_impaye != null).length} dossier(s) sur ${actifs.length} renseigné(s)`],
-      [actifs.filter((x) => !x.declaration_le).length, 'Sans date de déclaration', true],
-      [actifs.filter((x) => x.audience_le && x.audience_le >= auj()).length, 'Audiences à venir'],
-      [euro(somme('solde_a_rembourser_assureur')), 'Solde à rembourser à l’assureur']]} />
-    <ImpayesMois peut={d.peut_saisir} apres={charger} />
-    <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-      <div className="bascule">{[['cartes', 'Biens'], ['tableau', 'Tableau']].map(([k, l]) => <button key={k} className={vue === k ? 'on' : ''} onClick={() => changerVue(k)}>{l}</button>)}</div>
-      <div className="row" style={{ gap: 8, flex: '1 1 280px', justifyContent: 'flex-end' }}>
-        {q && <span className="muted" style={{ fontSize: 13 }}>{dossiers.length} dossier{dossiers.length > 1 ? 's' : ''} trouvé{dossiers.length > 1 ? 's' : ''}, tous onglets</span>}
-        <input className="recherche" type="search" style={{ flex: '1 1 260px', maxWidth: 460 }} placeholder="Rechercher : locataire, bailleur, adresse, garantie, cause, personne…"
-          value={recherche} onChange={(e) => setRecherche(e.target.value)} aria-label="Rechercher un dossier d’impayé" />
-      </div>
+      <p className="sub">{actifs.length} dossiers en cours · {euro(somme('montant_impaye'))} saisis · {euro(somme('solde_a_rembourser_assureur'))} à rembourser aux assureurs.</p></div></div>
+    <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
+      <div className="bascule" role="tablist">{[['mois', 'À faire ce mois-ci', nbMois], ['dossiers', 'Dossiers en cours', actifs.length], ['ranger', 'À ranger', nbRanger]].map(([k, l, n]) =>
+        <button key={k} role="tab" aria-selected={voirOnglet === k} className={voirOnglet === k ? 'on' : ''} onClick={() => { setOnglet(k); setRecherche(''); }}>{l}{n != null ? ` · ${n}` : ''}</button>)}</div>
+      <input className="recherche" type="search" style={{ flex: '1 1 260px', maxWidth: 460 }} placeholder="Rechercher un dossier : locataire, bailleur, adresse, garantie…"
+        value={recherche} onChange={(e) => setRecherche(e.target.value)} aria-label="Rechercher un dossier d’impayé" />
     </div>
-    <div className="filtres-imp">
-      {[['en_cours', 'En cours', actifs.length], ...[...GROUPES_IMP, ...autres].map(([g, titre, c]) => [g, g === 'Clôturé' ? 'Clôturés' : (GROUPES_IMP.find((x) => x[0] === g) ? g : titre), d.dossiers.filter((x) => x.groupe === g).length, c]), ['tous', 'Tous', d.dossiers.length]]
-        .filter(([k, , n]) => n > 0 || ['en_cours', 'tous'].includes(k))
-        .map(([k, l, n, c]) => <button key={k} className={'chip' + (section === k ? ' on' : '')} style={c && section !== k ? { borderColor: c, color: c } : c ? { background: c, borderColor: c } : undefined} onClick={() => setSection(k)}>{l}<span className="n">{n}</span></button>)}
-    </div>
-    {d.peut_saisir && <Rapprochement apres={charger} />}
-    {d.candidats.length > 0 && <div className="mini-alerte haute" style={{ marginBottom: 14 }}>
-      <b>{d.candidats.length} bail{d.candidats.length > 1 ? 'x' : ''} en impayé dans Rivage sans dossier de suivi</b>
-      <div className="muted">Un dossier s'ouvre tout seul chaque matin dès que Rivage ouvre un cycle d'impayé ; ici, les baux en dette sans cycle ouvert.</div>
-      {d.candidats.map((c) => <div key={c.bail_id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-        <span>{(c.locataires || []).map((l) => l.nom).join(', ')} · {c.adresse} · impayé {euro(c.impaye)}{c.assureur_gli ? ' · GLI ' + c.assureur_gli : ''}</span>
-        {d.peut_saisir && <button className="btn" onClick={() => ouvrir(c.bail_id)}>Ouvrir un dossier</button>}</div>)}
-    </div>}
-    {/* 31/10 : seuls les dossiers en cours ; un dossier clôturé garde son avertissement sur sa carte */}
-    {d.dossiers.some((x) => x.ecart_garantie && x.groupe !== 'Clôturé') && <details className="mini-alerte haute" style={{ marginBottom: 14 }}>
-      <summary style={{ cursor: 'pointer' }}><b>{d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé').length} dossier(s) en cours dont la garantie ne concorde pas avec la GLI du bail dans Rivage</b></summary>
-      {d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé').map((x) => <div key={x.id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-        <span>{parties(x).titre} · {x.ecart_garantie}</span>
-        <button className="btn" onClick={() => setSel(x.id)}>Ouvrir</button></div>)}
-    </details>}
     <AvecDetail cle={sel} fermer={() => setSel(null)} vide="Clique sur un dossier pour ouvrir la fiche du bien et le suivi de l’impayé."
       titre={s ? titreLot(biens.lot(s.rivage?.lot), parties(s).titre) : ''}
       detail={s && <FicheLot l={biens.lot(s.rivage?.lot)} titre={'Impayé · ' + (s.groupe || 'dossier')} peut={biens.peut} apres={biens.recharger}>
+        <FriseImpaye x={s} mois={mois} />
         <DossierImpaye key={s.id} d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} /></FicheLot>}>
+
+      {voirOnglet === 'mois' && <ImpayesMois peut={d.peut_saisir} apres={charger} donnees={mois} recharger={chargerMois} />}
+
+      {voirOnglet === 'ranger' && <>
+        {nbRanger === 0 && <p className="muted">Rien à ranger.</p>}
+        {d.peut_saisir && <Rapprochement apres={charger} surCompte={setRappro} />}
+        {d.candidats.length > 0 && <div className="mini-alerte haute" style={{ marginBottom: 14 }}>
+          <b>{d.candidats.length} bail{d.candidats.length > 1 ? 'x' : ''} en dette dans Rivage sans dossier de suivi</b>
+          <div className="muted">Un dossier s'ouvre tout seul chaque matin dès que Rivage ouvre un cycle d'impayé ; ici, les baux en dette sans cycle ouvert.</div>
+          {d.candidats.map((c) => <div key={c.bail_id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+            <span>{(c.locataires || []).map((l) => l.nom).join(', ')} · {c.adresse} · impayé {euro(c.impaye)}{c.assureur_gli ? ' · GLI ' + c.assureur_gli : ''}</span>
+            {d.peut_saisir && <button className="btn" onClick={() => ouvrir(c.bail_id)}>Ouvrir un dossier</button>}</div>)}
+        </div>}
+        {ecarts.length > 0 && <div className="mini-alerte haute" style={{ marginBottom: 14 }}>
+          <b>{ecarts.length} dossier(s) dont la garantie ne concorde pas avec la GLI du bail dans Rivage</b>
+          {ecarts.map((x) => <div key={x.id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+            <span>{parties(x).titre} · {x.ecart_garantie}</span><button className="btn" onClick={() => setSel(x.id)}>Ouvrir</button></div>)}
+        </div>}
+        {soldes.length > 0 && <div className="mini-alerte normale" style={{ marginBottom: 14 }}>
+          <b>{soldes.length} dossier(s) en cours dont la dette est soldée dans Rivage</b>
+          <div className="muted">Plus rien n'est dû d'après Rivage : à clôturer si l'organisme n'attend plus rien (remboursement, quittance subrogative).</div>
+          {soldes.map((x) => <div key={x.id} className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+            <span>{parties(x).titre} · {x.groupe}{x.organisme ? ' · ' + (NOMS_ORG[x.organisme] || x.organisme) : ''}</span><button className="btn" onClick={() => setSel(x.id)}>Ouvrir</button></div>)}
+        </div>}
+      </>}
+
+      {voirOnglet === 'dossiers' && <>
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="filtres-imp" style={{ margin: 0 }}>
+            {[['en_cours', 'En cours', actifs.length], ...[...GROUPES_IMP, ...autres].map(([g, titre, c]) => [g, g === 'Clôturé' ? 'Clôturés' : (GROUPES_IMP.find((x) => x[0] === g) ? g : titre), d.dossiers.filter((x) => x.groupe === g).length, c]), ['tous', 'Tous', d.dossiers.length]]
+              .filter(([k, , n]) => n > 0 || ['en_cours', 'tous'].includes(k))
+              .map(([k, l, n, c]) => <button key={k} className={'chip' + (section === k ? ' on' : '')} style={c && section !== k ? { borderColor: c, color: c } : c ? { background: c, borderColor: c } : undefined} onClick={() => setSection(k)}>{l}<span className="n">{n}</span></button>)}
+          </div>
+          <div className="bascule">{[['cartes', 'Biens'], ['tableau', 'Tableau']].map(([k, l]) => <button key={k} className={vue === k ? 'on' : ''} onClick={() => changerVue(k)}>{l}</button>)}</div>
+        </div>
+        {q && <div className="muted" style={{ fontSize: 13, margin: '0 0 8px' }}>{dossiers.length} dossier{dossiers.length > 1 ? 's' : ''} trouvé{dossiers.length > 1 ? 's' : ''}, clôturés compris</div>}
       {[...GROUPES_IMP, ...autres].map(([g, titre, couleur]) => {
         if (!q && (section === 'en_cours' ? g === 'Clôturé' : section !== 'tous' && section !== g)) return null;
         const items = dossiers.filter((x) => x.groupe === g);
@@ -1639,7 +1661,7 @@ function Impayes() {
           <button className="groupe-tete" style={{ color: couleur }} onClick={() => setOuverts({ ...ouverts, [g]: !ouvert })}>
             {ouvert ? '▾' : '▸'} {titre} <span className="muted">{items.length} dossier{items.length > 1 ? 's' : ''}</span></button>
           {ouvert && vue === 'cartes' && <div className="stack" style={{ gap: 8, marginBottom: 12 }}>
-            {items.map((x) => <LigneImpaye key={x.id} x={x} l={biens.lot(x.rivage?.lot)} sel={sel === x.id} choisir={() => setSel(x.id)} />)}
+            {items.map((x) => <LigneImpaye key={x.id} x={x} l={biens.lot(x.rivage?.lot)} sel={sel === x.id} choisir={() => setSel(x.id)} mois={mois} />)}
             {!items.length && <div className="muted" style={{ padding: 8 }}>Aucun dossier.</div>}</div>}
           {ouvert && vue === 'tableau' && <div className="table-wrap" style={{ borderLeft: '4px solid ' + couleur, borderRadius: 8 }}><table className="table-imp">
             <thead><tr><th>Dossier</th><th>Cause</th><th>Personne</th><th>Notif. bailleur</th><th>Déclaré le</th><th>Garantie</th><th>Prise en charge</th><th>Montant</th><th>Indemnisation</th><th>Indemnité bailleur</th><th>Procédure</th><th>Audience</th><th>Échanges</th></tr></thead>
@@ -1662,6 +1684,7 @@ function Impayes() {
             {!items.length && <tr><td colSpan="13" className="muted">Aucun dossier.</td></tr>}</tbody></table></div>}
         </section>;
       })}
+      </>}
     </AvecDetail>
   </>;
 }
@@ -1871,9 +1894,9 @@ function CarteImpaye({ x, couleur, sel, choisir }) {
 }
 
 // Ligne d'un dossier d'impayé sur la frise de son lot (12/11) : titre, montant, garantie, prise en charge, procédure
-function LigneImpaye({ x, l, sel, choisir }) {
+function LigneImpaye({ x, l, sel, choisir, mois }) {
   const p = parties(x);
-  return <LigneLot l={l} sel={sel} ouvrir={choisir} gravite={x.ecart_garantie ? 'haute' : x.groupe === 'Clôturé' ? 'normale' : undefined}
+  return <LigneLot l={l} sel={sel} ouvrir={choisir} friseLot={false} gravite={x.ecart_garantie ? 'haute' : x.groupe === 'Clôturé' ? 'normale' : undefined}
     titre={p.adresse || 'Adresse ?'}
     entete={<>{p.titre}{x.cause ? ' · ' + x.cause : ''}</>}
     etiquettes={<>{x.montant_impaye != null && <span className="carte-imp-montant">{euro(x.montant_impaye)}</span>}{x.bail_id ? <span className="etq ok">Rivage ✓</span> : <span className="etq rose">Non rattaché</span>}</>}
@@ -1890,14 +1913,15 @@ function LigneImpaye({ x, l, sel, choisir }) {
         <span className="muted">{x.nb_notes ? `💬 ${x.nb_notes} · ${date(x.derniere_note)}` : '💬 0'}</span>
       </div>
       {x.ecart_garantie && <div style={{ color: 'var(--red)' }}>⚠ Garantie différente de Rivage : {x.ecart_garantie}</div>}
+      <FriseImpaye x={x} mois={mois} />
     </>} />;
 }
 
 // Rapprochement des dossiers non rattachés avec les baux Rivage (propositions à valider)
-function Rapprochement({ apres }) {
+function Rapprochement({ apres, surCompte }) {
   const [liste, setListe] = useState(null);
   const [ouvert, setOuvert] = useState(false);
-  const lire = () => rpc('pilotage_impayes_rapprochement').then(setListe).catch(() => setListe([]));
+  const lire = () => rpc('pilotage_impayes_rapprochement').then((l) => { setListe(l); surCompte && surCompte((l || []).length); }).catch(() => setListe([]));
   useEffect(() => { lire(); }, []);
   if (!liste || !liste.length) return null;
   const rattacher = async (id, bail) => { await rpc('pilotage_impaye_maj', { p_id: id, p_champ: 'bail_id', p_valeur: bail }); lire(); apres(); };
