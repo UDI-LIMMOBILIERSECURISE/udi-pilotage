@@ -1577,7 +1577,10 @@ function Impayes() {
   const [onglet, setOnglet] = useState('mois');
   const [mois, setMois] = useState(null);
   const [rappro, setRappro] = useState(0);
-  const chargerMois = () => rpc('pilotage_impayes_mois').then(setMois).catch(() => setMois({ a_declarer: [], reglements: [], actualisations: [], en_attente: [] }));
+  const [erreurMois, setErreurMois] = useState('');
+  // 13/11 : un échec (délai dépassé) n'est plus déguisé en « rien à déclarer » ; les frises gardent des listes vides
+  const chargerMois = () => rpc('pilotage_impayes_mois').then((m) => { setErreurMois(''); setMois(m); })
+    .catch((e) => { setErreurMois(e.message); setMois((m) => m || { a_declarer: [], reglements: [], actualisations: [], en_attente: [] }); });
   const changerVue = (v) => { setVue(v); try { localStorage.setItem('vue-impayes', v); } catch { /* stockage indisponible */ } };
   const biens = useBiens();
   const charger = () => rpc('pilotage_impayes').then(setD).catch((e) => setErr(e.message));
@@ -1600,7 +1603,7 @@ function Impayes() {
   const soldes = actifs.filter(detteSoldee);
   const ecarts = d.dossiers.filter((x) => x.ecart_garantie && x.groupe !== 'Clôturé');
   const nbRanger = d.candidats.length + ecarts.length + soldes.length + (rappro || 0);
-  const nbMois = mois ? (mois.a_declarer || []).length + (mois.reglements || []).length + (mois.actualisations || []).filter((a) => !a.fait_le).length : null;
+  const nbMois = mois ? (mois.jour >= 16 ? (mois.a_declarer || []).length : 0) + (mois.reglements || []).length + (mois.actualisations || []).filter((a) => !a.fait_le).length : null;
   const voirOnglet = q ? 'dossiers' : onglet;
   return <>
     <div className="entete"><div><h1>Suivi des impayés</h1>
@@ -1617,7 +1620,7 @@ function Impayes() {
         <FriseImpaye x={s} mois={mois} />
         <DossierImpaye key={s.id} d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} /></FicheLot>}>
 
-      {voirOnglet === 'mois' && <ImpayesMois peut={d.peut_saisir} apres={charger} donnees={mois} recharger={chargerMois} />}
+      {voirOnglet === 'mois' && <ImpayesMois peut={d.peut_saisir} apres={charger} donnees={mois} recharger={chargerMois} erreur={erreurMois} />}
 
       {voirOnglet === 'ranger' && <>
         {nbRanger === 0 && <p className="muted">Rien à ranger.</p>}
