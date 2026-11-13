@@ -145,3 +145,31 @@ export function BandeauMails({ ouvrir }) {
     <button className="btn" onClick={ouvrir}>Vérifier</button>
   </div>;
 }
+
+// 160 : commentaires Rivage du lot (lot, baux, mandat, tickets), en lecture seule. Le journal automatique de Rivage
+// (mails d'avis d'échéance, etc.) est replié derrière une case à cocher.
+export function CommentairesRivage({ lotId }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [liste, setListe] = useState(null);
+  const [err, setErr] = useState('');
+  const [auto, setAuto] = useState(false);
+  useEffect(() => { if (ouvert && !liste) rpc('pilotage_rivage_commentaires', { p_asset: lotId }).then(setListe).catch((e) => setErr(e.message)); }, [ouvert]);
+  const equipe = (liste || []).filter((c) => !c.auto);
+  const vus = (liste || []).filter((c) => auto || !c.auto);
+  return <details className="fb-bloc fb-complet" onToggle={(e) => setOuvert(e.currentTarget.open)}>
+    <summary>Commentaires Rivage{liste ? ` · ${equipe.length}` : ''}</summary>
+    {err && <div className="banner">{err}</div>}
+    {ouvert && !liste && !err && <p className="muted">Chargement…</p>}
+    {liste && <>
+      <label className="muted" style={{ display: 'block', margin: '6px 0' }}><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Afficher aussi le journal automatique de Rivage ({liste.length - equipe.length})</label>
+      {!vus.length && <p className="muted">Aucun commentaire de l’équipe dans Rivage sur ce lot, ses baux, son mandat ou ses tickets.</p>}
+      <ol className="histo">{vus.map((c) => <li key={c.id}>
+        <span className="muted">{dateHeure(c.le)}</span>
+        <span>
+          <span className="muted">{c.auteur ? c.auteur + ' · ' : 'Rivage · '}{c.sur}{c.ref ? ' n°' + c.ref : ''}{c.titre_ticket ? ' « ' + c.titre_ticket + ' »' : ''}</span>
+          <div style={{ whiteSpace: 'pre-wrap' }}>{c.texte}</div>
+        </span>
+      </li>)}</ol>
+    </>}
+  </details>;
+}

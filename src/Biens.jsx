@@ -9,7 +9,7 @@ import DossierMandat from './SuiviMandat.jsx';
 import { DossierBail } from './SuiviBaux.jsx';
 import { nature, texteRecherche, correspond } from './cartes.jsx';
 import { SuiviSinistre, ORIGINE } from './TicketsFil.jsx';
-import { EchangesLot } from './Echanges.jsx';
+import { EchangesLot , CommentairesRivage } from './Echanges.jsx';
 import { ClesLots } from './Cles.jsx';
 
 export const PHASES = [
@@ -278,6 +278,7 @@ export function FicheBien({ l, peut, moi: moiPage, apres, bloc, sansDossier }) {
     <section className="fb-bloc"><h3 className="fb-titre">Clés</h3><ClesLots assets={[l.id]} ouvert /></section>
     <HistoriqueTickets l={l} />
     <EchangesLot lotId={l.id} />
+    <CommentairesRivage lotId={l.id} />
     {!sansDossier && <details className="fb-bloc fb-complet" open={!!(af && (af.action || '').match(/contrôle|dossier|GO/i))}>
       <summary>Dossier complet du {l.bail_id ? 'bail' : 'mandat'} (contrôle, suivis, messages)</summary>
       {l.bail_id
