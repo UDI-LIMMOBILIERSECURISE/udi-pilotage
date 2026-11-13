@@ -69,12 +69,12 @@ export default function ImpayesMois({ peut, apres, donnees, recharger, erreur })
 
     {d.reglements.length > 0 && <div className="mini-alerte haute" style={{ marginTop: 8 }}>
       <b>Règlements reçus à signaler à l’organisme ({d.reglements.length})</b>
-      <div className="muted" style={{ fontSize: 12 }}>Le locataire a payé sur un dossier déjà déclaré : prévenir l’organisme avec l’extrait de compte, puis cliquer « Signalé ».</div>
+      <div className="muted" style={{ fontSize: 12 }}>Le locataire a payé sur un dossier déjà déclaré : envoyer l’extrait de compte à l’organisme (le pilotage ne l’envoie pas), puis cliquer « J’ai prévenu l’organisme » pour l’ôter de la liste.</div>
       {d.reglements.map((r, i) => <div key={r.dossier_id + '-' + i} className="row" style={ligne}>
         <div style={{ flex: '1 1 380px' }}>{r.locataires || r.bail_id} · {euro(r.montant)} reçu le {date(r.recu_le)} · {ORGANISMES[r.organisme] || r.organisme}
           {Number(r.indemnisation_compte || 0) !== 0 && <div style={{ fontSize: 12, color: 'var(--red)' }}>Indemnisation déjà enregistrée (compte GLI du bail : {euro(r.indemnisation_compte)}) : calculer la somme à reverser à l’organisme pour éviter une double indemnisation.</div>}</div>
         <div className="row" style={{ gap: 6 }}><button className="btn" onClick={() => setExtrait(r.bail_id)}>Extrait de compte</button>
-          {peut && <button className="btn plein" disabled={!!encours} onClick={() => agir('r' + i, `${r.locataires || 'Règlement'} : signalé à l’organisme.`, 'pilotage_impaye_reglement_signale', { p_dossier: r.dossier_id })}>{encours === 'r' + i ? 'Enregistrement…' : 'Signalé à l’organisme'}</button>}</div>
+          {peut && <button className="btn plein" disabled={!!encours} onClick={() => agir('r' + i, `${r.locataires || 'Règlement'} : signalé à l’organisme.`, 'pilotage_impaye_reglement_signale', { p_dossier: r.dossier_id })}>{encours === 'r' + i ? 'Enregistrement…' : 'J’ai prévenu l’organisme'}</button>}</div>
       </div>)}
     </div>}
 
