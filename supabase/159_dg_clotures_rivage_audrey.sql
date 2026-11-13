@@ -24,7 +24,7 @@ ins as (
 update pilotage.dg_suivi s
    set clos_le = '2026-11-12 21:35:00+01', clos_par = 'b3ce328a-11d4-445c-be6f-1479e46bfa28'::uuid, clos_motif = 'autre',
        clos_note = 'Bail clôturé dans Rivage par Audrey le 12/11/2026 (report dans le pilotage, script 159)'
-         || case when coalesce((select (g.data->>'deposit_refunded')::boolean from pilotage.objets g where g.id = s.bail_id), false)
+         || case when coalesce((select (g.data->>'deposit_refunded')::boolean from pilotage.objets g where g.id = s.bail_id and g.type = 'LeasingContract'), false)
                  then '' else ' — aucune restitution du dépôt enregistrée dans Rivage' end,
        maj_le = now()
  where s.bail_id in (select bail_id from clos_hier) and s.clos_le is null;
@@ -33,7 +33,7 @@ update pilotage.dg_suivi s
 update pilotage.dg_suivi s
    set clos_le = '2026-11-12 21:35:00+01', clos_par = 'b3ce328a-11d4-445c-be6f-1479e46bfa28'::uuid, clos_motif = 'autre',
        clos_note = 'Bail clôturé dans Rivage par Audrey le 12/11/2026 (report dans le pilotage, script 159)'
-         || case when coalesce((select (g.data->>'deposit_refunded')::boolean from pilotage.objets g where g.id = s.bail_id), false)
+         || case when coalesce((select (g.data->>'deposit_refunded')::boolean from pilotage.objets g where g.id = s.bail_id and g.type = 'LeasingContract'), false)
                  then '' else ' — aucune restitution du dépôt enregistrée dans Rivage' end,
        maj_le = now()
  where s.clos_le is null
