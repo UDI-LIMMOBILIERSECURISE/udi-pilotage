@@ -85,7 +85,8 @@ export default function Biens({ moi }) {
 // Ligne d'un lot (page Biens, et depuis le 12/11/2026 toutes les pages à lots) : frise, étapes, action en cours.
 // Une page ajoute ce qui lui est propre : entete (petite ligne au-dessus du titre), etiquettes (à droite), complement (sous le titre).
 // Sans lot connu (ticket d'immeuble, clés sans lot), la ligne garde la même forme avec le seul contenu de la page.
-export function LigneLot({ l, ouvrir, peut: peutPage, apres: apresPage, entete, etiquettes, complement, gravite, titre, sel }) {
+export function LigneLot({ l, ouvrir, peut: peutPage, apres: apresPage, entete, etiquettes, complement, gravite, titre, sel, friseLot = true }) {
+  // 13/11 : friseLot={false} quand la page a sa propre frise (impayés) — une seule frise par carte
   // 12/11 : bouton « Mettre en location » sur toutes les pages (droit lu dans la liste des biens partagée si la page ne le donne pas)
   const peut = peutPage ?? !!memoBiens?.d?.peut;
   const apres = apresPage || relireBiens;
@@ -117,13 +118,13 @@ export function LigneLot({ l, ouvrir, peut: peutPage, apres: apresPage, entete, 
       </div>
     </div>
     {complement && <div className="lot-complement">{complement}</div>}
-    <Frise phase={l.phase} />
-    {l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
-    {af && <div className={'a-faire' + (l.a_moi ? ' moi' : '') + (af.urgent ? ' urgent' : '')}>
+    {friseLot && <Frise phase={l.phase} />}
+    {friseLot && l.phase !== 'hors' && <Etapes etapes={l.etapes} courante={l.etape} />}
+    {friseLot && af && <div className={'a-faire' + (l.a_moi ? ' moi' : '') + (af.urgent ? ' urgent' : '')}>
       <strong>{l.a_moi ? 'À vous' : 'À faire par ' + af.prenom}</strong> : {af.action}{etape?.info ? ' · ' + etape.info : ''}
     </div>}
-    {!af && etape?.info && <div className="muted" style={{ marginTop: 4 }}>{etape.libelle} : {etape.info}</div>}
-    {peut && aMettreEnLocation(l) && <MettreEnLocation l={l} apres={apres} />}
+    {friseLot && !af && etape?.info && <div className="muted" style={{ marginTop: 4 }}>{etape.libelle} : {etape.info}</div>}
+    {friseLot && peut && aMettreEnLocation(l) && <MettreEnLocation l={l} apres={apres} />}
   </div>;
 }
 const LigneBien = LigneLot;

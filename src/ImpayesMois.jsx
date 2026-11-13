@@ -8,12 +8,14 @@ const euro = (n) => (n == null ? '—' : Number(n).toLocaleString('fr-FR', { min
 const auj = () => new Date().toISOString().slice(0, 10);
 export const ORGANISMES = { zelok: 'Zelok', mila: 'Mila', smartgarant: 'Smart Garant', garantme: 'Garantme', visale: 'Visale', avocats: 'Avocats', aucun: 'Sans garantie' };
 
-export default function ImpayesMois({ peut, apres }) {
-  const [d, setD] = useState(null);
+// 13/11 : les données peuvent venir de la page (donnees / recharger), qui s'en sert aussi pour les frises des dossiers
+export default function ImpayesMois({ peut, apres, donnees, recharger }) {
+  const [propre, setD] = useState(null);
   const [err, setErr] = useState('');
   const [extrait, setExtrait] = useState(null);
-  const charger = () => rpc('pilotage_impayes_mois').then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { charger(); }, []);
+  const d = donnees !== undefined ? donnees : propre;
+  const charger = () => (recharger ? Promise.resolve(recharger()) : rpc('pilotage_impayes_mois').then(setD).catch((e) => setErr(e.message)));
+  useEffect(() => { if (donnees === undefined) charger(); }, []);
   if (!d) return err ? <div className="banner">{err}</div> : null;
   const agir = async (fn, args) => { setErr(''); try { await rpc(fn, args); await charger(); apres && apres(); } catch (e) { setErr(e.message); } };
   const declarer = async (x) => {
@@ -31,6 +33,7 @@ export default function ImpayesMois({ peut, apres }) {
     <h2 style={{ fontSize: 17, margin: '0 0 6px' }}>Ce mois-ci</h2>
     {err && <div className="banner">{err}</div>}
     {rien && <p className="muted">Rien à déclarer ni à actualiser pour l’instant.</p>}
+    {(d.en_attente || []).length > 0 && <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{d.en_attente.length} bail(aux) Zelok n'ont que le loyer du mois en attente (prélèvements du 5 et du 10) : pas à déclarer avant le 16. Ils apparaîtront ici le 16 s'ils sont toujours impayés.</div>}
     {d.sans_organisme > 0 && <div className="muted" style={{ fontSize: 12 }}>{d.sans_organisme} dossier(s) en cours sans organisme (garantie « CDT via huissier », « avocat » ou non renseignée) : à compléter dans le dossier.</div>}
 
     {d.a_declarer.length > 0 && <div className={'mini-alerte ' + (fenetre ? (d.jour >= 18 ? 'critique' : 'haute') : 'normale')} style={{ marginTop: 8 }}>
