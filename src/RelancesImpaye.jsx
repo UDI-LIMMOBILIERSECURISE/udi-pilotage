@@ -86,30 +86,90 @@ export function RelancesBail({ bail, apres }) {
 }
 
 // Aperçu du mois (onglet « À faire ce mois-ci »)
+// 165 (13/11, Nicolas : « on peut tout sélectionner ou juste un et envoyer les SMS, le message est éditable ») : envoi manuel des SMS de
+// relance, sans attendre les relances automatiques. Texte de départ ci-dessous, modifiable avant l'envoi ; {nom} est remplacé pour chaque
+// locataire, {dette}, {adresse}, {constat_sms}… pour chaque bail. Envoi par pilotage-sms (Twilio, UDI GESTION), noté dans le dossier.
+const SMS_DEFAUT = 'Bonjour {nom}, {constat_sms}. Il reste {dette} à régler pour le logement {adresse}. Merci de faire le virement aujourd’hui ou de nous contacter si vous rencontrez une difficulté. UDI Gestion';
+
+async function erreurEnvoi(data, error) { return erreurFonction(data, error); }
+
 export function ApercuRelances() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
-  useEffect(() => { rpc('pilotage_relances_impayes_apercu').then(setD).catch((e) => setErr(e.message)); }, []);
-  if (err) return <div className="banner">{err}</div>;
+  const [sel, setSel] = useState(() => new Set());
+  const [texte, setTexte] = useState('');
+  const [apercus, setApercus] = useState(null);
+  const [etat, setEtat] = useState({});
+  const [encours, setEncours] = useState(false);
+  const charger = () => rpc('pilotage_relances_impayes_apercu').then(setD).catch((e) => setErr(e.message));
+  useEffect(() => {
+    charger();
+    setTexte((t) => t || SMS_DEFAUT);   // pas le modèle automatique (J0), qui renvoie au mail envoyé en même temps
+  }, []);
+  if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return null;
   const lignes = d.lignes || [];
   const enCours = lignes.filter((l) => l.cycle && !l.cycle.pause_motif);
   const pause = lignes.filter((l) => l.cycle?.pause_motif);
   const relancables = lignes.filter((l) => !l.cycle && !l.motif);
   const ecartes = lignes.filter((l) => !l.cycle && l.motif);
-  const ligne = (l, info) => <div key={l.bail_id} className="row" style={{ justifyContent: 'space-between', gap: 8, padding: '3px 0', borderBottom: '1px solid var(--line)' }}>
-    <span>{l.locataires || l.bail_id}{l.reference ? <span className="muted"> · bail {l.reference}</span> : null} · {euro(l.dette)} · {ORIGINE[l.origine] || l.origine}</span>
-    <span className="muted" style={{ fontSize: 12, textAlign: 'right' }}>{info}</span></div>;
+  const basculer = (id) => { setApercus(null); setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
+  const tous = (liste, oui) => { setApercus(null); setSel((s) => { const n = new Set(s); liste.forEach((l) => (oui ? n.add(l.bail_id) : n.delete(l.bail_id))); return n; }); };
+  const nom = (id) => lignes.find((l) => l.bail_id === id)?.locataires || id;
+  const verifier = async () => {
+    setErr('');
+    try { setApercus(await rpc('pilotage_relances_sms_textes', { p_baux: [...sel], p_texte: texte })); } catch (e) { setErr(e.message); }
+  };
+  const envoyer = async () => {
+    setEncours(true); setErr('');
+    const jour = new Date().toISOString().slice(0, 10);
+    for (const a of apercus || []) {
+      if (!a.portables || (a.manquants || []).length || etat[a.bail_id]?.ok) continue;
+      setEtat((e) => ({ ...e, [a.bail_id]: { txt: 'Envoi…' } }));
+      const { data, error } = await supabase.functions.invoke('pilotage-sms', { body: { bail: a.bail_id, texte: a.texte,
+        cle: `rim:${a.bail_id}:${jour}`, etape: 'sms_manuel', detail: 'Relance impayé envoyée à la main' } });
+      if (error || !data?.ok) { const m = await erreurEnvoi(data, error); setEtat((e) => ({ ...e, [a.bail_id]: { ko: true, txt: m } })); }
+      else setEtat((e) => ({ ...e, [a.bail_id]: { ok: true, txt: `envoyé (${(data.resultats || []).filter((r) => r.ok).length} SMS)` } }));
+    }
+    setEncours(false);
+  };
+  const ligne = (l, info, cochable = true) => <label key={l.bail_id} className="row" style={{ justifyContent: 'space-between', gap: 8, padding: '3px 0', borderBottom: '1px solid var(--line)', cursor: cochable ? 'pointer' : 'default' }}>
+    <span>{cochable && <input type="checkbox" checked={sel.has(l.bail_id)} onChange={() => basculer(l.bail_id)} style={{ marginRight: 6 }} aria-label={'Sélectionner ' + (l.locataires || l.bail_id)} />}
+      {l.locataires || l.bail_id}{l.reference ? <span className="muted"> · bail {l.reference}</span> : null} · {euro(l.dette)} · {ORIGINE[l.origine] || l.origine}</span>
+    <span className="muted" style={{ fontSize: 12, textAlign: 'right' }}>{etat[l.bail_id] ? <b style={{ color: etat[l.bail_id].ko ? 'var(--red)' : 'var(--teal)' }}>{etat[l.bail_id].txt}</b> : info}</span></label>;
+  const tousCoches = (liste) => liste.length > 0 && liste.every((l) => sel.has(l.bail_id));
+  const entete = (titre, liste) => <summary style={{ cursor: 'pointer' }}><b>{titre} ({liste.length})</b>
+    {liste.length > 0 && <button className="lien" onClick={(e) => { e.preventDefault(); tous(liste, !tousCoches(liste)); }}>{tousCoches(liste) ? 'tout désélectionner' : 'tout sélectionner'}</button>}</summary>;
+  const prets = (apercus || []).filter((a) => a.portables && !(a.manquants || []).length && !etat[a.bail_id]?.ok);
   return <section className="card" style={{ marginBottom: 14 }}>
-    <h2 style={{ fontSize: 17, margin: '0 0 6px' }}>Relances automatiques</h2>
-    {!d.actif && <div className="mini-alerte normale">Désactivées : rien ne part. Pour les lancer, activer « Relances automatiques des impayés » dans Règles de relance, après avoir coupé les relances d’impayés dans Rivage. Seuls les impayés détectés à partir de ce jour-là seront relancés.</div>}
-    {d.actif && <p className="muted" style={{ margin: '0 0 6px' }}>Chaque matin vers 9 h : SMS et mails selon le calendrier du mois ; appels et mise en demeure dans Ma journée d’Audrey.</p>}
-    {enCours.length > 0 && <details open><summary><b>En cours ({enCours.length})</b></summary>
+    <h2 style={{ fontSize: 17, margin: '0 0 6px' }}>Relances des impayés</h2>
+    {err && <div className="banner">{err}</div>}
+    <p className="muted" style={{ margin: '0 0 6px' }}>Coche un, plusieurs ou tous les locataires, ajuste le message, puis envoie : SMS de UDI GESTION aux portables connus dans Rivage, noté dans le dossier d’impayé.
+      {d.actif ? ' Relances automatiques actives en plus (chaque matin vers 9 h).' : ' Relances automatiques (sans clic) : désactivées, voir Règles de relance.'}</p>
+    {enCours.length > 0 && <details open>{entete('Relances automatiques en cours', enCours)}
       {enCours.map((l) => ligne(l, l.cycle.prochaine ? `${l.cycle.prochaine.libelle} : ${l.cycle.prochaine.statut === 'erreur' ? 'non envoyé' : date(l.cycle.prochaine.le)}` : 'plus rien de prévu ce mois-ci'))}</details>}
-    {pause.length > 0 && <details><summary><b>En pause ({pause.length})</b></summary>{pause.map((l) => ligne(l, l.cycle.pause_motif))}</details>}
-    {relancables.length > 0 && <details open={!d.actif}><summary><b>{d.actif ? 'En dette, sans relance automatique ce mois-ci' : 'Seraient relancés si les relances étaient actives'} ({relancables.length})</b></summary>
-      {relancables.map((l) => ligne(l, 'premier envoi au ' + date(l.j0)))}</details>}
-    {ecartes.length > 0 && <details><summary><b>Écartés, suivis à la main ({ecartes.length})</b></summary>{ecartes.map((l) => ligne(l, l.motif))}</details>}
+    {pause.length > 0 && <details>{entete('En pause', pause)}{pause.map((l) => ligne(l, l.cycle.pause_motif))}</details>}
+    {relancables.length > 0 && <details open>{entete('Impayés du mois', relancables)}
+      {relancables.map((l) => ligne(l, 'impayé depuis le ' + date(l.j0)))}</details>}
+    {ecartes.length > 0 && <details>{entete('Dettes suivies à la main (anciennes, en procédure, plus de 2 mois)', ecartes)}{ecartes.map((l) => ligne(l, l.motif))}</details>}
     {!lignes.length && <p className="muted">Aucun bail en dette au-delà du seuil.</p>}
+
+    {sel.size > 0 && <div className="panneau" style={{ marginTop: 10 }}>
+      <b>SMS à {sel.size} bail{sel.size > 1 ? 'x' : ''}</b>
+      <textarea rows="4" style={{ width: '100%', marginTop: 6 }} value={texte} onChange={(e) => { setTexte(e.target.value); setApercus(null); }} aria-label="Texte du SMS" />
+      <div className="muted" style={{ fontSize: 12 }}>{texte.length} caractères · champs remplis pour chaque bail : {'{nom}'} (chaque locataire), {'{dette}'}, {'{adresse}'}, {'{constat_sms}'}, {'{reference}'}.</div>
+      {!apercus ? <button className="btn plein" style={{ marginTop: 6 }} onClick={verifier}>Voir les SMS avant l’envoi</button> : <>
+        <div className="stack" style={{ gap: 4, maxHeight: 260, overflow: 'auto', marginTop: 6 }}>
+          {apercus.map((a) => <div key={a.bail_id} style={{ fontSize: 13, borderBottom: '1px solid var(--line)', padding: '4px 0' }}>
+            <b>{nom(a.bail_id)}</b>{!a.portables ? <span style={{ color: 'var(--red)' }}> · aucun portable dans Rivage : pas d’envoi</span>
+              : (a.manquants || []).length ? <span style={{ color: 'var(--red)' }}> · champ non rempli : {a.manquants.join(', ')}</span> : <span className="muted"> · {a.portables} portable{a.portables > 1 ? 's' : ''}</span>}
+            <div className="muted">{a.texte}</div></div>)}
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 6 }}>
+          <button className="btn plein" disabled={encours || !prets.length} onClick={envoyer}>{encours ? 'Envoi en cours…' : `Envoyer ${prets.length} SMS`}</button>
+          <button className="lien" disabled={encours} onClick={() => setApercus(null)}>Modifier</button>
+          <button className="lien" disabled={encours} onClick={() => { setSel(new Set()); setApercus(null); setEtat({}); charger(); }}>Terminer</button>
+        </div></>}
+    </div>}
   </section>;
 }
