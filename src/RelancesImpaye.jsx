@@ -154,7 +154,7 @@ export function ApercuRelances() {
     {ecartes.length > 0 && <details>{entete('Dettes suivies à la main (anciennes, en procédure, plus de 2 mois)', ecartes)}{ecartes.map((l) => ligne(l, l.motif))}</details>}
     {!lignes.length && <p className="muted">Aucun bail en dette au-delà du seuil.</p>}
 
-    {sel.size > 0 && <div className="panneau" style={{ marginTop: 10 }}>
+    {sel.size > 0 && <div className="panneau" style={{ marginTop: 10, position: 'sticky', bottom: 8, zIndex: 5, background: '#fff', boxShadow: '0 -6px 20px rgba(16,24,40,.15)' }}>
       <b>SMS à {sel.size} bail{sel.size > 1 ? 'x' : ''}</b>
       <textarea rows="4" style={{ width: '100%', marginTop: 6 }} value={texte} onChange={(e) => { setTexte(e.target.value); setApercus(null); }} aria-label="Texte du SMS" />
       <div className="muted" style={{ fontSize: 12 }}>{texte.length} caractères · champs remplis pour chaque bail : {'{nom}'} (chaque locataire), {'{dette}'}, {'{adresse}'}, {'{constat_sms}'}, {'{reference}'}.</div>
