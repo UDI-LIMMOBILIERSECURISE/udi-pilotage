@@ -78,7 +78,7 @@ function Modele({ m, modifiable, agir }) {
       <summary style={{ cursor: 'pointer' }}>
         <span className={'tag ' + (m.canal === 'sms' ? 'oblig' : 'tache')}>{CANAL[m.canal]}</span>{' '}
         <strong style={{ opacity: m.actif ? 1 : 0.5 }}>{m.libelle}</strong>
-        <span className="muted"> · {CIBLE[m.cible]}{m.envoi === 'twilio' ? ' · envoyé par le pilotage (UDI GESTION)' : ''}{!m.actif ? ' · désactivé' : ''}</span>
+        <span className="muted"> · {CIBLE[m.cible]}{m.envoi === 'twilio' ? ' · envoyé par le pilotage (UDI GESTION)' : m.envoi === 'pilotage' ? ' · envoyé par le pilotage (votregestionnaire@udi-immo.com)' : ''}{!m.actif ? ' · désactivé' : ''}</span>
       </summary>
       <div className="stack" style={{ gap: 6, marginTop: 8 }}>
         {m.canal === 'email' && <label style={{ fontSize: 13 }}>Objet<input style={{ width: '100%' }} value={objet} disabled={!modifiable} onChange={(e) => setObjet(e.target.value)} /></label>}

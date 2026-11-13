@@ -22,6 +22,7 @@ import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
 import { FriseImpaye, detteSoldee, NOMS_ORG, derniereAction, ACTIONS_RELANCE } from './ImpayesFrise.jsx';
+import { RelancesBail, ApercuRelances } from './RelancesImpaye.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 // 139 : familles de dossiers de Ma journée (calculées par pilotage.famille_alerte)
@@ -1621,6 +1622,7 @@ function Impayes() {
         <DossierImpaye key={s.id} d={s} membres={d.membres} peut={d.peut_saisir} recharger={charger} /></FicheLot>}>
 
       {voirOnglet === 'mois' && <ImpayesMois peut={d.peut_saisir} apres={charger} donnees={mois} recharger={chargerMois} erreur={erreurMois} />}
+      {voirOnglet === 'mois' && <ApercuRelances />}
 
       {voirOnglet === 'ranger' && <>
         {nbRanger === 0 && <p className="muted">Rien à ranger.</p>}
@@ -1853,6 +1855,7 @@ function DossierImpaye({ d, membres, peut, recharger }) {
       <button className="btn" onClick={() => noterRelance('relance')}>{ACTIONS_RELANCE.relance}</button>
       <button className="btn" onClick={() => noterRelance('med')}>{ACTIONS_RELANCE.med}</button>
     </div>}
+    {d.bail_id && d.groupe !== 'Clôturé' && <RelancesBail key={d.bail_id} bail={d.bail_id} apres={recharger} />}
     <h3>Sous-éléments / actions</h3>
     <ol className="histo">{d.actions.map((a) => <li key={a.id}><span className="muted">{date(a.le)}</span><span style={{ flex: 1 }}>{a.libelle}{a.par ? <span className="muted"> · {a.par}</span> : ''}</span>
       {peut ? <select value={a.statut} onChange={(e) => statutAction(a, e.target.value)}>{[...new Set(['À faire', 'En cours', 'Fait', a.statut])].map((o) => <option key={o}>{o}</option>)}</select> : <span>{a.statut}</span>}</li>)}
