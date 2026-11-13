@@ -1229,7 +1229,8 @@ function SortiesDG() {
       [d.filter(tests.retard).length, 'Au-delà d’un mois', true], [partis.filter((x) => !x.restitution_creee).length, 'Restitution non créée', true]]} />
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <Filtres val={filtre} set={setFiltre} items={[['tous', 'Tous', recents.length], ['preavis', 'Préavis', d.filter(tests.preavis).length],
-        ['partis', 'À restituer', partis.length], ['retard', 'En retard', d.filter(tests.retard).length], ['anciens', 'Baux à clôturer dans Rivage', anciens.length], ['clos', 'Clôturés', d.filter(clos).length]]} />
+        ['partis', 'À restituer', partis.length], ['retard', 'En retard', d.filter(tests.retard).length], ['anciens', 'Baux à clôturer dans Rivage', anciens.length]]} />
+      {/* 13/11 : filtre « Clôturés » retiré (demande de Nicolas) ; un dossier clôturé se retrouve par la recherche */}
       <input className="recherche" placeholder="Rechercher : nom, adresse, téléphone, e-mail, n° de bail" value={cherche} onChange={(e) => setCherche(e.target.value)} aria-label="Rechercher un congé" />
     </div>
     {q && <div className="muted" style={{ margin: '6px 0' }}>{vus.length} dossier(s) trouvé(s) sur tous les congés.</div>}
