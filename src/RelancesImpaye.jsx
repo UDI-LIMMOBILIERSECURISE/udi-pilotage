@@ -89,6 +89,10 @@ export function RelancesBail({ bail, apres }) {
 // 165 (13/11, Nicolas : « on peut tout sélectionner ou juste un et envoyer les SMS, le message est éditable ») : envoi manuel des SMS de
 // relance, sans attendre les relances automatiques. Texte de départ ci-dessous, modifiable avant l'envoi ; {nom} est remplacé pour chaque
 // locataire, {dette}, {adresse}, {constat_sms}… pour chaque bail. Envoi par pilotage-sms (Twilio, UDI GESTION), noté dans le dossier.
+// Recherche (13/11, Nicolas) : sans accents ni majuscules, tous les mots tapés, sur le nom, le n° de bail et la dette
+const sansAccents = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const trouve = (l, q) => { if (!q) return true; const h = sansAccents([l.locataires, l.reference, 'bail ' + (l.reference || ''), euro(l.dette), l.dette].join(' '));
+  return sansAccents(q).split(/\s+/).filter(Boolean).every((m) => h.includes(m)); };
 const SMS_DEFAUT = 'Bonjour {nom}, {constat_sms}. Il reste {dette} à régler pour le logement {adresse}. Merci de faire le virement aujourd’hui ou de nous contacter si vous rencontrez une difficulté. UDI Gestion';
 
 async function erreurEnvoi(data, error) { return erreurFonction(data, error); }
@@ -101,6 +105,7 @@ export function ApercuRelances() {
   const [apercus, setApercus] = useState(null);
   const [etat, setEtat] = useState({});
   const [encours, setEncours] = useState(false);
+  const [q, setQ] = useState('');
   const charger = () => rpc('pilotage_relances_impayes_apercu').then(setD).catch((e) => setErr(e.message));
   useEffect(() => {
     charger();
@@ -109,10 +114,11 @@ export function ApercuRelances() {
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return null;
   const lignes = d.lignes || [];
-  const enCours = lignes.filter((l) => l.cycle && !l.cycle.pause_motif);
-  const pause = lignes.filter((l) => l.cycle?.pause_motif);
-  const relancables = lignes.filter((l) => !l.cycle && !l.motif);
-  const ecartes = lignes.filter((l) => !l.cycle && l.motif);
+  const vues = lignes.filter((l) => trouve(l, q));
+  const enCours = vues.filter((l) => l.cycle && !l.cycle.pause_motif);
+  const pause = vues.filter((l) => l.cycle?.pause_motif);
+  const relancables = vues.filter((l) => !l.cycle && !l.motif);
+  const ecartes = vues.filter((l) => !l.cycle && l.motif);
   const basculer = (id) => { setApercus(null); setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
   const tous = (liste, oui) => { setApercus(null); setSel((s) => { const n = new Set(s); liste.forEach((l) => (oui ? n.add(l.bail_id) : n.delete(l.bail_id))); return n; }); };
   const nom = (id) => lignes.find((l) => l.bail_id === id)?.locataires || id;
@@ -146,13 +152,19 @@ export function ApercuRelances() {
     {err && <div className="banner">{err}</div>}
     <p className="muted" style={{ margin: '0 0 6px' }}>Coche un, plusieurs ou tous les locataires, ajuste le message, puis envoie : SMS de UDI GESTION aux portables connus dans Rivage, noté dans le dossier d’impayé.
       {d.actif ? ' Relances automatiques actives en plus (chaque matin vers 9 h).' : ' Relances automatiques (sans clic) : désactivées, voir Règles de relance.'}</p>
+    {lignes.length > 0 && <div className="row" style={{ gap: 8, margin: '4px 0 8px' }}>
+      <input className="recherche" type="search" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: '1 1 260px', maxWidth: 460 }}
+        placeholder="Rechercher un locataire : nom, n° de bail, montant…" aria-label="Rechercher un locataire dans les relances" />
+      {q && <span className="muted" style={{ fontSize: 12 }}>{vues.length} sur {lignes.length}{sel.size ? ` · ${sel.size} coché(s) en tout` : ''}</span>}
+    </div>}
     {enCours.length > 0 && <details open>{entete('Relances automatiques en cours', enCours)}
       {enCours.map((l) => ligne(l, l.cycle.prochaine ? `${l.cycle.prochaine.libelle} : ${l.cycle.prochaine.statut === 'erreur' ? 'non envoyé' : date(l.cycle.prochaine.le)}` : 'plus rien de prévu ce mois-ci'))}</details>}
-    {pause.length > 0 && <details>{entete('En pause', pause)}{pause.map((l) => ligne(l, l.cycle.pause_motif))}</details>}
+    {pause.length > 0 && <details open={!!q}>{entete('En pause', pause)}{pause.map((l) => ligne(l, l.cycle.pause_motif))}</details>}
     {relancables.length > 0 && <details open>{entete('Impayés du mois', relancables)}
       {relancables.map((l) => ligne(l, 'impayé depuis le ' + date(l.j0)))}</details>}
-    {ecartes.length > 0 && <details>{entete('Dettes suivies à la main (anciennes, en procédure, plus de 2 mois)', ecartes)}{ecartes.map((l) => ligne(l, l.motif))}</details>}
+    {ecartes.length > 0 && <details open={!!q}>{entete('Dettes suivies à la main (anciennes, en procédure, plus de 2 mois)', ecartes)}{ecartes.map((l) => ligne(l, l.motif))}</details>}
     {!lignes.length && <p className="muted">Aucun bail en dette au-delà du seuil.</p>}
+    {lignes.length > 0 && q && !vues.length && <p className="muted">Aucun locataire ne correspond à « {q} ».</p>}
 
     {sel.size > 0 && <div className="panneau" style={{ marginTop: 10, position: 'sticky', bottom: 8, zIndex: 5, background: '#fff', boxShadow: '0 -6px 20px rgba(16,24,40,.15)' }}>
       <b>SMS à {sel.size} bail{sel.size > 1 ? 'x' : ''}</b>
