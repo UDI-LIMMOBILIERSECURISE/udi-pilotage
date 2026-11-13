@@ -11,7 +11,27 @@ export const NOMS_ORG = { zelok: 'Zelok', mila: 'Mila', smartgarant: 'Smart Gara
 const GLI = ['zelok', 'mila', 'smartgarant', 'garantme', 'visale'];
 const RANG = { opened: 1, reminded: 2, formal_notice: 3, gli_reported: 4, long_contentious: 5, closed: 6 };
 
+// Relances notées dans le dossier (13/11) : « Relance amiable faite », « Mise en demeure envoyée » (boutons de la fiche),
+// ou toute action au statut Fait dont le libellé parle de relance / mise en demeure. La frise n'attend plus Rivage seul.
+export const ACTIONS_RELANCE = { relance: 'Relance amiable faite', med: 'Mise en demeure envoyée' };
+const MOTIF = { relance: /relance|relanc[ée]/i, med: /mise en demeure|\bMED\b/i };
+export function derniereAction(x, quoi) {
+  const l = (x.actions || []).filter((a) => a.statut === 'Fait' && MOTIF[quoi].test(a.libelle || ''));
+  if (!l.length) return null;
+  return l.map((a) => a.le || (a.cree_le || '').slice(0, 10)).filter(Boolean).sort().pop() || '';
+}
+
 export const detteSoldee = (x) => !!x.bail_id && x.rivage && Number(x.rivage.impaye || 0) <= 0 && Number(x.rivage.solde_locataire || 0) <= 0;
+
+// Étape de relance : faite si notée dans le dossier ou si le cycle Rivage l'a passée ; si l'étape suivante est franchie
+// sans relance notée, elle apparaît « sautée » (grisée) au lieu d'être cochée à tort.
+function etapeRelance(x, quoi, lib, parRivage, depassee) {
+  const le = derniereAction(x, quoi);
+  if (le != null) return [lib, true, le ? 'le ' + date(le) : 'notée dans le dossier'];
+  if (parRivage) return [lib, true, 'selon Rivage'];
+  if (depassee) return [lib + ' (non notée)', false, 'Aucune ' + lib.toLowerCase() + ' notée dans le dossier', true];
+  return [lib, false, ''];
+}
 
 // Phases du dossier : [libellé, fait, détail, refus]
 export function phasesImpaye(x) {
@@ -23,8 +43,8 @@ export function phasesImpaye(x) {
     const refus = /NON|REFUS/i.test(t(x.prise_en_charge));
     return [
       ['Impayé constaté', true, x.cycle?.ouvert_le ? 'le ' + date(x.cycle.ouvert_le) : ''],
-      ['Relance amiable', rang >= 2 || declare, ''],
-      ['Mise en demeure', rang >= 3 || declare, ''],
+      etapeRelance(x, 'relance', 'Relance amiable', rang >= 2, declare),
+      etapeRelance(x, 'med', 'Mise en demeure', rang >= 3, declare),
       ['Déclaré à ' + org, declare, x.declaration_le ? 'le ' + date(x.declaration_le) : ''],
       [refus ? 'Prise en charge refusée' : 'Prise en charge', /OUI|DECOMPTE|OK/i.test(t(x.prise_en_charge)), t(x.prise_en_charge), refus],
       ['Indemnisation reçue', /OK|RECUE|QUITTANCE/i.test(t(x.indemnisation_recue)), x.indemnisation_montant ? euro(x.indemnisation_montant) : ''],
@@ -34,8 +54,8 @@ export function phasesImpaye(x) {
   const p = t(x.procedure);
   return [
     ['Impayé constaté', true, x.cycle?.ouvert_le ? 'le ' + date(x.cycle.ouvert_le) : ''],
-    ['Relance amiable', rang >= 2 || !!x.commandement_le || !!p, ''],
-    ['Mise en demeure', rang >= 3 || !!x.commandement_le || !!p, ''],
+    etapeRelance(x, 'relance', 'Relance amiable', rang >= 2, !!x.commandement_le || !!p),
+    etapeRelance(x, 'med', 'Mise en demeure', rang >= 3, !!x.commandement_le || !!p),
     ['Commandement de payer', !!x.commandement_le || /CDT|COMMANDEMENT|AVOCAT|ASSIGNATION/i.test(p), x.commandement_le ? 'le ' + date(x.commandement_le) : ''],
     ['Avocat, assignation', /AVOCAT|ASSIGNATION/i.test(p) || !!x.audience_le, ''],
     ['Audience', !!x.audience_le && x.audience_le < new Date().toISOString().slice(0, 10), x.audience_le ? 'le ' + date(x.audience_le) : ''],
@@ -64,7 +84,7 @@ export function obligationsImpaye(x, mois) {
 export function FriseImpaye({ x, mois }) {
   const ph = phasesImpaye(x);
   const clos = x.groupe === 'Clôturé';
-  const courante = clos ? -1 : ph.findIndex((p) => !p[1]);
+  const courante = clos ? -1 : ph.findIndex((p) => !p[1] && !p[3]);
   const obl = clos ? [] : obligationsImpaye(x, mois);
   return <div>
     <ol className="frise" aria-label="Avancement du dossier d’impayé">

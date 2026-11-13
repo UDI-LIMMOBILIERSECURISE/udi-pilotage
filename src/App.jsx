@@ -21,7 +21,7 @@ import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
 import ImpayesMois, { Extrait, ORGANISMES } from './ImpayesMois.jsx';
-import { FriseImpaye, detteSoldee, NOMS_ORG } from './ImpayesFrise.jsx';
+import { FriseImpaye, detteSoldee, NOMS_ORG, derniereAction, ACTIONS_RELANCE } from './ImpayesFrise.jsx';
 
 const CAT = { oblig: 'Obligation', tache: 'Tâche', controle: 'Contrôle', courrier: 'Courrier' };
 // 139 : familles de dossiers de Ma journée (calculées par pilotage.famille_alerte)
@@ -1777,6 +1777,18 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     return <label key={cle + d.maj_le} className="champ-imp"><span>{libelle}</span>{input}</label>;
   };
   const ajouterAction = async () => { if (!action.trim()) return; try { await rpc('pilotage_impaye_action', { p_impaye: d.id, p_libelle: action, p_le: actionLe || null }); setAction(''); setActionLe(''); recharger(); } catch (e) { setErr(e.message); } };
+  // Relance ou mise en demeure faite : action datée du jour, passée à « Fait » (fait avancer la frise, 13/11)
+  const noterRelance = async (quoi) => {
+    const lib = ACTIONS_RELANCE[quoi], jour = new Date().toISOString().slice(0, 10);
+    try {
+      await rpc('pilotage_impaye_action', { p_impaye: d.id, p_libelle: lib, p_le: jour });
+      const tous = await rpc('pilotage_impayes');
+      const moi = (tous?.dossiers || []).find((y) => y.id === d.id);
+      const a = (moi?.actions || []).filter((y) => y.libelle === lib && y.statut !== 'Fait').pop();
+      if (a) await rpc('pilotage_impaye_action_statut', { p_action: a.id, p_statut: 'Fait' });
+      recharger();
+    } catch (e) { setErr(e.message); }
+  };
   const statutAction = async (a, st) => { try { await rpc('pilotage_impaye_action_statut', { p_action: a.id, p_statut: st }); recharger(); } catch (e) { setErr(e.message); } };
   return <>
     <datalist id="causes-imp">{CAUSES_IMP.map((c) => <option key={c} value={c} />)}</datalist>
@@ -1833,6 +1845,11 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     </div>
     {peut ? <label className="champ-imp" style={{ marginTop: 8 }}><span>Observations</span><textarea rows="3" defaultValue={d.observations || ''} key={'o' + d.maj_le} onBlur={(e) => e.target.value !== (d.observations || '') && maj('observations', e.target.value)} /></label>
       : d.observations && <p>{d.observations}</p>}
+    {peut && d.groupe !== 'Clôturé' && <div className="row" style={{ margin: '10px 0', gap: 8 }}>
+      <span className="muted">Noter aujourd’hui :</span>
+      <button className="btn" onClick={() => noterRelance('relance')}>{ACTIONS_RELANCE.relance}</button>
+      <button className="btn" onClick={() => noterRelance('med')}>{ACTIONS_RELANCE.med}</button>
+    </div>}
     <h3>Sous-éléments / actions</h3>
     <ol className="histo">{d.actions.map((a) => <li key={a.id}><span className="muted">{date(a.le)}</span><span style={{ flex: 1 }}>{a.libelle}{a.par ? <span className="muted"> · {a.par}</span> : ''}</span>
       {peut ? <select value={a.statut} onChange={(e) => statutAction(a, e.target.value)}>{[...new Set(['À faire', 'En cours', 'Fait', a.statut])].map((o) => <option key={o}>{o}</option>)}</select> : <span>{a.statut}</span>}</li>)}
@@ -1893,24 +1910,44 @@ function CarteImpaye({ x, couleur, sel, choisir }) {
   </button>;
 }
 
-// Ligne d'un dossier d'impayé sur la frise de son lot (12/11) : titre, montant, garantie, prise en charge, procédure
+// Ligne d'un dossier d'impayé sur la frise de son lot (12/11). Revue le 13/11 pour une lecture d'un coup d'œil :
+// montant = dette Rivage (le montant saisi n'apparaît qu'en écart), badge = statut du cycle Rivage et ancienneté,
+// informations selon l'étape (avant déclaration : dernier règlement, relances notées ; après : prise en charge, indemnisation).
 function LigneImpaye({ x, l, sel, choisir, mois }) {
   const p = parties(x);
+  const r = x.rivage;
+  const dette = r ? r.impaye : x.montant_impaye;
+  const ecartSaisi = r && x.montant_impaye != null && Math.abs(Number(x.montant_impaye) - Number(r.impaye || 0)) >= 0.01;
+  const gli = ['zelok', 'mila', 'smartgarant', 'garantme', 'visale'].includes(x.organisme);
+  const relance = derniereAction(x, 'relance'), med = derniereAction(x, 'med');
+  const badge = !x.bail_id ? <span className="etq rose">Non rattaché à Rivage</span>
+    : x.cycle ? <span className={'etq ' + (x.cycle.ouvert ? 'info' : 'gris')} title="Cycle d’impayé dans Rivage">Rivage : {x.cycle.libelle || x.cycle.statut}{x.cycle.ouvert && x.cycle.jours != null ? ' · J+' + x.cycle.jours : ''}</span>
+    : <span className="etq gris">Rivage : pas de cycle d’impayé</span>;
+  const info = [];
+  info.push(<span key="g" className="row" style={{ gap: 4 }}><span className="muted">Garantie</span><Etiquette v={x.garantie} /></span>);
+  if (gli && x.declaration_le) {
+    info.push(<span key="d">Déclaré le {date(x.declaration_le)}</span>);
+    info.push(<span key="pc" className="row" style={{ gap: 4 }}><span className="muted">Prise en charge</span>{x.prise_en_charge ? <Etiquette v={x.prise_en_charge} /> : <span>en attente</span>}</span>);
+    if (x.indemnisation_recue) info.push(<span key="i" className="row" style={{ gap: 4 }}><span className="muted">Indemnisation</span><Etiquette v={x.indemnisation_recue} /></span>);
+    if (x.indemnite_versee_bailleur) info.push(<span key="ib" className="row" style={{ gap: 4 }}><span className="muted">Reversement bailleur</span><Etiquette v={x.indemnite_versee_bailleur} /></span>);
+  } else {
+    if (r && r.dernier_encaissement_montant) info.push(<span key="e"><span className="muted">Dernier règlement</span> {euro(r.dernier_encaissement_montant)} le {date(r.dernier_encaissement)}</span>);
+    info.push(<span key="rl"><span className="muted">Relance</span> {relance != null ? (relance ? 'le ' + date(relance) : 'faite') : 'aucune notée'}</span>);
+    if (med != null) info.push(<span key="md"><span className="muted">Mise en demeure</span> {med ? 'le ' + date(med) : 'faite'}</span>);
+  }
   return <LigneLot l={l} sel={sel} ouvrir={choisir} friseLot={false} gravite={x.ecart_garantie ? 'haute' : x.groupe === 'Clôturé' ? 'normale' : undefined}
     titre={p.adresse || 'Adresse ?'}
     entete={<>{p.titre}{x.cause ? ' · ' + x.cause : ''}</>}
-    etiquettes={<>{x.montant_impaye != null && <span className="carte-imp-montant">{euro(x.montant_impaye)}</span>}{x.bail_id ? <span className="etq ok">Rivage ✓</span> : <span className="etq rose">Non rattaché</span>}</>}
+    etiquettes={<>{dette != null && <span className="carte-imp-montant" title={r ? 'Dette selon Rivage' : 'Montant saisi (dossier non rattaché à Rivage)'}>{euro(dette)}</span>}
+      {ecartSaisi && <span className="mini-alerte haute" style={{ margin: 0, padding: "2px 8px", fontSize: 12 }} title="Montant saisi dans le dossier, différent de la dette Rivage">saisi {euro(x.montant_impaye)}, à mettre à jour</span>}
+      {badge}</>}
     complement={<>
-      <div className="row" style={{ gap: 10 }}>
-        {[['Garantie', x.garantie], ['Prise en charge', x.prise_en_charge], ['Indemnisation', x.indemnisation_recue], ['Indemnité bailleur', x.indemnite_versee_bailleur]]
-          .map(([k, v]) => <span key={k} className="row" style={{ gap: 4 }}><span className="muted">{k}</span><Etiquette v={v} /></span>)}
-      </div>
+      <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>{info}</div>
       <div className="row" style={{ gap: 14 }}>
         <span>{x.intervenants || x.responsable_prenom || 'Personne'}</span>
-        <span>{x.declaration_le ? 'Déclaré le ' + date(x.declaration_le) : 'Non déclaré'}</span>
         {x.procedure && <span>{x.procedure}</span>}
         {x.audience_le && <span className="carte-imp-audience">Audience {date(x.audience_le)}</span>}
-        <span className="muted">{x.nb_notes ? `💬 ${x.nb_notes} · ${date(x.derniere_note)}` : '💬 0'}</span>
+        <span className="muted">{x.nb_notes ? `💬 ${x.nb_notes} échange${x.nb_notes > 1 ? 's' : ''}, dernier le ${date(x.derniere_note)}` : '💬 aucun échange'}</span>
       </div>
       {x.ecart_garantie && <div style={{ color: 'var(--red)' }}>⚠ Garantie différente de Rivage : {x.ecart_garantie}</div>}
       <FriseImpaye x={x} mois={mois} />
