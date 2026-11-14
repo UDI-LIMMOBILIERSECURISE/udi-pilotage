@@ -1,6 +1,7 @@
 // Module « Pilotage UDI » pour Gmail (146).
 // Lecture d'un mail : lot / bail / ticket reconnus par le pilotage, rattachement en un clic, derniers échanges.
 // Écriture d'un mail : recherche d'un lot, d'un bail ou d'un ticket ; un clic sur le dossier ajoute la référence [UDI L<lot> T<ticket>] en bas du mail.
+// 168 : rattachement possible au niveau d'un bailleur (tous ses biens, [UDI B<n°>]) ou d'un mandat ([UDI M<n°>]).
 // Les droits sont ceux du membre du pilotage qui a la même adresse Gmail (vérifiés côté pilotage, fonction pilotage-gmail).
 
 var API = 'https://tanupqmphxadaxeksxjh.supabase.co/functions/v1/pilotage-gmail';
@@ -27,6 +28,17 @@ function date(d) { return d ? Utilities.formatDate(new Date(d), 'Europe/Paris', 
 function ref(lot, ticket) { return '[UDI L' + lot + (ticket ? ' T' + ticket : '') + ']'; }
 // 151 : ticket d'immeuble (sans lot) : référence courte, rattachement sans lot
 function refTicket(l, t) { return t.immeuble ? '[UDI T' + t.numero + ']' : ref(l.lot, t.numero); }
+// 168 : bailleur (tous ses biens) ou mandat
+function refNiveau(n) { return n.niveau === 'bailleur' ? '[UDI B' + n.numero + ']' : '[UDI M' + n.code + ']'; }
+function libNiveau(n) {
+  return n.niveau === 'bailleur'
+    ? 'Bailleur ' + (n.nom || n.email) + ' · tous ses biens (' + n.mandats + ' mandats, ' + n.lots + ' lots)'
+    : 'Mandat ' + n.reference + ' · ' + (n.nom || '') + ' (' + n.lots + ' lots)';
+}
+function boutonNiveau(n, mailId) {
+  var p = { mail_id: String(mailId), lot_id: '', ticket_id: '', mandat_id: n.niveau === 'mandat' ? n.mandat_id : '', bailleur: n.niveau === 'bailleur' ? n.email : '' };
+  return CardService.newTextButton().setText(libNiveau(n)).setOnClickAction(CardService.newAction().setFunctionName('classer').setParameters(p));
+}
 function libTicket(t) { return 'Ticket n°' + t.numero + (t.immeuble ? ' · immeuble' : ''); }
 function carteErreur(e) {
   return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Pilotage UDI'))
@@ -78,6 +90,9 @@ function surMessage(e) {
         });
       } catch (err) { }
     }
+  } else if (d.mail.statut === 'classe' && (d.mail.niveau === 'bailleur' || d.mail.niveau === 'mandat')) {
+    s1.addWidget(CardService.newTextParagraph().setText('Rattaché au <b>' + libNiveau(d.mail.niveau === 'bailleur' ? d.mail.bailleur : d.mail.mandat) + '</b>'
+      + (d.mail.resume ? '<br><i>' + d.mail.resume + '</i>' : '')));
   } else if (d.mail.statut === 'classe') {
     s1.addWidget(CardService.newTextParagraph().setText((d.mail.lot ? 'Rattaché au <b>lot ' + d.mail.lot + '</b> · ' + (d.mail.adresse || '') : 'Rattaché à l\'<b>' + (d.mail.immeuble || 'immeuble') + '</b>')
       + (d.mail.bail ? '<br>Bail ' + d.mail.bail : '') + (d.mail.ticket ? '<br>Ticket n°' + d.mail.ticket.numero + ' ' + (d.mail.ticket.titre || '') : '')
@@ -89,6 +104,18 @@ function surMessage(e) {
   }
   if ((d.parties || []).length) s1.addWidget(CardService.newTextParagraph().setText(d.parties.map(function (p) { return (p.nom || p.email) + ' (' + (ROLES[p.role] || p.role) + ')'; }).join('<br>')));
   c.addSection(s1);
+
+  // 168 : bailleur de plusieurs biens — rattachement à tous ses biens ou à un mandat, avant les lots
+  if (d.mail && d.peut_classer && (d.niveaux || []).length) {
+    var sn = CardService.newCardSection().setHeader('Demande globale du bailleur ?').setCollapsible(d.niveaux.length > 4).setNumUncollapsibleWidgets(4);
+    d.niveaux.forEach(function (n) {
+      var actuel = d.mail.statut === 'classe' && (n.niveau === 'bailleur' ? d.mail.bailleur_email === n.email : d.mail.niveau === 'mandat' && d.mail.mandat_id === n.mandat_id);
+      if (!actuel) sn.addWidget(boutonNiveau(n, d.mail.id));
+    });
+    c.addSection(sn);
+  }
+  if (d.nb_lots > (d.lots || []).length && !(d.mail && d.mail.lot_id))
+    c.addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(d.nb_lots + ' lots liés à ces correspondants : cherchez le lot ci-dessous.')));
 
   (d.lots || []).forEach(function (l) {
     var s = CardService.newCardSection().addWidget(blocLot(l));
@@ -134,7 +161,7 @@ function importer(e) {
 
 function classer(e) {
   var p = e.parameters;
-  try { appel('classer', { mail_id: Number(p.mail_id), lot_id: p.lot_id, ticket_id: p.ticket_id || null }); }
+  try { appel('classer', { mail_id: Number(p.mail_id), lot_id: p.lot_id, ticket_id: p.ticket_id || null, mandat_id: p.mandat_id || null, bailleur: p.bailleur || null }); }
   catch (err) { return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(String(err.message || err))).build(); }
   return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText('Rattaché : le libellé Gmail passe à « Pilotage/Classé ».'))
     .setStateChanged(true).build();
@@ -144,17 +171,27 @@ function classer(e) {
 function sectionRecherche(q, redaction, mailId) {
   var s = CardService.newCardSection().setHeader(redaction ? 'Dossier du mail' : 'Chercher un lot');
   if (redaction) s.addWidget(CardService.newTextParagraph().setText('Cherchez le lot, puis cliquez sur le lot ou le ticket concerné : la référence du dossier est ajoutée en bas du mail et le mail, comme les réponses, sera rangé dans ce dossier.'));
-  s.addWidget(CardService.newTextInput().setFieldName('q').setTitle('N° de lot, adresse, locataire, bailleur, prestataire ou n° de ticket').setValue(q || ''));
+  s.addWidget(CardService.newTextInput().setFieldName('q').setTitle('N° de lot ou de mandat, adresse, locataire, bailleur, prestataire ou n° de ticket').setValue(q || ''));
   s.addWidget(CardService.newTextButton().setText('Rechercher')
     .setOnClickAction(CardService.newAction().setFunctionName('rechercher').setParameters({ redaction: redaction ? '1' : '', mail_id: mailId ? String(mailId) : '' })));
   return s;
 }
 
-function carteRecherche(q, redaction, mailId, lots) {
+function carteRecherche(q, redaction, mailId, lots, niveaux) {
   var c = CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Pilotage UDI').setSubtitle(redaction ? 'Rattacher ce mail à un dossier' : 'Recherche'));
   c.addSection(sectionRecherche(q, redaction, mailId));
+  // 168 : bailleurs (tous leurs biens) et mandats trouvés
+  if ((niveaux || []).length && (redaction || mailId)) {
+    var sn = CardService.newCardSection().setHeader('Bailleur ou mandat');
+    niveaux.forEach(function (n) {
+      sn.addWidget(redaction
+        ? CardService.newTextButton().setText(libNiveau(n)).setOnClickAction(CardService.newAction().setFunctionName('insererRef').setParameters({ ref: refNiveau(n) }))
+        : boutonNiveau(n, mailId));
+    });
+    c.addSection(sn);
+  }
   if (lots) {
-    if (!lots.length) c.addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText('Aucun lot trouvé.')));
+    if (!lots.length && !(niveaux || []).length) c.addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText('Aucun lot trouvé.')));
     lots.forEach(function (l) {
       var s = CardService.newCardSection().addWidget(blocLot(l));
       var bs = CardService.newButtonSet();
@@ -184,9 +221,9 @@ function carteRecherche(q, redaction, mailId, lots) {
 function rechercher(e) {
   var q = (e.formInput && e.formInput.q) || '';
   var redaction = !!e.parameters.redaction, mailId = e.parameters.mail_id ? Number(e.parameters.mail_id) : null;
-  var lots;
-  try { lots = appel('chercher', { q: q }).lots || []; } catch (err) { return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(String(err.message || err))).build(); }
-  return CardService.newActionResponseBuilder().setNavigation(CardService.newNavigation().pushCard(carteRecherche(q, redaction, mailId, lots))).build();
+  var lots, niveaux;
+  try { var r = appel('chercher', { q: q }); lots = r.lots || []; niveaux = r.niveaux || []; } catch (err) { return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(String(err.message || err))).build(); }
+  return CardService.newActionResponseBuilder().setNavigation(CardService.newNavigation().pushCard(carteRecherche(q, redaction, mailId, lots, niveaux))).build();
 }
 
 // ---------- Écriture d'un mail ----------

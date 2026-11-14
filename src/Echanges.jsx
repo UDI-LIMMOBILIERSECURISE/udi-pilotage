@@ -2,6 +2,7 @@
 //  - EchangesLot : onglet de la fiche du bien, présenté comme une boîte Gmail (une ligne par conversation) ;
 //  - EchangesTicket : mails d'un ticket, sous son fil de mises à jour ;
 //  - MailsAVerifier : page des mails que le pilotage n'a pas pu rattacher avec certitude (un clic pour choisir le lot).
+//  - 168 : niveaux bailleur (tous ses biens) et mandat ; FicheBailleur : mandats, lots, tickets ouverts et tous les échanges d'un bailleur.
 // Le texte est en base, les pièces jointes sur R2 (lien de 5 minutes demandé à la fonction pilotage-mails).
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase, rpc } from './supabase.js';
@@ -34,6 +35,8 @@ function Message({ m }) {
         ? <button key={p.cle} className="lien" onClick={() => ouvrirPj(m.id, p.cle)}>📎 {p.nom}</button>
         : <span key={p.nom} className="muted">📎 {p.nom} (dans Gmail)</span>)}
       {m.ticket && <span className="etq neutre">Ticket n°{m.ticket.numero}</span>}
+      {m.niveau === 'bailleur' && <span className="etq violet" title="Mail rangé au niveau du bailleur : il concerne tous ses biens">Bailleur · tous ses biens</span>}
+      {m.niveau === 'mandat' && <span className="etq info" title="Mail rangé au niveau du mandat : il concerne tous les lots du mandat">Mandat {m.mandat?.reference}</span>}
     </div>
     {err && <div className="err">{err}</div>}
     {plein && <pre className="mail-corps">{plein.corps || '(mail sans texte)'}</pre>}
@@ -99,10 +102,12 @@ export function MailsAVerifier() {
   const [saisie, setSaisie] = useState({});
   const charger = () => rpc('pilotage_mails_a_verifier').then(setListe).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, []);
-  const classer = async (m, lot, ticket, ignorer = false) => {
+  const [filtreLots, setFiltreLots] = useState({});
+  const classer = async (m, lot, ticket, ignorer = false, niveau = null) => {
     setErr('');
     try {
-      await rpc('pilotage_mail_classer', { p_id: m.id, p_lot_ref: lot || null, p_ticket_numero: ticket || null, p_ignorer: ignorer });
+      if (niveau) await rpc('pilotage_mail_classer_niveau', { p_id: m.id, p_mandat: niveau.niveau === 'mandat' ? niveau.mandat_id : null, p_bailleur: niveau.niveau === 'bailleur' ? niveau.email : null });
+      else await rpc('pilotage_mail_classer', { p_id: m.id, p_lot_ref: lot || null, p_ticket_numero: ticket || null, p_ignorer: ignorer });
       supabase.functions.invoke('pilotage-mails', { body: { action: 'etiqueter', id: m.id } }).catch(() => {});
       setListe((l) => l.filter((x) => x.id !== m.id));
     } catch (e) { setErr(e.message); }
@@ -110,7 +115,8 @@ export function MailsAVerifier() {
   return <>
     <div className="entete"><div><h1>Mails à vérifier</h1>
       <p className="sub">Mails échangés avec un contact Rivage que le pilotage n’a pas pu rattacher avec certitude. Un clic sur le bon lot (et le ticket s’il y a lieu) :
-        le choix est retenu pour ce correspondant et le libellé Gmail passe à « Pilotage/Classé ».</p></div></div>
+        le choix est retenu pour ce correspondant et le libellé Gmail passe à « Pilotage/Classé ». Pour une demande globale d’un bailleur (compte rendu, fiscalité, plusieurs biens),
+        choisissez « tous ses biens » ou le mandat : le mail apparaîtra dans chacun de ses lots.</p></div></div>
     {err && <div className="banner">{err}</div>}
     {!liste ? <p className="sub">Chargement…</p> : !liste.length ? <p className="sub">Rien à vérifier.</p> :
       <div className="stack">{liste.map((m) => <div key={m.id} className="mail-carte">
@@ -118,13 +124,11 @@ export function MailsAVerifier() {
         <div className="muted">{m.sens === 'envoye' ? 'Envoyé à ' + (m.a || []).join(', ') : 'Reçu de ' + m.de} · {qui(m)}{m.boites ? ' · boîte ' + m.boites.join(', ') : ''}</div>
         {m.resume && <p style={{ margin: '6px 0' }}>{m.resume}</p>}
         <Message m={{ ...m, resume: '' }} />
-        <div className="row" style={{ gap: 6, marginTop: 8 }}>
-          {(m.candidats || []).map((c) => <React.Fragment key={c.lot_id}>
-            <button className="btn" onClick={() => classer(m, c.lot)}>Lot {c.lot} · {c.adresse}{c.locataires ? ' · ' + c.locataires : ''}</button>
-            {(c.tickets || []).map((t) => <button key={t.ticket_id} className="btn gris" onClick={() => classer(m, t.immeuble ? null : c.lot, t.numero)}>
-              {t.immeuble ? 'Immeuble' : 'Lot ' + c.lot} · ticket n°{t.numero} {t.titre}</button>)}
-          </React.Fragment>)}
-        </div>
+        {(m.niveaux || []).length > 0 && <div className="row" style={{ gap: 6, marginTop: 8 }}>
+          {m.niveaux.map((n) => <button key={n.niveau + (n.email || n.mandat_id)} className={'btn' + (n.niveau === 'bailleur' ? ' plein' : '')} onClick={() => classer(m, null, null, false, n)}>
+            {libNiveau(n)}</button>)}
+        </div>}
+        <BoutonsLots m={m} classer={classer} filtre={filtreLots[m.id] || ''} setFiltre={(v) => setFiltreLots({ ...filtreLots, [m.id]: v })} />
         <div className="row" style={{ gap: 6, marginTop: 8 }}>
           <input placeholder="N° de lot (vide : ticket d’immeuble)" value={saisie[m.id]?.lot || ''} onChange={(e) => setSaisie({ ...saisie, [m.id]: { ...saisie[m.id], lot: e.target.value } })} style={{ width: 230 }} />
           <input placeholder="N° de ticket (facultatif)" value={saisie[m.id]?.ticket || ''} onChange={(e) => setSaisie({ ...saisie, [m.id]: { ...saisie[m.id], ticket: e.target.value } })} style={{ width: 190 }} />
@@ -132,6 +136,91 @@ export function MailsAVerifier() {
           <button className="btn gris" onClick={() => classer(m, null, null, true)}>Pas un dossier</button>
         </div>
       </div>)}</div>}
+  </>;
+}
+
+export const libNiveau = (n) => (n.niveau === 'bailleur'
+  ? `Bailleur ${n.nom || n.email} · tous ses biens (${n.mandats} mandats, ${n.lots} lots)`
+  : `Mandat ${n.reference} · ${n.nom || ''} (${n.lots} lots)`);
+
+// Lots candidats : au-delà de 6 (bailleur de nombreux biens), repliés avec une recherche
+function BoutonsLots({ m, classer, filtre, setFiltre }) {
+  const cands = m.candidats || [];
+  if (!cands.length) return null;
+  const boutons = (l) => <div className="row" style={{ gap: 6, marginTop: 8 }}>
+    {l.map((c) => <React.Fragment key={c.lot_id}>
+      <button className="btn" onClick={() => classer(m, c.lot)}>Lot {c.lot} · {c.adresse}{c.locataires ? ' · ' + c.locataires : ''}</button>
+      {(c.tickets || []).map((t) => <button key={t.ticket_id} className="btn gris" onClick={() => classer(m, t.immeuble ? null : c.lot, t.numero)}>
+        {t.immeuble ? 'Immeuble' : 'Lot ' + c.lot} · ticket n°{t.numero} {t.titre}</button>)}
+    </React.Fragment>)}
+  </div>;
+  if (cands.length <= 6) return boutons(cands);
+  const f = filtre.trim().toLowerCase();
+  const vus = cands.filter((c) => !f || [c.lot, c.adresse, c.locataires].join(' ').toLowerCase().includes(f));
+  return <details style={{ marginTop: 8 }}>
+    <summary>Choisir un lot ({cands.length} lots possibles)</summary>
+    <input className="recherche" placeholder="N° de lot, adresse ou locataire…" value={filtre} onChange={(e) => setFiltre(e.target.value)} style={{ marginTop: 6, width: '100%', maxWidth: 360 }} />
+    {boutons(vus.slice(0, 30))}
+    {vus.length > 30 && <p className="muted">{vus.length - 30} autres : précisez la recherche.</p>}
+  </details>;
+}
+
+// 168 : fiche bailleur — recherche par nom, adresse mail ou n° de mandat
+export function FicheBailleur() {
+  const [q, setQ] = useState('');
+  const [res, setRes] = useState(null);
+  const [fiche, setFiche] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const chercher = async (e) => {
+    e?.preventDefault(); setErr(''); setFiche(null); setBusy(true);
+    try { setRes(await rpc('pilotage_bailleurs_chercher', { p_q: q })); } catch (x) { setErr(x.message); }
+    setBusy(false);
+  };
+  const ouvrir = async (email) => {
+    setErr(''); setBusy(true);
+    try { setFiche(await rpc('pilotage_bailleur', { p_email: email })); } catch (x) { setErr(x.message); }
+    setBusy(false);
+  };
+  const eur = (n) => Number(n || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+  return <>
+    <div className="entete"><div><h1>Bailleurs</h1>
+      <p className="sub">Un bailleur = une adresse mail de propriétaire dans Rivage, avec tous ses mandats (SCI, nom propre…). Ses échanges : mails rangés sur ses lots, ses mandats ou « tous ses biens ».</p></div></div>
+    <form className="row" style={{ gap: 6, marginBottom: 12 }} onSubmit={chercher}>
+      <input className="recherche" placeholder="Nom, SCI, adresse mail ou n° de mandat" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, maxWidth: 420 }} />
+      <button className="btn plein" disabled={busy || q.trim().length < 2}>Rechercher</button>
+    </form>
+    {err && <div className="banner">{err}</div>}
+    {busy && <p className="muted">Chargement…</p>}
+    {!fiche && res && (!res.length ? <p className="sub">Aucun bailleur trouvé.</p> :
+      <div className="stack">{res.map((b) => <button key={b.email} className="mail-carte" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => ouvrir(b.email)}>
+        <b>{b.nom || b.email}</b><div className="muted">{b.email} · {b.mandats} mandat{b.mandats > 1 ? 's' : ''} · {b.lots} lot{b.lots > 1 ? 's' : ''}</div>
+      </button>)}</div>)}
+    {fiche && <div className="stack">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <div><h2 style={{ margin: 0 }}>{fiche.nom || fiche.email}</h2>
+          <div className="muted">{fiche.email}{fiche.numero ? ` · réf. Gmail [UDI B${fiche.numero}]` : ''} · {fiche.mandats.length} mandat{fiche.mandats.length > 1 ? 's' : ''} · {fiche.lots} lot{fiche.lots > 1 ? 's' : ''}</div></div>
+        {res && <button className="btn gris" onClick={() => setFiche(null)}>Retour à la liste</button>}
+      </div>
+      <details className="fb-bloc fb-complet" open>
+        <summary>Mandats et lots</summary>
+        {fiche.mandats.map((md) => <div key={md.mandat_id} style={{ margin: '8px 0' }}>
+          <b>Mandat {md.reference}</b> <span className="muted">· {md.nom} · réf. Gmail [UDI M{md.code}]</span>
+          <ul style={{ margin: '4px 0 0 18px' }}>{(md.lots_detail || []).map((l) => <li key={l.lot_id}>
+            Lot {l.lot} · {l.adresse}{l.bail ? ` · bail ${l.bail}` : ' · vacant'}{l.locataires ? ` · ${l.locataires}` : ''}
+            {Number(l.impaye) > 0 && <span className="etq ko" style={{ marginLeft: 6 }}>Impayé Rivage {eur(l.impaye)}</span>}</li>)}</ul>
+        </div>)}
+      </details>
+      <details className="fb-bloc fb-complet" open={fiche.tickets.length > 0}>
+        <summary>Tickets ouverts · {fiche.tickets.length}</summary>
+        {!fiche.tickets.length ? <p className="muted">Aucun.</p> : <ul style={{ margin: '4px 0 0 18px' }}>{fiche.tickets.map((t) => <li key={t.ticket_id}>
+          n°{t.numero} · lot {t.lot} · {t.titre}{t.declare_le ? ` · déclaré le ${new Date(t.declare_le).toLocaleDateString('fr-FR')}` : ''}</li>)}</ul>}
+      </details>
+      <details className="fb-bloc fb-complet" open>
+        <summary>Échanges par mail · {fiche.mails.length}{fiche.mails.length >= 300 ? ' (300 derniers)' : ''}</summary>
+        {!fiche.mails.length ? <p className="muted">Aucun mail rangé pour ce bailleur.</p> : <Conversations mails={fiche.mails} />}
+      </details>
+    </div>}
   </>;
 }
 

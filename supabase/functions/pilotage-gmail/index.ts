@@ -23,7 +23,7 @@ async function identite(jeton: string): Promise<string> {
 Deno.serve(async (req) => {
   const rep = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   if (req.method !== 'POST') return rep(405, { error: 'Méthode non autorisée' })
-  let c: { id_token?: string; action?: string; message_id?: string; emails?: string[]; q?: string; mail_id?: number; lot_id?: string; ticket_id?: string | null; ref?: string; objet?: string; gmail_id?: string } = {}
+  let c: { id_token?: string; action?: string; message_id?: string; emails?: string[]; q?: string; mail_id?: number; lot_id?: string; ticket_id?: string | null; mandat_id?: string | null; bailleur?: string | null; ref?: string; objet?: string; gmail_id?: string } = {}
   try { c = await req.json() } catch { return rep(400, { error: 'Requête invalide' }) }
   let email: string
   try { email = await identite(c.id_token || '') } catch (e) { return rep(401, { error: e instanceof Error ? e.message : 'Non autorisé' }) }
@@ -38,9 +38,12 @@ Deno.serve(async (req) => {
     if (c.action === 'contexte')
       return rep(200, await appel('pilotage_addon_contexte', { p_email: email, p_message_id: c.message_id || '', p_emails: (c.emails || []).slice(0, 30) }))
     if (c.action === 'chercher')
-      return rep(200, { lots: await appel('pilotage_addon_chercher', { p_email: email, p_q: c.q || '' }) })
+      // 168 : bailleurs (tous leurs biens) et mandats en plus des lots
+      return rep(200, { lots: await appel('pilotage_addon_chercher', { p_email: email, p_q: c.q || '' }),
+        niveaux: await appel('pilotage_addon_chercher_niveaux', { p_email: email, p_q: c.q || '' }) })
     if (c.action === 'classer') {
-      await appel('pilotage_addon_classer', { p_email: email, p_mail: c.mail_id, p_lot: c.lot_id, p_ticket: c.ticket_id || null })
+      if (c.mandat_id || c.bailleur) await appel('pilotage_addon_classer_niveau', { p_email: email, p_mail: c.mail_id, p_mandat: c.mandat_id || null, p_bailleur: c.bailleur || null })
+      else await appel('pilotage_addon_classer', { p_email: email, p_mail: c.mail_id, p_lot: c.lot_id, p_ticket: c.ticket_id || null })
       // Libellé Gmail « Pilotage/Classé » posé par la fonction de lecture des boîtes
       await fetch(`${url}/functions/v1/pilotage-mails`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cle}` },
         body: JSON.stringify({ action: 'etiqueter', id: c.mail_id }) }).catch(() => {})
