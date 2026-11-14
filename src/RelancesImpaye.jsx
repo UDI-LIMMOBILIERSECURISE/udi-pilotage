@@ -19,7 +19,9 @@ async function erreurFonction(data, error) {
 const heure = (d) => (d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(' ', ' à ') : '—');
 // 166 : une ligne d'historique (envoi du pilotage ou changement de statut Rivage)
 function LigneHistorique({ h }) {
+  const MOYENS = { appel: 'appel', sms_portable: 'SMS du portable', mail: 'mail hors pilotage', courrier: 'courrier', recommande: 'recommandé', autre: 'autre moyen' };
   const quoi = h.source === 'rivage' ? h.texte
+    : h.canal === 'note' ? `${h.etape === 'med' ? 'Mise en demeure' : 'Relance'} notée : ${MOYENS[h.moyen] || h.moyen}${h.par ? ' · ' + h.par : ''}${h.texte ? ' · ' + h.texte : ''}`
     : `${h.canal === 'sms' ? 'SMS' : 'Mail'} ${h.etape === 'med' ? '(mise en demeure)' : h.manuel ? 'à la main' : 'automatique'}${h.destinataire ? ' à ' + h.destinataire : ''}${h.par ? ' · ' + h.par : ''}`;
   const ko = h.statut === 'erreur';
   return <li className={'etape e-' + (ko ? 'alerte' : 'fait')} title={h.source === 'rivage' ? 'Information Rivage (statut du cycle d’impayé)' : (h.texte || '')}>
@@ -61,7 +63,7 @@ function texteEtape(e) {
 }
 
 // Bloc du dossier d'impayé
-export function RelancesBail({ bail, apres }) {
+export function RelancesBail({ bail, dossier, apres }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [motif, setMotif] = useState('');
@@ -69,6 +71,7 @@ export function RelancesBail({ bail, apres }) {
   const [med, setMed] = useState(null);
   const [envoi, setEnvoi] = useState('');
   const [sms, setSms] = useState(false);
+  const [noter, setNoter] = useState(null);
   const [ok, setOk] = useState('');
   const charger = () => rpc('pilotage_relances_impaye', { p_bail: bail }).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, [bail]);
@@ -87,11 +90,22 @@ export function RelancesBail({ bail, apres }) {
   return <div className="panneau" style={{ margin: '10px 0' }}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <b>Relances</b>
-      <span className="row" style={{ gap: 8 }}>{d.peut_sms && !sms && <button className="btn" onClick={() => { setSms(true); setOk(''); }}>Envoyer un SMS</button>}
+      <span className="row" style={{ gap: 8 }}>{d.peut_sms && !sms && <button className="btn" onClick={() => { setSms(true); setNoter(null); setOk(''); }}>Envoyer un SMS</button>}
+        {d.peut && dossier && !noter && <button className="btn gris" onClick={() => { setNoter({ quoi: 'relance', moyen: 'appel', note: '' }); setSms(false); setOk(''); }}>Noter une relance faite</button>}
         <span className="muted" style={{ fontSize: 12 }}>automatiques {d.actif ? 'actives' : 'désactivées'}</span></span>
     </div>
     {err && <div className="err">{err}</div>}
     {ok && <div className="mini-alerte normale" role="status">✓ {ok}</div>}
+    {noter && <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8, alignItems: 'flex-end' }}>
+      <label className="champ-imp"><span>Quoi</span><select value={noter.quoi} onChange={(e) => setNoter({ ...noter, quoi: e.target.value })}>
+        <option value="relance">Relance</option><option value="med">Mise en demeure</option></select></label>
+      <label className="champ-imp"><span>Par</span><select value={noter.moyen} onChange={(e) => setNoter({ ...noter, moyen: e.target.value })}>
+        {[['appel', 'Appel'], ['sms_portable', 'SMS du portable'], ['mail', 'Mail hors pilotage'], ['courrier', 'Courrier'], ['recommande', 'Recommandé'], ['autre', 'Autre']].map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
+      <label className="champ-imp" style={{ flex: '1 1 220px' }}><span>Note (facultatif)</span><input value={noter.note} onChange={(e) => setNoter({ ...noter, note: e.target.value })} placeholder="Ex. promet de payer vendredi" /></label>
+      <button className="btn plein" onClick={async () => { setErr(''); try { await rpc('pilotage_relance_noter', { p_dossier: dossier, p_quoi: noter.quoi, p_moyen: noter.moyen, p_note: noter.note });
+        setNoter(null); setOk('Relance notée.'); await charger(); apres && apres(); } catch (e) { setErr(e.message); } }}>Enregistrer</button>
+      <button className="lien" onClick={() => setNoter(null)}>Annuler</button>
+    </div>}
     {sms && <SmsBail bail={bail} fini={async (m) => { setSms(false); setOk(m); await charger(); apres && apres(); }} />}
     {(d.historique || []).length > 0 ? <ul className="etapes" style={{ flexDirection: 'column', gap: 2, marginTop: 6 }} aria-label="Relances déjà faites">
         {d.historique.slice(0, 12).map((h, i) => <LigneHistorique key={i} h={h} />)}</ul>

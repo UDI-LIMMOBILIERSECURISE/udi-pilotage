@@ -16,7 +16,8 @@ const RANG = { opened: 1, reminded: 2, formal_notice: 3, gli_reported: 4, long_c
 export const ACTIONS_RELANCE = { relance: 'Relance amiable faite', med: 'Mise en demeure envoyée' };
 const MOTIF = { relance: /relance|relanc[ée]/i, med: /mise en demeure|\bMED\b/i };
 export function derniereAction(x, quoi) {
-  const l = (x.actions || []).filter((a) => a.statut === 'Fait' && MOTIF[quoi].test(a.libelle || ''));
+  // 167 : les relances envoyées ou notées arrivent dans x.relances (pilotage_impayes), les tâches restent dans x.actions
+  const l = [...(x.actions || []), ...(x.relances || [])].filter((a) => a.statut === 'Fait' && MOTIF[quoi].test(a.libelle || ''));
   if (!l.length) return null;
   return l.map((a) => a.le || (a.cree_le || '').slice(0, 10)).filter(Boolean).sort().pop() || '';
 }
