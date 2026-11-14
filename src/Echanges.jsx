@@ -338,11 +338,16 @@ export function FicheBailleur() {
 
 // Ma journée : rappel des mails à rattacher (rien d'affiché s'il n'y en a pas, ou si la table n'existe pas encore)
 export function BandeauMails({ ouvrir }) {
-  const [n, setN] = useState(0);
-  useEffect(() => { rpc('pilotage_mails_a_verifier').then((l) => setN((l || []).length)).catch(() => setN(0)); }, []);
+  // 170 : compteur léger (la liste complète est chargée seulement sur la page « Mails à vérifier »)
+  const [c, setC] = useState(null);
+  useEffect(() => { rpc('pilotage_mails_a_verifier_compte').then(setC).catch(() => setC(null)); }, []);
+  const n = c?.total || 0;
   if (!n) return null;
+  const depuis = c.plus_ancien ? new Date(c.plus_ancien).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '';
   return <div className="mini-alerte haute" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-    <span>✉ {n} mail{n > 1 ? 's' : ''} à rattacher à un lot ou un ticket</span>
+    <span>✉ {n} mail{n > 1 ? 's' : ''} à rattacher à un dossier
+      {c.bailleurs > 0 && <> · dont {c.bailleurs} de bailleur{c.bailleurs > 1 ? 's' : ''} de plusieurs biens</>}
+      {depuis && <span className="muted"> · le plus ancien du {depuis}</span>}</span>
     <button className="btn" onClick={ouvrir}>Vérifier</button>
   </div>;
 }
