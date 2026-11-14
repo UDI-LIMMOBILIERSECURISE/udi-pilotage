@@ -2,6 +2,7 @@
 //  - EchangesLot : onglet de la fiche du bien, présenté comme une boîte Gmail (une ligne par conversation) ;
 //  - EchangesTicket : mails d'un ticket, sous son fil de mises à jour ;
 //  - MailsAVerifier : page des mails que le pilotage n'a pas pu rattacher avec certitude (un clic pour choisir le lot).
+//  - 169 : niveau société (profil Rivage) ; « Mails à vérifier » en trois questions avec suggestion, raccourcis et compteur du jour.
 //  - 168 : niveaux bailleur (tous ses biens) et mandat ; FicheBailleur : mandats, lots, tickets ouverts et tous les échanges d'un bailleur.
 // Le texte est en base, les pièces jointes sur R2 (lien de 5 minutes demandé à la fonction pilotage-mails).
 import React, { useEffect, useMemo, useState } from 'react';
@@ -9,6 +10,8 @@ import { supabase, rpc } from './supabase.js';
 
 const dateHeure = (d) => (d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 const ROLES = { locataire: 'Locataire', bailleur: 'Bailleur', prestataire: 'Prestataire', syndic: 'Syndic', garant: 'Garant', organisme: 'Organisme' };
+// Texte venu de mails HTML : entités affichées telles quelles (« &lt; ») corrigées à l'affichage (169)
+const texteMail = (t) => (t || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
 const qui = (m) => (m.parties || []).map((p) => `${p.nom || p.email} (${ROLES[p.role] || p.role})`).join(', ');
 
 async function ouvrirPj(id, cle) {
@@ -28,7 +31,7 @@ function Message({ m }) {
       <span className="mail-de">{m.sens === 'envoye' ? 'À ' + (m.a || []).join(', ') : m.de}</span>
       <span className="muted">{dateHeure(m.le)}</span>
     </div>
-    <div className="mail-resume">{m.resume || m.extrait || ''}</div>
+    <div className="mail-resume">{texteMail(m.resume || m.extrait)}</div>
     <div className="row" style={{ gap: 6, marginTop: 4 }}>
       <button className="lien" onClick={lire}>{plein ? 'Replier' : 'Lire le mail'}</button>
       {(m.pj || []).map((p) => p.cle
@@ -36,10 +39,11 @@ function Message({ m }) {
         : <span key={p.nom} className="muted">📎 {p.nom} (dans Gmail)</span>)}
       {m.ticket && <span className="etq neutre">Ticket n°{m.ticket.numero}</span>}
       {m.niveau === 'bailleur' && <span className="etq violet" title="Mail rangé au niveau du bailleur : il concerne tous ses biens">Bailleur · tous ses biens</span>}
+      {m.niveau === 'societe' && <span className="etq violet" title="Mail rangé au niveau de la société : il concerne tous ses biens">Société {m.societe?.nom}</span>}
       {m.niveau === 'mandat' && <span className="etq info" title="Mail rangé au niveau du mandat : il concerne tous les lots du mandat">Mandat {m.mandat?.reference}</span>}
     </div>
     {err && <div className="err">{err}</div>}
-    {plein && <pre className="mail-corps">{plein.corps || '(mail sans texte)'}</pre>}
+    {plein && <pre className="mail-corps">{texteMail(plein.corps) || '(mail sans texte)'}</pre>}
   </div>;
 }
 
@@ -55,8 +59,8 @@ function Conversations({ mails }) {
     {fils.map(({ k, l, dernier }) => <div key={k} className={'mail-fil' + (ouvert === k ? ' ouvert' : '')}>
       <button className="mail-ligne" aria-expanded={ouvert === k} onClick={() => setOuvert(ouvert === k ? null : k)}>
         <span className="mail-qui">{qui(dernier) || dernier.de}</span>
-        <span className="mail-objet"><b>{dernier.objet || '(sans objet)'}</b>{l.length > 1 ? <span className="muted"> ({l.length})</span> : null}
-          <span className="muted"> — {dernier.resume || dernier.extrait || ''}</span></span>
+        <span className="mail-objet"><b>{texteMail(dernier.objet) || '(sans objet)'}</b>{l.length > 1 ? <span className="muted"> ({l.length})</span> : null}
+          <span className="muted"> — {texteMail(dernier.resume || dernier.extrait)}</span></span>
         <span className="mail-date">{l.some((m) => (m.pj || []).length) ? '📎 ' : ''}{dateHeure(dernier.le)}</span>
       </button>
       {ouvert === k && <div className="mail-detail">{l.map((m) => <Message key={m.id} m={m} />)}</div>}
@@ -96,74 +100,182 @@ export function EchangesTicket({ ticketId }) {
   return <div style={{ marginTop: 12 }}><h3>Mails du ticket ({mails.length})</h3><Conversations mails={mails} /></div>;
 }
 
+// 169 : « Mails à vérifier » en trois questions — suggestion d'abord (Entrée), puis « ce mail concerne… » (société, mandat, lot, ticket),
+// puis le choix, lots regroupés par société et par adresse avec une recherche. Compteur des mails triés dans la journée.
+const sansAccent = (t) => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+// Suggestion déterministe : une seule société nommée dans le résumé ou l'objet, sinon un seul lot possible.
+function suggestion(m) {
+  const texte = ' ' + sansAccent([m.objet, m.resume, m.extrait].join(' ')).replace(/[^a-z0-9]+/g, ' ') + ' ';
+  const nommees = (m.societes || []).filter((s) => {
+    const nom = sansAccent(s.nom).replace(/[^a-z0-9]+/g, ' ').trim();
+    return nom.length >= 3 && texte.includes(' ' + nom + ' ');
+  });
+  if (nommees.length === 1) return { type: 'societe', s: nommees[0], pourquoi: 'nommée dans le mail' };
+  const cands = m.candidats || [];
+  if (cands.length === 1) return { type: 'lot', c: cands[0], pourquoi: 'seul lot possible' };
+  return null;
+}
+const libSuggestion = (sg) => (sg.type === 'societe'
+  ? `${sg.s.nom} · ${sg.s.mandats} mandat${sg.s.mandats > 1 ? 's' : ''}, ${sg.s.lots} lot${sg.s.lots > 1 ? 's' : ''}`
+  : `Lot ${sg.c.lot} · ${sg.c.adresse}${sg.c.locataires ? ' · ' + sg.c.locataires : ''}`);
+
 export function MailsAVerifier() {
   const [liste, setListe] = useState(null);
   const [err, setErr] = useState('');
-  const [saisie, setSaisie] = useState({});
+  const [jour, setJour] = useState(null);
   const charger = () => rpc('pilotage_mails_a_verifier').then(setListe).catch((e) => setErr(e.message));
-  useEffect(() => { charger(); }, []);
-  const [filtreLots, setFiltreLots] = useState({});
-  const classer = async (m, lot, ticket, ignorer = false, niveau = null) => {
+  const compter = () => rpc('pilotage_mails_tri_jour').then(setJour).catch(() => setJour(null));
+  useEffect(() => { charger(); compter(); }, []);
+  const classer = async (m, action) => {
     setErr('');
     try {
-      if (niveau) await rpc('pilotage_mail_classer_niveau', { p_id: m.id, p_mandat: niveau.niveau === 'mandat' ? niveau.mandat_id : null, p_bailleur: niveau.niveau === 'bailleur' ? niveau.email : null });
-      else await rpc('pilotage_mail_classer', { p_id: m.id, p_lot_ref: lot || null, p_ticket_numero: ticket || null, p_ignorer: ignorer });
+      if (action.societe) await rpc('pilotage_mail_classer_societe', { p_id: m.id, p_profil: action.societe });
+      else if (action.niveau) await rpc('pilotage_mail_classer_niveau', { p_id: m.id, p_mandat: action.niveau.niveau === 'mandat' ? action.niveau.mandat_id : null, p_bailleur: action.niveau.niveau === 'bailleur' ? action.niveau.email : null });
+      else await rpc('pilotage_mail_classer', { p_id: m.id, p_lot_ref: action.lot || null, p_ticket_numero: action.ticket || null, p_ignorer: !!action.ignorer });
       supabase.functions.invoke('pilotage-mails', { body: { action: 'etiqueter', id: m.id } }).catch(() => {});
       setListe((l) => l.filter((x) => x.id !== m.id));
+      setJour((j) => (j ? { ...j, moi: j.moi + 1, equipe: j.equipe + 1 } : j));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { setErr(e.message); }
   };
+  // Raccourcis sur le premier mail de la liste : Entrée = suggestion, N = pas un dossier (hors saisie)
+  useEffect(() => {
+    const touche = (e) => {
+      if (!liste?.length || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(e.target.tagName)) return;
+      const m = liste[0];
+      if (e.key === 'Enter') { const sg = suggestion(m); if (sg) { e.preventDefault(); classer(m, sg.type === 'societe' ? { societe: sg.s.profil_id } : { lot: sg.c.lot }); } }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); classer(m, { ignorer: true }); }
+    };
+    window.addEventListener('keydown', touche);
+    return () => window.removeEventListener('keydown', touche);
+  }, [liste]);
+  const reste = liste ? liste.length : 0;
+  const faits = jour ? jour.equipe : 0;
   return <>
     <div className="entete"><div><h1>Mails à vérifier</h1>
-      <p className="sub">Mails échangés avec un contact Rivage que le pilotage n’a pas pu rattacher avec certitude. Un clic sur le bon lot (et le ticket s’il y a lieu) :
-        le choix est retenu pour ce correspondant et le libellé Gmail passe à « Pilotage/Classé ». Pour une demande globale d’un bailleur (compte rendu, fiscalité, plusieurs biens),
-        choisissez « tous ses biens » ou le mandat : le mail apparaîtra dans chacun de ses lots.</p></div></div>
+      <p className="sub">Mails échangés avec un contact Rivage que le pilotage n’a pas pu ranger seul. Le choix est retenu et le libellé Gmail passe à « Pilotage/Classé ».</p></div></div>
+    {liste && <div className="tri-progres">
+      <div className="jauge"><span style={{ width: (faits + reste ? Math.round(100 * faits / (faits + reste)) : 100) + '%' }} /></div>
+      <span className="muted">{faits} trié{faits > 1 ? 's' : ''} aujourd’hui{jour && jour.moi ? ` (dont ${jour.moi} par vous)` : ''} · {reste} restant{reste > 1 ? 's' : ''}</span>
+    </div>}
     {err && <div className="banner">{err}</div>}
-    {!liste ? <p className="sub">Chargement…</p> : !liste.length ? <p className="sub">Rien à vérifier.</p> :
-      <div className="stack">{liste.map((m) => <div key={m.id} className="mail-carte">
-        <div className="row" style={{ justifyContent: 'space-between' }}><b>{m.objet || '(sans objet)'}</b><span className="muted">{dateHeure(m.le)}</span></div>
-        <div className="muted">{m.sens === 'envoye' ? 'Envoyé à ' + (m.a || []).join(', ') : 'Reçu de ' + m.de} · {qui(m)}{m.boites ? ' · boîte ' + m.boites.join(', ') : ''}</div>
-        {m.resume && <p style={{ margin: '6px 0' }}>{m.resume}</p>}
-        <Message m={{ ...m, resume: '' }} />
-        {(m.niveaux || []).length > 0 && <div className="row" style={{ gap: 6, marginTop: 8 }}>
-          {m.niveaux.map((n) => <button key={n.niveau + (n.email || n.mandat_id)} className={'btn' + (n.niveau === 'bailleur' ? ' plein' : '')} onClick={() => classer(m, null, null, false, n)}>
-            {libNiveau(n)}</button>)}
-        </div>}
-        <BoutonsLots m={m} classer={classer} filtre={filtreLots[m.id] || ''} setFiltre={(v) => setFiltreLots({ ...filtreLots, [m.id]: v })} />
-        <div className="row" style={{ gap: 6, marginTop: 8 }}>
-          <input placeholder="N° de lot (vide : ticket d’immeuble)" value={saisie[m.id]?.lot || ''} onChange={(e) => setSaisie({ ...saisie, [m.id]: { ...saisie[m.id], lot: e.target.value } })} style={{ width: 230 }} />
-          <input placeholder="N° de ticket (facultatif)" value={saisie[m.id]?.ticket || ''} onChange={(e) => setSaisie({ ...saisie, [m.id]: { ...saisie[m.id], ticket: e.target.value } })} style={{ width: 190 }} />
-          <button className="btn plein" disabled={!saisie[m.id]?.lot && !saisie[m.id]?.ticket} onClick={() => classer(m, saisie[m.id].lot, saisie[m.id].ticket)}>Rattacher</button>
-          <button className="btn gris" onClick={() => classer(m, null, null, true)}>Pas un dossier</button>
-        </div>
-      </div>)}</div>}
+    {!liste ? <p className="sub">Chargement…</p> : !liste.length
+      ? <div className="tri-fini"><b>Tout est trié.</b> <span className="muted">Les nouveaux mails à vérifier arriveront ici.</span></div>
+      : <div className="stack">{liste.map((m, i) => <CarteMail key={m.id} m={m} actif={i === 0} classer={classer} />)}</div>}
   </>;
+}
+
+function CarteMail({ m, actif, classer }) {
+  const sg = useMemo(() => suggestion(m), [m]);
+  const societes = m.societes || [];
+  const adresses = (m.niveaux || []).filter((n) => n.niveau === 'bailleur');
+  const mandats = (m.niveaux || []).filter((n) => n.niveau === 'mandat');
+  const cands = m.candidats || [];
+  const tickets = cands.flatMap((c) => (c.tickets || []).map((t) => ({ ...t, c })));
+  const [niveau, setNiveau] = useState(sg ? sg.type : societes.length ? 'societe' : 'lot');
+  const [q, setQ] = useState('');
+  const [tk, setTk] = useState({ ticket: '', lot: '' });
+  const [msg, setMsg] = useState('');
+  const choix = [
+    { k: 'societe', lib: 'Une société', sous: 'tous ses biens', n: societes.length, ok: societes.length > 0 },
+    { k: 'mandat', lib: 'Un mandat', sous: 'tous ses lots', n: mandats.length, ok: mandats.length > 0 },
+    { k: 'lot', lib: 'Un lot', sous: 'un logement, un local', n: cands.length, ok: true },
+    { k: 'ticket', lib: 'Un ticket', sous: 'travaux, sinistre…', n: tickets.length, ok: true },
+  ].filter((c) => c.ok);
+  return <div className={'mail-carte' + (actif ? ' actif' : '')}>
+    <div className="row" style={{ justifyContent: 'space-between' }}><b>{texteMail(m.objet) || '(sans objet)'}</b><span className="muted">{dateHeure(m.le)}</span></div>
+    <div className="muted">{m.sens === 'envoye' ? 'Envoyé à ' + (m.a || []).join(', ') : 'Reçu de ' + m.de}{m.boites ? ' · boîte ' + m.boites.join(', ') : ''}</div>
+    {m.resume && <p style={{ margin: '6px 0' }}>{texteMail(m.resume)}</p>}
+    <Message m={{ ...m, resume: '' }} />
+
+    {sg && <div className="tri-suggestion">
+      <div className="muted">Suggestion ({sg.pourquoi})</div>
+      <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
+        <button className="btn plein" onClick={() => classer(m, sg.type === 'societe' ? { societe: sg.s.profil_id } : { lot: sg.c.lot })}>
+          {sg.type === 'societe' ? 'Ranger sur la société ' : 'Ranger sur le '}{libSuggestion(sg)}</button>
+        {actif && <span className="muted"><kbd>Entrée</kbd> pour valider</span>}
+      </div>
+    </div>}
+
+    <div className="tri-question">{sg ? 'Sinon, ce mail concerne…' : 'Ce mail concerne…'}</div>
+    <div className="tri-niveaux">
+      {choix.map((c) => <button key={c.k} className={'tri-niveau' + (niveau === c.k ? ' on' : '')} onClick={() => { setNiveau(c.k); setMsg(''); }}>
+        <b>{c.lib}{c.n ? <span className="n"> {c.n}</span> : null}</b><span>{c.sous}</span></button>)}
+    </div>
+
+    {niveau === 'societe' && <div className="tri-choix">
+      {societes.map((s) => <button key={s.profil_id} className={'btn' + (sg?.s?.profil_id === s.profil_id ? ' plein' : '')} onClick={() => classer(m, { societe: s.profil_id })}>
+        {s.nom} · {s.mandats} mandat{s.mandats > 1 ? 's' : ''}, {s.lots} lot{s.lots > 1 ? 's' : ''}</button>)}
+      {adresses.filter((a) => societes.filter((s) => s.email === a.email).length > 1).map((a) =>
+        <button key={a.email} className="btn gris" onClick={() => classer(m, { niveau: a })}>Toutes les sociétés de {a.email} ({a.mandats} mandats, {a.lots} lots)</button>)}
+    </div>}
+
+    {niveau === 'mandat' && <div className="tri-choix">
+      {mandats.map((n) => <button key={n.mandat_id} className="btn" onClick={() => classer(m, { niveau: n })}>{libNiveau(n)}</button>)}
+    </div>}
+
+    {niveau === 'lot' && <ChoixLot m={m} q={q} setQ={setQ} classer={classer} />}
+
+    {niveau === 'ticket' && <div className="tri-choix">
+      {tickets.map((t) => <button key={t.ticket_id} className="btn" onClick={() => classer(m, { lot: t.immeuble ? null : t.c.lot, ticket: t.numero })}>
+        {t.immeuble ? 'Immeuble' : 'Lot ' + t.c.lot} · ticket n°{t.numero} {t.titre}</button>)}
+      <div className="row" style={{ gap: 6, width: '100%', alignItems: 'center' }}>
+        <input placeholder="N° du ticket" value={tk.ticket} onChange={(e) => { setTk({ ...tk, ticket: e.target.value }); setMsg(''); }} style={{ width: 130 }} />
+        <input placeholder="N° du lot (vide si ticket d’immeuble)" value={tk.lot} onChange={(e) => { setTk({ ...tk, lot: e.target.value }); setMsg(''); }} style={{ width: 250 }} />
+        <button className="btn" onClick={() => (tk.ticket.trim() ? classer(m, { lot: tk.lot.trim(), ticket: tk.ticket.trim() }) : setMsg('Indiquez le n° du ticket.'))}>Ranger sur ce ticket</button>
+      </div>
+    </div>}
+    {msg && <div className="err">{msg}</div>}
+
+    <div className="row tri-pied">
+      {actif && <span className="muted"><kbd>N</kbd> pas un dossier</span>}
+      <button className="btn gris" onClick={() => classer(m, { ignorer: true })}>Pas un dossier</button>
+    </div>
+  </div>;
+}
+
+// Lots candidats regroupés par société puis par adresse ; une recherche filtre (n° de lot, adresse, locataire, société).
+function ChoixLot({ m, q, setQ, classer }) {
+  const cands = m.candidats || [];
+  const noms = Object.fromEntries((m.societes || []).map((s) => [s.profil_id, s.nom]));
+  const f = sansAccent(q.trim());
+  const groupes = useMemo(() => {
+    const g = new Map();
+    for (const c of cands) {
+      const soc = (c.societes || []).map((id) => noms[id]).filter(Boolean).join(', ') || 'Autres lots';
+      if (f && !sansAccent([c.lot, c.adresse, c.locataires, soc].join(' ')).includes(f)) continue;
+      if (!g.has(soc)) g.set(soc, new Map());
+      const parAdresse = g.get(soc);
+      if (!parAdresse.has(c.adresse)) parAdresse.set(c.adresse, []);
+      parAdresse.get(c.adresse).push(c);
+    }
+    return [...g.entries()].map(([soc, a]) => ({ soc, adresses: [...a.entries()], n: [...a.values()].reduce((x, l) => x + l.length, 0) }))
+      .sort((a, b) => b.n - a.n);
+  }, [m, f]);
+  const total = groupes.reduce((x, g) => x + g.n, 0);
+  const ouvrir = !!f || cands.length <= 8 || groupes.length === 1;
+  const lotSaisi = /^\d+$/.test(q.trim()) && !cands.some((c) => c.lot === q.trim());
+  return <div className="tri-choix" style={{ display: 'block' }}>
+    <input className="recherche" placeholder="N° de lot, adresse, locataire ou société" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: '100%', maxWidth: 420 }} />
+    {lotSaisi && <div style={{ marginTop: 8 }}><button className="btn" onClick={() => classer(m, { lot: q.trim() })}>Ranger sur le lot {q.trim()}</button>
+      <span className="muted"> (hors des lots proposés pour ce correspondant)</span></div>}
+    {f && !total && !lotSaisi && <p className="muted">Aucun lot ne correspond.</p>}
+    {groupes.map((g) => <details key={g.soc + (ouvrir ? '1' : '0')} className="tri-groupe" open={ouvrir}>
+      <summary>{g.soc} <span className="muted">· {g.n} lot{g.n > 1 ? 's' : ''}</span></summary>
+      {g.adresses.map(([adr, lots]) => <div key={adr} className="tri-adresse">
+        <div className="muted">{adr}</div>
+        <div className="row" style={{ gap: 6, marginTop: 4 }}>
+          {lots.map((c) => <button key={c.lot_id} className="btn" onClick={() => classer(m, { lot: c.lot })}>Lot {c.lot}{c.locataires ? ' · ' + c.locataires : ''}</button>)}
+        </div>
+      </div>)}
+    </details>)}
+  </div>;
 }
 
 export const libNiveau = (n) => (n.niveau === 'bailleur'
   ? `Bailleur ${n.nom || n.email} · tous ses biens (${n.mandats} mandats, ${n.lots} lots)`
   : `Mandat ${n.reference} · ${n.nom || ''} (${n.lots} lots)`);
-
-// Lots candidats : au-delà de 6 (bailleur de nombreux biens), repliés avec une recherche
-function BoutonsLots({ m, classer, filtre, setFiltre }) {
-  const cands = m.candidats || [];
-  if (!cands.length) return null;
-  const boutons = (l) => <div className="row" style={{ gap: 6, marginTop: 8 }}>
-    {l.map((c) => <React.Fragment key={c.lot_id}>
-      <button className="btn" onClick={() => classer(m, c.lot)}>Lot {c.lot} · {c.adresse}{c.locataires ? ' · ' + c.locataires : ''}</button>
-      {(c.tickets || []).map((t) => <button key={t.ticket_id} className="btn gris" onClick={() => classer(m, t.immeuble ? null : c.lot, t.numero)}>
-        {t.immeuble ? 'Immeuble' : 'Lot ' + c.lot} · ticket n°{t.numero} {t.titre}</button>)}
-    </React.Fragment>)}
-  </div>;
-  if (cands.length <= 6) return boutons(cands);
-  const f = filtre.trim().toLowerCase();
-  const vus = cands.filter((c) => !f || [c.lot, c.adresse, c.locataires].join(' ').toLowerCase().includes(f));
-  return <details style={{ marginTop: 8 }}>
-    <summary>Choisir un lot ({cands.length} lots possibles)</summary>
-    <input className="recherche" placeholder="N° de lot, adresse ou locataire…" value={filtre} onChange={(e) => setFiltre(e.target.value)} style={{ marginTop: 6, width: '100%', maxWidth: 360 }} />
-    {boutons(vus.slice(0, 30))}
-    {vus.length > 30 && <p className="muted">{vus.length - 30} autres : précisez la recherche.</p>}
-  </details>;
-}
 
 // 168 : fiche bailleur — recherche par nom, adresse mail ou n° de mandat
 export function FicheBailleur() {
