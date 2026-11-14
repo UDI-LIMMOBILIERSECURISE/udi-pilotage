@@ -16,6 +16,43 @@ async function erreurFonction(data, error) {
   return msg || error?.message || 'Échec';
 }
 
+const heure = (d) => (d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(' ', ' à ') : '—');
+// 166 : une ligne d'historique (envoi du pilotage ou changement de statut Rivage)
+function LigneHistorique({ h }) {
+  const quoi = h.source === 'rivage' ? h.texte
+    : `${h.canal === 'sms' ? 'SMS' : 'Mail'} ${h.etape === 'med' ? '(mise en demeure)' : h.manuel ? 'à la main' : 'automatique'}${h.destinataire ? ' à ' + h.destinataire : ''}${h.par ? ' · ' + h.par : ''}`;
+  const ko = h.statut === 'erreur';
+  return <li className={'etape e-' + (ko ? 'alerte' : 'fait')} title={h.source === 'rivage' ? 'Information Rivage (statut du cycle d’impayé)' : (h.texte || '')}>
+    <span className="etape-marque">{ko ? '✗' : h.source === 'rivage' ? 'R' : '✓'}</span>
+    {heure(h.le)} · {quoi}{ko ? ' : non envoyé (' + (h.erreur || 'erreur') + ')' : h.statut !== 'transmis' ? ' : en cours' : ''}</li>;
+}
+
+// 166 : SMS à ce seul bail depuis la fiche (même texte et même envoi que la liste des relances)
+function SmsBail({ bail, fini }) {
+  const [texte, setTexte] = useState(SMS_DEFAUT);
+  const [ap, setAp] = useState(null);
+  const [msg, setMsg] = useState('');
+  const [encours, setEncours] = useState(false);
+  const voir = async () => { setMsg(''); try { setAp((await rpc('pilotage_relances_sms_textes', { p_baux: [bail], p_texte: texte }))[0]); } catch (e) { setMsg(e.message); } };
+  const envoyer = async () => {
+    setEncours(true); setMsg('');
+    const { data, error } = await supabase.functions.invoke('pilotage-sms', { body: { bail, texte: ap.texte,
+      cle: `rim:${bail}:${new Date().toISOString().slice(0, 10)}`, etape: 'sms_manuel', detail: 'Relance impayé envoyée à la main' } });
+    setEncours(false);
+    if (error || !data?.ok) { setMsg(await erreurFonction(data, error)); return; }
+    fini(`SMS envoyé (${(data.resultats || []).filter((r) => r.ok).length}).`);
+  };
+  return <div style={{ marginTop: 8 }}>
+    <textarea rows="3" style={{ width: '100%' }} value={texte} onChange={(e) => { setTexte(e.target.value); setAp(null); }} aria-label="Texte du SMS de relance" />
+    {msg && <div className="err">{msg}</div>}
+    {!ap ? <button className="btn plein" onClick={voir}>Voir le SMS avant l’envoi</button> : <>
+      <div className="muted" style={{ fontSize: 13, margin: '4px 0' }}>{ap.portables ? `${ap.portables} portable${ap.portables > 1 ? 's' : ''} dans Rivage` : 'Aucun portable dans Rivage : pas d’envoi possible'}
+        {(ap.manquants || []).length ? ` · champ non rempli : ${ap.manquants.join(', ')}` : ''}<br />{ap.texte}</div>
+      <div className="row" style={{ gap: 8 }}><button className="btn plein" disabled={encours || !ap.portables || (ap.manquants || []).length > 0} onClick={envoyer}>{encours ? 'Envoi…' : 'Envoyer le SMS'}</button>
+        <button className="lien" onClick={() => setAp(null)}>Modifier</button></div></>}
+  </div>;
+}
+
 function texteEtape(e) {
   const quand = e.statut === 'fait' ? `fait le ${date(e.fait_le)}` : e.statut === 'sautee' ? 'non envoyé (étape suivante déjà due)'
     : e.statut === 'erreur' ? 'non envoyé : voir l’alerte' : e.statut === 'annulee' ? 'annulé' : e.statut === 'pause' ? 'en pause'
@@ -31,6 +68,8 @@ export function RelancesBail({ bail, apres }) {
   const [pause, setPause] = useState(false);
   const [med, setMed] = useState(null);
   const [envoi, setEnvoi] = useState('');
+  const [sms, setSms] = useState(false);
+  const [ok, setOk] = useState('');
   const charger = () => rpc('pilotage_relances_impaye', { p_bail: bail }).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { charger(); }, [bail]);
   if (!d) return err ? <div className="err">{err}</div> : null;
@@ -47,14 +86,19 @@ export function RelancesBail({ bail, apres }) {
   const medDue = c && (c.etapes || []).some((e) => e.etape === 'med' && e.statut === 'due');
   return <div className="panneau" style={{ margin: '10px 0' }}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
-      <b>Relances automatiques</b>
-      {!d.actif && <span className="muted">désactivées (Règles de relance)</span>}
+      <b>Relances</b>
+      <span className="row" style={{ gap: 8 }}>{d.peut_sms && !sms && <button className="btn" onClick={() => { setSms(true); setOk(''); }}>Envoyer un SMS</button>}
+        <span className="muted" style={{ fontSize: 12 }}>automatiques {d.actif ? 'actives' : 'désactivées'}</span></span>
     </div>
     {err && <div className="err">{err}</div>}
-    {!c && <p className="muted" style={{ margin: '4px 0' }}>{d.cycle?.clos_le ? `Dernier cycle (${date(d.cycle.j0)}) arrêté : ${d.cycle.clos_motif || 'clos'}.` : 'Aucune relance automatique en cours.'}
-      {d.candidat?.motif ? ' ' + d.candidat.motif + '.' : ''}</p>}
+    {ok && <div className="mini-alerte normale" role="status">✓ {ok}</div>}
+    {sms && <SmsBail bail={bail} fini={async (m) => { setSms(false); setOk(m); await charger(); apres && apres(); }} />}
+    {(d.historique || []).length > 0 ? <ul className="etapes" style={{ flexDirection: 'column', gap: 2, marginTop: 6 }} aria-label="Relances déjà faites">
+        {d.historique.slice(0, 12).map((h, i) => <LigneHistorique key={i} h={h} />)}</ul>
+      : <p className="muted" style={{ margin: '4px 0' }}>Aucune relance envoyée depuis 3 mois (ni par le pilotage, ni par Rivage).</p>}
+    {!c && d.candidat?.motif && <p className="muted" style={{ margin: '4px 0', fontSize: 12 }}>Relances automatiques : {d.candidat.motif}.</p>}
     {c && <>
-      <div className="muted" style={{ fontSize: 13 }}>Depuis le {date(c.j0)} ({ORIGINE[c.origine] || c.origine}{c.rejet_le ? ' le ' + date(c.rejet_le) : ''}), dette de départ {euro(c.dette_initiale)}.
+      <div className="muted" style={{ fontSize: 13, marginTop: 6 }}><b>Relances automatiques</b> depuis le {date(c.j0)} ({ORIGINE[c.origine] || c.origine}{c.rejet_le ? ' le ' + date(c.rejet_le) : ''}), dette de départ {euro(c.dette_initiale)}.
         {c.pause_le ? ` En pause depuis le ${date(c.pause_le)}${c.pause_par ? ' (' + c.pause_par + ')' : ''} : ${c.pause_motif}.` : ''}</div>
       <ul className="etapes" style={{ flexDirection: 'column', gap: 2 }} aria-label="Étapes des relances automatiques">
         {(c.etapes || []).map((e) => { const [cl, m] = MARQUE[e.statut] || ['', '•'];
@@ -106,6 +150,7 @@ export function ApercuRelances() {
   const [etat, setEtat] = useState({});
   const [encours, setEncours] = useState(false);
   const [q, setQ] = useState('');
+  const [filtre, setFiltre] = useState('tous');
   const charger = () => rpc('pilotage_relances_impayes_apercu').then(setD).catch((e) => setErr(e.message));
   useEffect(() => {
     charger();
@@ -114,13 +159,14 @@ export function ApercuRelances() {
   if (err && !d) return <div className="banner">{err}</div>;
   if (!d) return null;
   const lignes = d.lignes || [];
-  const vues = lignes.filter((l) => trouve(l, q));
+  const vues = lignes.filter((l) => trouve(l, q) && (filtre === 'tous' || (filtre === 'jamais' ? !l.envois && !l.rivage_relance_le : (l.envois || l.rivage_relance_le))));
   const enCours = vues.filter((l) => l.cycle && !l.cycle.pause_motif);
   const pause = vues.filter((l) => l.cycle?.pause_motif);
   const relancables = vues.filter((l) => !l.cycle && !l.motif);
   const ecartes = vues.filter((l) => !l.cycle && l.motif);
   const basculer = (id) => { setApercus(null); setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
-  const tous = (liste, oui) => { setApercus(null); setSel((s) => { const n = new Set(s); liste.forEach((l) => (oui ? n.add(l.bail_id) : n.delete(l.bail_id))); return n; }); };
+  // 166 : « tout sélectionner » laisse de côté les baux relancés par le pilotage depuis moins de 48 h (cochables à la main)
+  const tous = (liste, oui) => { setApercus(null); setSel((s) => { const n = new Set(s); liste.forEach((l) => (oui ? (!l.envois_48h && n.add(l.bail_id)) : n.delete(l.bail_id))); return n; }); };
   const nom = (id) => lignes.find((l) => l.bail_id === id)?.locataires || id;
   const verifier = async () => {
     setErr('');
@@ -142,8 +188,16 @@ export function ApercuRelances() {
   const ligne = (l, info, cochable = true) => <label key={l.bail_id} className="row" style={{ justifyContent: 'space-between', gap: 8, padding: '3px 0', borderBottom: '1px solid var(--line)', cursor: cochable ? 'pointer' : 'default' }}>
     <span>{cochable && <input type="checkbox" checked={sel.has(l.bail_id)} onChange={() => basculer(l.bail_id)} style={{ marginRight: 6 }} aria-label={'Sélectionner ' + (l.locataires || l.bail_id)} />}
       {l.locataires || l.bail_id}{l.reference ? <span className="muted"> · bail {l.reference}</span> : null} · {euro(l.dette)} · {ORIGINE[l.origine] || l.origine}</span>
-    <span className="muted" style={{ fontSize: 12, textAlign: 'right' }}>{etat[l.bail_id] ? <b style={{ color: etat[l.bail_id].ko ? 'var(--red)' : 'var(--teal)' }}>{etat[l.bail_id].txt}</b> : info}</span></label>;
-  const tousCoches = (liste) => liste.length > 0 && liste.every((l) => sel.has(l.bail_id));
+    <span className="muted" style={{ fontSize: 12, textAlign: 'right' }}>{etat[l.bail_id] ? <b style={{ color: etat[l.bail_id].ko ? 'var(--red)' : 'var(--teal)' }}>{etat[l.bail_id].txt}</b>
+      : <>{dernier(l)}{dernier(l) ? <br /> : null}{info}</>}</span></label>;
+  const dernier = (l) => {
+    const p = l.derniere;
+    const pilot = l.envois ? `${l.envois} envoi${l.envois > 1 ? 's' : ''} ce mois` + (p && p.source === 'pilotage' ? ` · dernier : ${p.canal === 'sms' ? 'SMS' : 'mail'} le ${heure(p.le)}` : '') : '';
+    const riv = l.rivage_relance_le ? `Rivage a relancé le ${heure(l.rivage_relance_le)}` : '';
+    const txt = [pilot, riv].filter(Boolean).join(' · ');
+    return txt ? <b style={{ color: l.envois_48h ? '#B45309' : 'var(--teal)' }}>{l.envois_48h ? '⚠ relancé il y a moins de 48 h · ' : ''}{txt}</b> : '';
+  };
+  const tousCoches = (liste) => liste.some((l) => !l.envois_48h) && liste.every((l) => l.envois_48h || sel.has(l.bail_id));
   const entete = (titre, liste) => <summary style={{ cursor: 'pointer' }}><b>{titre} ({liste.length})</b>
     {liste.length > 0 && <button className="lien" onClick={(e) => { e.preventDefault(); tous(liste, !tousCoches(liste)); }}>{tousCoches(liste) ? 'tout désélectionner' : 'tout sélectionner'}</button>}</summary>;
   const prets = (apercus || []).filter((a) => a.portables && !(a.manquants || []).length && !etat[a.bail_id]?.ok);
@@ -155,7 +209,10 @@ export function ApercuRelances() {
     {lignes.length > 0 && <div className="row" style={{ gap: 8, margin: '4px 0 8px' }}>
       <input className="recherche" type="search" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: '1 1 260px', maxWidth: 460 }}
         placeholder="Rechercher un locataire : nom, n° de bail, montant…" aria-label="Rechercher un locataire dans les relances" />
-      {q && <span className="muted" style={{ fontSize: 12 }}>{vues.length} sur {lignes.length}{sel.size ? ` · ${sel.size} coché(s) en tout` : ''}</span>}
+      <span className="row" style={{ gap: 4 }} role="group" aria-label="Filtrer les relances">
+        {[['tous', 'Tous'], ['jamais', 'Jamais relancés'], ['deja', 'Déjà relancés']].map(([k, t]) =>
+          <button key={k} className={'btn' + (filtre === k ? ' plein' : '')} style={{ padding: '4px 10px' }} onClick={() => setFiltre(k)}>{t}</button>)}</span>
+      {(q || filtre !== 'tous') && <span className="muted" style={{ fontSize: 12 }}>{vues.length} sur {lignes.length}{sel.size ? ` · ${sel.size} coché(s) en tout` : ''}</span>}
     </div>}
     {enCours.length > 0 && <details open>{entete('Relances automatiques en cours', enCours)}
       {enCours.map((l) => ligne(l, l.cycle.prochaine ? `${l.cycle.prochaine.libelle} : ${l.cycle.prochaine.statut === 'erreur' ? 'non envoyé' : date(l.cycle.prochaine.le)}` : 'plus rien de prévu ce mois-ci'))}</details>}
