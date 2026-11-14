@@ -392,3 +392,6 @@ tr.sel td { background: #EEF4FA; }
 /* 12/11 : résumé IA court, parcours d'entrée */
 .resume-court { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .bandeau-etat { margin: 10px 0; padding: 8px 12px; border-radius: 10px; background: var(--teal-bg); font-size: 14px; }
+/* 166 : frise des impayés, étape faite cochée, étape suivante encadrée (et non plus pleine, lue comme l'état du dossier) */
+.frise-phase.impaye-fait { background: var(--teal-bg); color: var(--teal); }
+.frise-phase.impaye-a-faire { background: #fff; color: var(--teal); box-shadow: inset 0 0 0 2px var(--teal); }

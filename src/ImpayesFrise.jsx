@@ -89,8 +89,13 @@ export function FriseImpaye({ x, mois }) {
   return <div>
     <ol className="frise" aria-label="Avancement du dossier d’impayé">
       {ph.map(([lib, fait, det, refus], i) => <li key={lib} title={det || lib}
-        className={'frise-phase ' + (refus ? 'hors' : clos || fait ? 'passee' : i === courante ? 'courante' : '')}>{lib}</li>)}
+        className={'frise-phase ' + (refus ? 'hors' : clos || fait ? 'passee impaye-fait' : i === courante ? 'impaye-a-faire' : '')}>{(clos || fait) && !refus ? '✓ ' : ''}{lib}</li>)}
     </ol>
+    {/* 166 : la frise montrait l'étape suivante en foncé, lue comme l'état du dossier : on écrit l'état en clair */}
+    {!clos && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+      {(() => { const f = ph.filter((p) => p[1] && !p[3]); const der = f[f.length - 1];
+        return <>{der ? <>Fait : <b>{der[0]}</b>{der[2] ? ' ' + der[2] : ''}</> : null}{der && courante >= 0 ? ' · ' : ''}{courante >= 0 ? <>Prochaine étape : <b>{ph[courante][0]}</b></> : null}</>; })()}
+    </div>}
     {obl.length > 0 && <ul className="etapes" aria-label="Obligations du mois">
       {obl.map(([etat, txt]) => <li key={txt} className={'etape e-' + etat}><span className="etape-marque">{etat === 'fait' ? '✓' : etat === 'alerte' ? '!' : '•'}</span>{txt}</li>)}
     </ul>}
