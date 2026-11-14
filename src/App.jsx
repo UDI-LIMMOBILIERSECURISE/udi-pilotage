@@ -1782,18 +1782,6 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     return <label key={cle + d.maj_le} className="champ-imp"><span>{libelle}</span>{input}</label>;
   };
   const ajouterAction = async () => { if (!action.trim()) return; try { await rpc('pilotage_impaye_action', { p_impaye: d.id, p_libelle: action, p_le: actionLe || null }); setAction(''); setActionLe(''); recharger(); } catch (e) { setErr(e.message); } };
-  // Relance ou mise en demeure faite : action datée du jour, passée à « Fait » (fait avancer la frise, 13/11)
-  const noterRelance = async (quoi) => {
-    const lib = ACTIONS_RELANCE[quoi], jour = new Date().toISOString().slice(0, 10);
-    try {
-      await rpc('pilotage_impaye_action', { p_impaye: d.id, p_libelle: lib, p_le: jour });
-      const tous = await rpc('pilotage_impayes');
-      const moi = (tous?.dossiers || []).find((y) => y.id === d.id);
-      const a = (moi?.actions || []).filter((y) => y.libelle === lib && y.statut !== 'Fait').pop();
-      if (a) await rpc('pilotage_impaye_action_statut', { p_action: a.id, p_statut: 'Fait' });
-      recharger();
-    } catch (e) { setErr(e.message); }
-  };
   const statutAction = async (a, st) => { try { await rpc('pilotage_impaye_action_statut', { p_action: a.id, p_statut: st }); recharger(); } catch (e) { setErr(e.message); } };
   return <>
     <datalist id="causes-imp">{CAUSES_IMP.map((c) => <option key={c} value={c} />)}</datalist>
@@ -1850,18 +1838,22 @@ function DossierImpaye({ d, membres, peut, recharger }) {
     </div>
     {peut ? <label className="champ-imp" style={{ marginTop: 8 }}><span>Observations</span><textarea rows="3" defaultValue={d.observations || ''} key={'o' + d.maj_le} onBlur={(e) => e.target.value !== (d.observations || '') && maj('observations', e.target.value)} /></label>
       : d.observations && <p>{d.observations}</p>}
-    {peut && d.groupe !== 'Clôturé' && <div className="row" style={{ margin: '10px 0', gap: 8 }}>
-      <span className="muted">Noter aujourd’hui :</span>
-      <button className="btn" onClick={() => noterRelance('relance')}>{ACTIONS_RELANCE.relance}</button>
-      <button className="btn" onClick={() => noterRelance('med')}>{ACTIONS_RELANCE.med}</button>
-    </div>}
-    {d.bail_id && d.groupe !== 'Clôturé' && <RelancesBail key={d.bail_id} bail={d.bail_id} apres={recharger} />}
-    <h3>Sous-éléments / actions</h3>
-    <ol className="histo">{d.actions.map((a) => <li key={a.id}><span className="muted">{date(a.le)}</span><span style={{ flex: 1 }}>{a.libelle}{a.par ? <span className="muted"> · {a.par}</span> : ''}</span>
-      {peut ? <select value={a.statut} onChange={(e) => statutAction(a, e.target.value)}>{[...new Set(['À faire', 'En cours', 'Fait', a.statut])].map((o) => <option key={o}>{o}</option>)}</select> : <span>{a.statut}</span>}</li>)}
-      {!d.actions.length && <li className="muted">Aucune action notée.</li>}</ol>
+    {d.bail_id && d.groupe !== 'Clôturé' && <RelancesBail key={d.bail_id} bail={d.bail_id} dossier={d.id} apres={recharger} />}
+    {/* 167 : les relances sont dans le bloc « Relances » ; ici, seulement les tâches (à faire d'abord, par échéance ; faites repliées) */}
+    <h3>Tâches du dossier</h3>
+    {(() => {
+      const ligneTache = (a) => <li key={a.id}><span className="muted" style={{ color: a.statut !== 'Fait' && a.le && a.le <= new Date().toISOString().slice(0, 10) ? 'var(--red)' : undefined }}>{a.le ? 'pour le ' + date(a.le) : 'sans date'}</span>
+        <span style={{ flex: 1 }}>{a.libelle}{a.par ? <span className="muted"> · {a.par}</span> : ''}</span>
+        {peut ? <select value={a.statut} onChange={(e) => statutAction(a, e.target.value)}>{[...new Set(['À faire', 'En cours', 'Fait', a.statut])].map((o) => <option key={o}>{o}</option>)}</select> : <span>{a.statut}</span>}</li>;
+      const ouvertes = d.actions.filter((a) => a.statut !== 'Fait').sort((x, y) => String(x.le || '9999').localeCompare(String(y.le || '9999')));
+      const faites = d.actions.filter((a) => a.statut === 'Fait');
+      return <>
+        <ol className="histo">{ouvertes.map(ligneTache)}{!ouvertes.length && <li className="muted">Aucune tâche en cours.</li>}</ol>
+        {faites.length > 0 && <details><summary className="muted" style={{ cursor: 'pointer' }}>Tâches faites ({faites.length})</summary><ol className="histo">{faites.map(ligneTache)}</ol></details>}
+      </>;
+    })()}
     {peut && <div className="form" style={{ marginTop: 8 }}>
-      <label style={{ flex: 1 }}>Nouvelle action<input value={action} onChange={(e) => setAction(e.target.value)} placeholder="Ex. envoyer le décompte mensuel à l’assureur" /></label>
+      <label style={{ flex: 1 }}>Nouvelle tâche<input value={action} onChange={(e) => setAction(e.target.value)} placeholder="Ex. envoyer le décompte mensuel à l’assureur" /></label>
       <label>Pour le<input type="date" value={actionLe} onChange={(e) => setActionLe(e.target.value)} /></label>
       <button className="btn plein" onClick={ajouterAction}>Ajouter</button></div>}
     {r && <MailsImpaye d={d} r={r} p={p} />}
