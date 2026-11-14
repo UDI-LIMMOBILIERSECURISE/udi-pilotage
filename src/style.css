@@ -395,3 +395,24 @@ tr.sel td { background: #EEF4FA; }
 /* 166 : frise des impayés, étape faite cochée, étape suivante encadrée (et non plus pleine, lue comme l'état du dossier) */
 .frise-phase.impaye-fait { background: var(--teal-bg); color: var(--teal); }
 .frise-phase.impaye-a-faire { background: #fff; color: var(--teal); box-shadow: inset 0 0 0 2px var(--teal); }
+
+/* 169 : Mails à vérifier en trois questions */
+.mail-carte.actif { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal); }
+.tri-progres { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+.tri-progres .jauge { flex: 1; max-width: 420px; margin: 0; }
+.tri-progres .jauge span { display: block; height: 100%; background: var(--teal); border-radius: 999px; transition: width .3s; }
+.tri-fini { background: var(--teal-bg); color: var(--teal); border-radius: 12px; padding: 16px; }
+.tri-suggestion { background: var(--teal-bg); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.tri-question { margin: 12px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.tri-niveaux { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.tri-niveau { text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 8px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; color: var(--ink); font-size: 13px; }
+.tri-niveau span { color: var(--muted); font-size: 12px; }
+.tri-niveau .n { color: var(--muted); font-weight: 400; }
+.tri-niveau.on { border: 2px solid var(--teal); background: var(--teal-bg); padding: 7px 11px; }
+.tri-niveau.on b { color: var(--teal); }
+.tri-choix { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tri-groupe { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-top: 8px; }
+.tri-groupe summary { cursor: pointer; font-weight: 600; }
+.tri-adresse { margin-top: 8px; }
+.tri-pied { justify-content: flex-end; align-items: center; gap: 10px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+kbd { font-family: 'IBM Plex Mono', monospace; font-size: 11px; border: 1px solid #C9D3DC; border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: #fff; }
