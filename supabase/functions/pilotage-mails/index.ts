@@ -108,15 +108,20 @@ function parcourir(p: Part, texte: { plain: string; html: string }, pj: Part[]) 
   for (const s of p.parts || []) parcourir(s, texte, pj)
 }
 
-async function resumerEtChoisir(m: { objet: string; de: string; a: string[]; corps: string; sens: string }, candidats: unknown, choisir: boolean) {
+type Niveau = { niveau: 'bailleur' | 'mandat'; email?: string; mandat_id?: string; nom?: string; lots?: number; mandats?: number; reference?: string }
+
+async function resumerEtChoisir(m: { objet: string; de: string; a: string[]; corps: string; sens: string }, candidats: unknown, choisir: boolean, niveaux: Niveau[] = []) {
   const cleApi = Deno.env.get('ANTHROPIC_API_KEY'); if (!cleApi) return null
+  // 168 : niveaux bailleur (tous ses biens) et mandat proposés quand un correspondant est bailleur de plusieurs biens
+  const avecNiveaux = choisir && niveaux.length > 0
   const consigne = `Tu classes les mails d'une agence de gestion locative (UDI Gestion). Réponds uniquement en JSON :
-{"resume": "une phrase en français, factuelle, qui dit qui demande ou annonce quoi"${choisir ? ', "lot_id": "identifiant du lot choisi parmi les candidats ou null", "ticket_id": "identifiant du ticket choisi ou null", "confiance": nombre de 0 à 1' : ''}}
-${choisir ? "Choisis le lot (et le ticket si le mail en parle clairement) uniquement d'après l'adresse, le nom du locataire, le sujet. Si tu hésites, confiance basse. N'invente jamais un identifiant absent des candidats." : ''}`
+{"resume": "une phrase en français, factuelle, qui dit qui demande ou annonce quoi"${choisir ? `, ${avecNiveaux ? '"niveau": "lot", "bailleur" ou "mandat", "bailleur_email": "adresse du bailleur choisi ou null", "mandat_id": "identifiant du mandat choisi ou null", ' : ''}"lot_id": "identifiant du lot choisi parmi les candidats ou null", "ticket_id": "identifiant du ticket choisi ou null", "confiance": nombre de 0 à 1` : ''}}
+${choisir ? "Choisis le lot (et le ticket si le mail en parle clairement) uniquement d'après l'adresse, le nom du locataire, le sujet. Si tu hésites, confiance basse. N'invente jamais un identifiant absent des candidats." : ''}
+${avecNiveaux ? "Le correspondant est propriétaire de plusieurs biens. Si le mail concerne l'ensemble de ses biens ou plusieurs biens à la fois (compte rendu de gestion, reddition des comptes, relevé annuel, déclaration fiscale, attestation, virement global, question générale sur sa gestion, mandat ou facturation d'ensemble), choisis le niveau bailleur (ou mandat si un seul mandat est visé). Choisis le niveau lot seulement si le mail parle clairement d'un bien précis (adresse, locataire, ticket)." : ''}`
   const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': cleApi, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: MODELE, max_tokens: 400, temperature: 0, system: consigne, messages: [{ role: 'user', content:
-      `Sens : ${m.sens === 'envoye' ? "envoyé par l'agence" : "reçu par l'agence"}\nDe : ${m.de}\nÀ : ${m.a.join(', ')}\nObjet : ${m.objet}\n\n${m.corps.slice(0, 8000)}${choisir ? `\n\nCandidats :\n${JSON.stringify(candidats)}` : ''}` }] }) })
+      `Sens : ${m.sens === 'envoye' ? "envoyé par l'agence" : "reçu par l'agence"}\nDe : ${m.de}\nÀ : ${m.a.join(', ')}\nObjet : ${m.objet}\n\n${m.corps.slice(0, 8000)}${choisir ? `\n\nCandidats (lots) :\n${JSON.stringify(candidats)}` : ''}${avecNiveaux ? `\n\nNiveaux bailleur / mandat :\n${JSON.stringify(niveaux)}` : ''}` }] }) })
   if (!r.ok) { console.error('[pilotage-mails] IA', r.status, (await r.text()).slice(0, 200)); return null }
   const t = ((await r.json()).content || []).map((c: { text?: string }) => c.text || '').join('')
   try { return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)) } catch { return null }
@@ -139,12 +144,13 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
   const corps = (texte.plain.trim() || sansHtml(texte.html)).slice(0, 60000)
   // 146 : référence [UDI L.. T..] insérée dans le texte par le module Gmail, prise en compte comme dans l'objet
   // 151 : ou [UDI T..] pour un ticket d'immeuble (sans lot)
-  const refCorps = /\[UDI\s+[LT]/i.test(objet) ? null : (corps.match(/\[UDI\s+(?:L[A-Za-z0-9-]+(?:\s+T\d+)?|T\d+)\]/i) || [null])[0]
+  // 168 : ou [UDI M..] (mandat) / [UDI B..] (bailleur, tous ses biens)
+  const refCorps = /\[UDI\s+[LTMB]/i.test(objet) ? null : (corps.match(/\[UDI\s+(?:L[A-Za-z0-9-]+(?:\s+T\d+)?|T\d+|M[A-Za-z0-9_-]+|B\d+)\]/i) || [null])[0]
   // 148 : mail envoyé — choix du dossier fait dans le module Gmail ; consommé dans tous les cas, utilisé seulement si la référence a disparu du mail
   let refChoix: string | null = null
   if (lab.includes('SENT')) {
     const { data: ch } = await service.rpc('pilotage_mails_choix_prendre', { p_boite: boite, p_le: le, p_dest: externes, p_objet: objet, p_message_id: messageId })
-    if (ch && !refCorps && !/\[UDI\s+[LT]/i.test(objet)) refChoix = ch as string
+    if (ch && !refCorps && !/\[UDI\s+[LTMB]/i.test(objet)) refChoix = ch as string
   }
   const refAjout = refCorps || refChoix
   const { data: prep, error } = await service.rpc('pilotage_mails_preparer', { p_emails: externes, p_le: le, p_objet: refAjout ? `${objet} ${refAjout}` : objet, p_thread: g.threadId })
@@ -165,21 +171,30 @@ async function traiterMessage(service: SupabaseClient, boite: string, id: string
 
   let statut = 'a_verifier', methode = prep.methode || null, confiance = prep.certain ? 1 : null
   let lot = prep.lot_id || null, ticket = prep.ticket_id || null, bail = prep.bail_id || null, mandat = prep.mandat_id || null
+  let bailleur: string | null = prep.bailleur_email || null
   const cand = (prep.candidats || []) as { lot_id: string; bail_id: string; mandat_id: string; tickets: { ticket_id: string }[] }[]
-  const ia = await resumerEtChoisir({ objet, de, a, corps, sens }, cand, !prep.certain && cand.length > 0)
+  const niveaux = (prep.niveaux || []) as Niveau[]
+  const ia = await resumerEtChoisir({ objet, de, a, corps, sens }, cand, !prep.certain && (cand.length > 0 || niveaux.length > 0), niveaux)
   if (prep.certain) statut = 'classe'
-  else if (ia && cand.length) {
+  else if (ia && Number(ia.confiance) >= SEUIL && ia.niveau === 'bailleur' && niveaux.some((n) => n.niveau === 'bailleur' && n.email === ia.bailleur_email)) {
+    statut = 'classe'; methode = 'ia'; confiance = Number(ia.confiance)
+    lot = null; bail = null; ticket = null; mandat = null; bailleur = ia.bailleur_email
+  } else if (ia && Number(ia.confiance) >= SEUIL && ia.niveau === 'mandat' && niveaux.some((n) => n.niveau === 'mandat' && n.mandat_id === ia.mandat_id)) {
+    statut = 'classe'; methode = 'ia'; confiance = Number(ia.confiance)
+    lot = null; bail = null; ticket = null; mandat = ia.mandat_id; bailleur = null
+  } else if (ia && cand.length && (!ia.niveau || ia.niveau === 'lot')) {
     const c = cand.find((x) => x.lot_id === ia.lot_id)
     if (c && Number(ia.confiance) >= SEUIL) {
       statut = 'classe'; methode = 'ia'; confiance = Number(ia.confiance)
-      lot = c.lot_id; bail = c.bail_id; mandat = c.mandat_id
+      lot = c.lot_id; bail = c.bail_id; mandat = c.mandat_id; bailleur = null
       ticket = (c.tickets || []).some((t) => t.ticket_id === ia.ticket_id) ? ia.ticket_id : null
     } else confiance = Number(ia?.confiance) || null
-  }
+  } else confiance = Number(ia?.confiance) || null
   await service.rpc('pilotage_mails_enregistrer', { p: { message_id: messageId, thread_id: g.threadId, boites: { [boite]: g.id }, sens, de, a, cc, objet, le,
     extrait: g.snippet, corps, pj, parties: prep.parties, statut, methode, confiance, resume: ia?.resume || null,
     lot_id: statut === 'classe' ? lot : null, bail_id: statut === 'classe' ? bail : null, mandat_id: statut === 'classe' ? mandat : null,
-    ticket_id: statut === 'classe' ? ticket : null, immeuble_id: statut === 'classe' ? (prep.immeuble_id || null) : null, candidats: cand } })
+    ticket_id: statut === 'classe' ? ticket : null, immeuble_id: statut === 'classe' ? (prep.immeuble_id || null) : null,
+    bailleur_email: statut === 'classe' ? bailleur : null, candidats: cand } })
   await etiqueter(boite, g.id, statut === 'classe' ? LIB_CLASSE : LIB_VERIFIER)
   return statut
 }

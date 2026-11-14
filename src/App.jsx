@@ -16,7 +16,7 @@ import { MoiContexte } from './moi.js';
 import ParcoursSortie from './ParcoursSortie.jsx';
 import { EnvoiGroupe, REGLES_RELANCE } from './ActionsGroupees.jsx';
 import { SuiviSinistre, TexteLiens, ORIGINE } from './TicketsFil.jsx';
-import { MailsAVerifier, BandeauMails } from './Echanges.jsx';
+import { MailsAVerifier, BandeauMails, FicheBailleur } from './Echanges.jsx';
 import Reprise from './Reprise.jsx';
 import Cles from './Cles.jsx';
 import { PermisBail } from './Permis.jsx';
@@ -126,7 +126,7 @@ function Connexion() {
 // Menu de navigation : rubriques regroupées, page courante gardée dans l'adresse (#regles) pour le retour arrière et le rechargement
 const MENU = [
   ['Au quotidien', [['jour', 'Ma journée', '☀'], ['agence', 'Toute l’agence', '◉'], ['biens', 'Biens', '▦'], ['alouer', 'À louer', '⌂']]],
-  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['cles', 'Clés', '⚿'], ['sinistres', 'Tickets', '⚠'], ['mails', 'Mails à vérifier', '✉'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
+  ['Gestion', [['baux', 'Baux et obligations', '▤'], ['mandats', 'Mandats', '✎'], ['dg', 'Sorties et DG', '⇥'], ['cles', 'Clés', '⚿'], ['sinistres', 'Tickets', '⚠'], ['mails', 'Mails à vérifier', '✉'], ['bailleurs', 'Bailleurs', '☺'], ['impayes', 'Impayés', '€'], ['compta', 'Comptabilité', '∑']]],
   ['Commercial', [['remunerations', 'Rémunérations à valider', '✓'], ['commissions', 'Commissions', '%'], ['reprise', 'Reprise', '↻']]],
   ['Réglages', [['messages', 'Modèles de messages', '✉'], ['obligations', 'Obligations suivies', '☑'], ['regles', 'Règles de relance', '⏱'], ['permis', 'Communes du permis de louer', '⚖'], ['equipe', 'Équipe', '☺']]],
 ];
@@ -168,7 +168,7 @@ function Espace() {
     <main><div className="card"><h1>Accès non ouvert</h1><p className="sub">Votre compte existe mais n’a pas encore accès au pilotage. Demandez à Nicolas de vous ajouter dans l’onglet Équipe.</p>
       <button className="btn gris" onClick={() => supabase.auth.signOut()}>Se déconnecter</button></div></main>
   );
-  const droit = { mails: ['direction', 'superviseur', 'gestionnaire', 'comptable'].includes(moi.role), jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, biens: true, remunerations: moi.role === 'direction', permis: moi.voit_reglages, cles: true,
+  const droit = { mails: ['direction', 'superviseur', 'gestionnaire', 'comptable'].includes(moi.role), bailleurs: ['direction', 'superviseur', 'gestionnaire', 'comptable'].includes(moi.role), jour: true, agence: voit('agence'), sinistres: voit('sinistres'), dg: voit('dg'), compta: voit('compta'), impayes: voit('impayes'), alouer: true, biens: true, remunerations: moi.role === 'direction', permis: moi.voit_reglages, cles: true,
     mandats: moi.voit_commissions || ['gestionnaire', 'comptable'].includes(moi.role), baux: voit('baux'), commissions: moi.voit_commissions, reprise: moi.voit_equipe,
     obligations: moi.voit_reglages, regles: moi.voit_reglages, equipe: moi.voit_reglages, messages: true };
   const principal = (PRINCIPAL[moi.role] || ['jour', 'biens']).filter((k) => droit[k]);
@@ -215,6 +215,7 @@ function Espace() {
         {page === 'agence' && <Agence />}
         {page === 'sinistres' && <Sinistres />}
         {page === 'mails' && <MailsAVerifier />}
+        {page === 'bailleurs' && <FicheBailleur />}
         {page === 'dg' && <SortiesDG />}
         {page === 'compta' && <Compta />}
         {page === 'impayes' && <Impayes />}
